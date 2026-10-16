@@ -1,0 +1,1 @@
+ALTER TABLE properties ADD COLUMN IF NOT EXISTS no_junk_mail_updated_at TIMESTAMPTZ;

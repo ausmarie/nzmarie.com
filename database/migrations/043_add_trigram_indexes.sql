@@ -1,0 +1,18 @@
+-- Migration 043: Optional pg_trgm trigram GIN indexes for PostgreSQL
+-- Created: 2026-08-12
+--
+-- NOTE: This codebase currently targets CockroachDB via .env DATABASE_URL.
+-- CockroachDB does not support the pg_trgm extension in this cluster, so
+-- applying actual trigram indexes here would fail.
+--
+-- For PostgreSQL only, the following indexes are recommended:
+--
+-- CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- CREATE INDEX IF NOT EXISTS idx_properties_address_trgm
+--   ON properties USING gin (address gin_trgm_ops);
+-- CREATE INDEX IF NOT EXISTS idx_outreach_enriched_address_trgm
+--   ON outreach_enriched USING gin (property_address gin_trgm_ops);
+-- CREATE INDEX IF NOT EXISTS idx_properties_street_trgm
+--   ON properties USING gin (street gin_trgm_ops);
+--
+-- This file is intentionally left as a placeholder for PostgreSQL deployments.

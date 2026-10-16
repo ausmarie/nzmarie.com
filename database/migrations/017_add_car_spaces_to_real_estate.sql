@@ -1,0 +1,1 @@
+ALTER TABLE real_estate ADD COLUMN IF NOT EXISTS car_spaces INTEGER;

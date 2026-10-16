@@ -1,0 +1,10 @@
+-- Migration: 008 - Automatic tracking triggers
+-- Database: Marie DB
+--
+-- NOTE: The automatic tracking triggers defined in this file relied on
+-- PL/pgSQL functions containing DML statements (UPDATE ...), which are NOT
+-- supported on CockroachDB. Their behaviour is instead implemented in the
+-- application layer:
+--   - lib/tracking.ts (updateDownloadTracking / updateAppraisalTracking)
+--   - app/api/reports/download/route.ts (outreach status updates)
+-- Therefore this migration intentionally contains no SQL commands.
