@@ -26,6 +26,11 @@ const defaultProps = {
   onContentChange: vi.fn(),
 };
 
+const defaultDisclaimers = {
+  disclaimer2: 'This document is an independent market analysis prepared by Marie Nian, Licensed Residential Sales, Barfoot & Thompson (Licensed under the REAA 2008). It is based on official REINZ data and does not constitute binding financial valuation advice.',
+  disclaimer3: '© 2026 Marie Nian, Licensed Residential Sales, Barfoot & Thompson (Licensed under the REAA 2008). This publication is an independent market analysis based on official REINZ data.',
+};
+
 describe('AboutMarieEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -596,6 +601,75 @@ describe('AboutMarieEditor', () => {
       const textRule = printSection.match(/#am-root :is\(([^)]+)\)/);
       expect(textRule).toBeTruthy();
       expect(textRule![1]).not.toContain('svg');
+    });
+  });
+
+  describe('Header and footer styles', () => {
+    it('header title uses the dark navy color', () => {
+      render(<AboutMarieEditor {...defaultProps} />);
+      const title = screen.getByText('A Personal Note from Marie');
+      expect(title.className).toContain('text-[#102A43]');
+    });
+
+    it('header subtitle keeps the light letterspaced badge style', () => {
+      render(<AboutMarieEditor {...defaultProps} />);
+      const badge = document.querySelector('#am-header .am-badge');
+      expect(badge).toBeTruthy();
+      expect(badge!.className).toContain('text-slate-400');
+      expect(badge!.className).toContain('tracking-widest');
+    });
+
+    it('footer has a full-width top divider line', () => {
+      render(<AboutMarieEditor {...defaultProps} />);
+      const footer = document.getElementById('am-footer');
+      expect(footer).toBeTruthy();
+      expect(footer!.className).toContain('border-t');
+      expect(footer!.className).not.toContain('w-10');
+    });
+
+    it('footer disclaimer text uses readable slate-500', () => {
+      render(<AboutMarieEditor {...defaultProps} />);
+      const footer = document.getElementById('am-footer');
+      const paragraphs = footer!.querySelectorAll('p');
+      expect(paragraphs.length).toBeGreaterThan(0);
+      paragraphs.forEach((p) => {
+        expect(p.className).toContain('text-slate-500');
+      });
+    });
+
+    it('does not render a hardcoded copyright line (comes from disclaimer content)', () => {
+      render(<AboutMarieEditor {...defaultProps} />);
+      expect(screen.queryByText(/All rights reserved/)).toBeNull();
+    });
+
+    it('falls back to default disclaimers when content leaves them empty', () => {
+      const content = {
+        custom: true,
+        title: 'Test',
+        subtitle: '',
+        welcomeText: '',
+        paragraphs: [],
+        phone: '',
+        email: '',
+        website: '',
+        location: '',
+        license: '',
+        appraisalTitle: '',
+        steps: [],
+        websiteCtaPrefix: '',
+        disclaimer1: 'Only first disclaimer',
+        disclaimer2: '',
+        disclaimer3: '',
+        showQrCode: false,
+        qrCodeUrl: '',
+      };
+      render(<AboutMarieEditor {...defaultProps} initialContent={content} />);
+      const footer = document.getElementById('am-footer');
+      const paragraphs = footer!.querySelectorAll('p');
+      expect(paragraphs.length).toBe(3);
+      expect(paragraphs[0].textContent).toBe('Only first disclaimer');
+      expect(paragraphs[1].textContent).toBe(defaultDisclaimers.disclaimer2);
+      expect(paragraphs[2].textContent).toBe(defaultDisclaimers.disclaimer3);
     });
   });
 });

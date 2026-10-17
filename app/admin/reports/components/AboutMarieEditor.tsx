@@ -342,7 +342,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
               <div className="am-badge tracking-widest text-xs font-light text-slate-400 mb-1">
                 {subtitle}
               </div>
-              <h1 className="text-3xl font-serif font-bold text-slate-900 tracking-tight">
+              <h1 className="text-3xl font-serif font-bold text-[#102A43] tracking-tight">
                 {title}
               </h1>
             </div>
@@ -462,16 +462,20 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
             </div>
           </div>
 
-          <div id="am-footer" className="mt-auto pt-6 border-t border-slate-100 text-left space-y-2">
-            <p className="text-[9.5px] text-slate-400/80 leading-normal">
+          <div id="am-footer" className="mt-auto pt-6 border-t border-slate-200 text-left space-y-2">
+            <p className="text-[10px] text-slate-500 leading-relaxed">
               {disclaimer1}
             </p>
-            <p className="text-[9.5px] text-slate-400/80 leading-normal">
-              {disclaimer2}
-            </p>
-            <p className="text-[9.5px] text-slate-400/80 leading-normal">
-              {disclaimer3}
-            </p>
+            {disclaimer2 && (
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                {disclaimer2}
+              </p>
+            )}
+            {disclaimer3 && (
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                {disclaimer3}
+              </p>
+            )}
           </div>
         </div>
       ) : (
