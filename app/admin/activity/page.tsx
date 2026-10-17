@@ -84,15 +84,15 @@ const PRIORITY_LABELS: Record<BookingPriority, string> = {
 function fmtStatus(v: BookingStatus) { return STATUS_LABELS[v] ?? v; }
 function fmtPriority(v: BookingPriority) { return PRIORITY_LABELS[v] ?? v; }
 
-function AppraisalsTab() {
+function AppraisalsTab({ initialSearch = '' }: { initialSearch?: string }) {
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch);
   const [regionFilter, setRegionFilter] = useState('');
   const [cityFilter, setCityFilter] = useState('');
   const [suburbFilter, setSuburbFilter] = useState('');
@@ -375,9 +375,9 @@ function AppraisalsTab() {
       </div>
 
       {detailBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 overflow-y-auto">
-          <div className="w-full max-w-3xl rounded-xl bg-white p-6 shadow-2xl my-8">
-            <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-xl bg-white shadow-2xl flex flex-col max-h-[calc(100vh-2rem)]">
+            <div className="flex items-center justify-between gap-3 px-6 pt-6 pb-4 shrink-0">
               <div>
                 <h3 className="text-xl font-bold text-slate-900">Appraisal Details</h3>
                 <p className="text-sm text-slate-500 mt-1">{detailBooking.client_name}</p>
@@ -391,6 +391,7 @@ function AppraisalsTab() {
               </button>
             </div>
 
+            <div className="px-6 pb-6 overflow-y-auto flex-1">
             <div className="space-y-6">
               <div className="bg-slate-50 rounded-lg p-4 space-y-2">
                 <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3">Client Information</h4>
@@ -556,8 +557,11 @@ function AppraisalsTab() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                 />
               </label>
+            </div>
+            </div>
 
-              <div className="flex justify-end gap-3 pt-4">
+            <div className="px-6 py-4 border-t border-slate-200 shrink-0">
+              <div className="flex justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setDetailBooking(null)}
@@ -774,6 +778,7 @@ function DownloadsTab() {
 export default function ActivityPage() {
   const { status } = useSession();
   const [activeTab, setActiveTab] = useState<'dispatch' | 'appraisals' | 'downloads'>('dispatch');
+  const [initialSearch, setInitialSearch] = useState('');
 
   // Track which tabs have ever been activated so we only mount them once (lazy)
   // and keep them mounted thereafter to avoid re-fetching on tab re-visits.
@@ -786,6 +791,16 @@ export default function ActivityPage() {
       return new Set([...prev, tab]);
     });
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const search = params.get('search');
+    if (search) setInitialSearch(search);
+    if (tab === 'appraisals' || tab === 'downloads' || tab === 'dispatch') {
+      activateTab(tab);
+    }
+  }, []);
 
   if (status === 'loading') {
     return activeTab === 'dispatch' ? <div className="space-y-6"><div className="h-10 bg-slate-100 rounded-xl animate-pulse w-64" /><div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="bg-white rounded-xl border border-slate-100 shadow-sm p-4"><div className="h-4 bg-slate-100 rounded w-16 mb-2 animate-pulse" /><div className="h-7 bg-slate-100 rounded w-12 animate-pulse" /></div>)}</div></div> : activeTab === 'appraisals' ? <SkeletonBookings /> : <SkeletonDownloads />;
@@ -837,7 +852,7 @@ export default function ActivityPage() {
           re-fetching. Non-dispatch tabs only mount on first activation. */}
       <div className={activeTab === 'dispatch' ? '' : 'hidden'}><DispatchStatsPanel /></div>
       {mountedTabs.has('appraisals') && (
-        <div className={activeTab === 'appraisals' ? '' : 'hidden'}><AppraisalsTab /></div>
+        <div className={activeTab === 'appraisals' ? '' : 'hidden'}><AppraisalsTab initialSearch={initialSearch} /></div>
       )}
       {mountedTabs.has('downloads') && (
         <div className={activeTab === 'downloads' ? '' : 'hidden'}><DownloadsTab /></div>

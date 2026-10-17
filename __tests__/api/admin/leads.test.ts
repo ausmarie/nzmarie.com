@@ -238,7 +238,9 @@ describe('POST /api/admin/leads', () => {
   });
 
   it('should create a lead and return it', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [mockLeadRow] });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [mockLeadRow] });
 
     const request = new Request('http://localhost:3000/api/admin/leads', {
       method: 'POST',
@@ -259,6 +261,27 @@ describe('POST /api/admin/leads', () => {
     expect(response.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data.property_address).toBe('2/23 Sartors Avenue');
+  });
+
+  it('should match property_id from properties table by address when none given', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: '6455a77d2231cfed1697d9fd9605073b' }] })
+      .mockResolvedValueOnce({ rows: [mockLeadRow] });
+
+    const request = new Request('http://localhost:3000/api/admin/leads', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        property_address: '249 Sunset Road, Sunnynook',
+        suburb: 'Sunnynook',
+      }),
+    });
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mockQuery.mock.calls[0][0]).toContain('FROM properties');
+    const insertParams = mockQuery.mock.calls[1][1] as unknown[];
+    expect(insertParams).toContain('6455a77d-2231-cfed-1697-d9fd9605073b');
   });
 
   it('should return 400 when property_address is missing', async () => {
@@ -305,6 +328,7 @@ describe('POST /api/admin/leads', () => {
   it('should update outreach_properties converted_to_lead_id after creation', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [{ property_id: null }] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [mockLeadRow] })
       .mockResolvedValueOnce({ rows: [] });
 
@@ -319,8 +343,8 @@ describe('POST /api/admin/leads', () => {
     });
     await POST(request);
 
-    expect(mockQuery.mock.calls[2][0]).toContain('UPDATE outreach_properties');
-    expect(mockQuery.mock.calls[2][0]).toContain('converted_to_lead_id = $1');
+    expect(mockQuery.mock.calls[3][0]).toContain('UPDATE outreach_properties');
+    expect(mockQuery.mock.calls[3][0]).toContain('converted_to_lead_id = $1');
   });
 
   it('should return 401 when not authenticated', async () => {
@@ -338,7 +362,9 @@ describe('POST /api/admin/leads', () => {
   });
 
   it('should trim whitespace from text fields', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [mockLeadRow] });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [mockLeadRow] });
 
     const request = new Request('http://localhost:3000/api/admin/leads', {
       method: 'POST',
@@ -350,7 +376,7 @@ describe('POST /api/admin/leads', () => {
     });
     await POST(request);
 
-    const insertParams = mockQuery.mock.calls[0][1];
+    const insertParams = mockQuery.mock.calls[1][1];
     const addressParam = insertParams.find((p: unknown) => typeof p === 'string' && p.includes('Sartors'));
     expect(addressParam).toBe('2/23 Sartors Avenue');
   });

@@ -320,6 +320,20 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
               .max-w-6xl {
                 background: white !important;
               }
+
+              /* Print: all text solid black (icons/QR untouched — svg not in list) */
+              #am-root :is(h1, h2, h3, h4, p, span, a, strong, em, li, div) {
+                color: #000000 !important;
+              }
+              /* Print: Appraisal CTA box reverts to plain white */
+              #am-appraisal {
+                background: #ffffff !important;
+                border-color: #e2e8f0 !important;
+              }
+              /* Print: footnotes readable */
+              #am-footer p {
+                font-size: 10px !important;
+              }
             }
           `}</style>
 
@@ -337,7 +351,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
               <div id="am-left" className="col-span-4 flex flex-col justify-between text-left">
 
                 {/* Headshot */}
-                <div id="am-photo-wrap" className="overflow-hidden rounded-2xl shadow-lg border border-slate-100 bg-slate-50 aspect-[4/5] w-full">
+                <div id="am-photo-wrap" className="overflow-hidden rounded-2xl shadow-lg border border-slate-200 bg-white aspect-[4/5] w-full">
                   <Image
                     src="/img/Marie_large7-Photoroom.png"
                     alt="Marie Nian"
@@ -348,7 +362,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
                 </div>
 
                 {/* Contact card — contains contact rows + license subtext as one cohesive block */}
-                <div id="am-contact" className="flex flex-col gap-2 bg-gradient-to-br from-slate-50 to-slate-100/30 border border-slate-200/50 rounded-xl p-4 shadow-sm">
+                <div id="am-contact" className="flex flex-col gap-2 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
                   <div className="flex items-center gap-2.5 text-slate-600 text-xs">
                     <span className="flex-shrink-0 text-[11px]" aria-hidden="true">📍</span>
                     <span>{location}</span>
@@ -380,7 +394,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
                 {showQrCode && (qrCodeUrl || qrLocalPreview) && (
                   <div
                     id="am-qrcode"
-                    className="bg-gradient-to-br from-slate-50 to-slate-100/30 border border-slate-200/50 rounded-xl p-3 shadow-sm flex flex-col items-center"
+                    className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col items-center"
                   >
                     <Image
                       src={qrLocalPreview || qrCodeUrl}
@@ -410,7 +424,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
                   ))}
                 </div>
 
-                <div id="am-appraisal" className="bg-gradient-to-br from-slate-50 to-slate-100/30 border border-slate-200/50 rounded-xl p-5 mt-2 shadow-sm">
+                <div id="am-appraisal" className="bg-blue-50 border border-blue-100 rounded-xl p-5 mt-2 shadow-sm print:bg-white print:border-slate-200">
                   <h3 className="text-sm font-serif font-semibold text-slate-900 mb-4 flex items-center gap-2">
                     <Award className="w-4 h-4 text-slate-800" />
                     {appraisalTitle}

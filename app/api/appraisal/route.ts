@@ -24,6 +24,25 @@ async function checkLocationColumns(): Promise<boolean> {
   return hasLocationColumns;
 }
 
+// Cache whether the alert_status column exists (migration 049)
+let hasAlertColumn: boolean | null = null;
+
+async function checkAlertColumn(): Promise<boolean> {
+  if (hasAlertColumn !== null) return hasAlertColumn;
+  try {
+    const result = await query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'appraisal_leads'
+        AND column_name = 'alert_status'
+    `);
+    hasAlertColumn = result.rows.length === 1;
+  } catch {
+    hasAlertColumn = false;
+  }
+  return hasAlertColumn;
+}
+
 export async function POST(req: Request) {
   try {
     await marieDB.ensureOutreachTablesExist?.();
@@ -104,14 +123,19 @@ export async function POST(req: Request) {
 
     // --- Check whether region/city columns exist (migration 011) ---
     const useLocationColumns = await checkLocationColumns();
+    // --- Check whether alert_status column exists (migration 049) ---
+    const useAlertColumn = await checkAlertColumn();
+
+    const alertColumnSql = useAlertColumn ? ', alert_status' : '';
+    const alertValueSql = useAlertColumn ? ', $13' : '';
 
     if (useLocationColumns) {
       // Full insert with region and city
       await query(
         `INSERT INTO appraisal_leads
          (client_name, property_address, region, city, suburb, email, email_hash, phone,
-          timeline, motivation, language_preference, heard_from)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          timeline, motivation, language_preference, heard_from${alertColumnSql})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12${alertValueSql})`,
         [
           name.trim(),
           address.trim(),
@@ -125,6 +149,7 @@ export async function POST(req: Request) {
           motivation || null,
           language || null,
           heard_from || null,
+          ...(useAlertColumn ? ['pending'] : []),
         ]
       );
     } else {
@@ -132,8 +157,8 @@ export async function POST(req: Request) {
       await query(
         `INSERT INTO appraisal_leads
          (client_name, property_address, suburb, email, email_hash, phone,
-          timeline, motivation, language_preference, heard_from)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          timeline, motivation, language_preference, heard_from${alertColumnSql})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${useAlertColumn ? ', $11' : ''})`,
         [
           name.trim(),
           address.trim(),
@@ -145,6 +170,7 @@ export async function POST(req: Request) {
           motivation || null,
           language || null,
           heard_from || null,
+          ...(useAlertColumn ? ['pending'] : []),
         ]
       );
       // Reset cache so next request re-checks (in case migration runs soon)
@@ -206,10 +232,14 @@ export async function POST(req: Request) {
       address: address.trim(),
       email: email.trim(),
       phone: phone.trim(),
+      suburb: suburb.trim(),
+      region: resolvedRegion || undefined,
+      city: resolvedCity || undefined,
       timeline,
       motivation,
       languagePreference,
       heardFrom,
+      submittedAt: new Date(),
     }).catch(err => console.error("Email send failed:", err));
 
     return NextResponse.json({ success: true });

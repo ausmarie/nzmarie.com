@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
 import { batchGetCachedR2Urls } from '@/lib/streetview';
+import { matchPropertyIdByAddress } from '@/lib/lead-property';
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -195,6 +196,10 @@ export async function POST(request: Request) {
       if (op.rows.length > 0 && op.rows[0].property_id) {
         property_id = op.rows[0].property_id;
       }
+    }
+
+    if (!property_id) {
+      property_id = await matchPropertyIdByAddress(property_address, suburb) ?? undefined;
     }
 
     const result = await marieDB.query(

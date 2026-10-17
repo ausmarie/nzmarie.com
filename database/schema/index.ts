@@ -25,6 +25,9 @@ export const appraisalLeads = pgTable('appraisal_leads', {
   last_contact_at: timestamp('last_contact_at', { withTimezone: true }),
   region: varchar('region', { length: 100 }),
   city: varchar('city', { length: 100 }),
+  alert_status: varchar('alert_status', { length: 20 }),
+  lead_id: uuid('lead_id'),
+  alert_converted_at: timestamp('alert_converted_at', { withTimezone: true }),
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updated_at: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [

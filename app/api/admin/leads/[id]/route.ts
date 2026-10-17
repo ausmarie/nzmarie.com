@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
+import { matchPropertyIdByAddress } from '@/lib/lead-property';
 
 export async function GET(
   _request: Request,
@@ -56,6 +57,31 @@ export async function PUT(
         updates.push(`${field} = $${idx++}`);
         values.push(body[field] === '' ? null : body[field]);
       }
+    }
+
+    const addressTouched = body.property_address !== undefined || body.suburb !== undefined;
+    if (addressTouched) {
+      let currentAddress: string | null = null;
+      let currentSuburb: string | null = null;
+      if (body.property_address === undefined || body.suburb === undefined) {
+        const current = await marieDB.query(
+          `SELECT property_address, suburb FROM leads WHERE id = $1`,
+          [id]
+        );
+        if (current.rows.length > 0) {
+          currentAddress = current.rows[0].property_address;
+          currentSuburb = current.rows[0].suburb;
+        }
+      }
+      const nextAddress = body.property_address !== undefined
+        ? (body.property_address || null)
+        : currentAddress;
+      const nextSuburb = body.suburb !== undefined
+        ? (body.suburb || null)
+        : currentSuburb;
+      const propertyId = await matchPropertyIdByAddress(nextAddress, nextSuburb);
+      updates.push(`property_id = $${idx++}`);
+      values.push(propertyId);
     }
 
     if (updates.length === 0) {
