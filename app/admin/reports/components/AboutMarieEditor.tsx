@@ -338,7 +338,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
           `}</style>
 
           <div>
-            <div id="am-header" className="border-b border-slate-200/80 pb-4 mb-6 text-left">
+            <div id="am-header" className="border-b border-slate-200/80 pb-5 mb-10 text-left">
               <div className="am-badge tracking-widest text-xs font-light text-slate-400 mb-1">
                 {subtitle}
               </div>
@@ -363,29 +363,29 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
 
                 {/* Contact card — contains contact rows + license subtext as one cohesive block */}
                 <div id="am-contact" className="flex flex-col gap-2 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                  <div className="flex items-center gap-2.5 text-slate-600 text-xs">
+                  <div className="flex items-center gap-2.5 text-slate-600 text-sm">
                     <span className="flex-shrink-0 text-[11px]" aria-hidden="true">📍</span>
                     <span>{location}</span>
                   </div>
-                  <div className="flex items-center gap-2.5 text-slate-600 text-xs">
-                    <Phone className="w-3 h-3 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                  <div className="flex items-center gap-2.5 text-slate-600 text-sm">
+                    <Phone className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
                     <span>{phone}</span>
                   </div>
-                  <div className="flex items-center gap-2.5 text-slate-600 text-xs">
-                    <Mail className="w-3 h-3 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                  <div className="flex items-center gap-2.5 text-slate-600 text-sm">
+                    <Mail className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
                     <a href={`mailto:${email}`} className="hover:text-slate-900 underline underline-offset-2 transition-colors">
                       {email}
                     </a>
                   </div>
-                  <div className="flex items-center gap-2.5 text-slate-600 text-xs">
-                    <Globe className="w-3 h-3 text-slate-400 flex-shrink-0" aria-hidden="true" />
+                  <div className="flex items-center gap-2.5 text-slate-600 text-sm">
+                    <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" aria-hidden="true" />
                     <a href={`https://${website}`} target="_blank" rel="noopener noreferrer" className="hover:text-slate-900 underline underline-offset-2 transition-colors">
                       {website}
                     </a>
                   </div>
 
                   {/* License subtext — flush muted label, no button affordance */}
-                  <p className="text-[11px] text-slate-500 font-medium mt-1.5 leading-normal">
+                  <p className="text-xs text-slate-500 font-medium mt-1.5 leading-normal">
                     Licensed under REAA 2008
                   </p>
                 </div>
@@ -411,20 +411,20 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
                 )}
               </div>
 
-              <div id="am-right" className="col-span-8 flex flex-col gap-4 text-left">
-                <div id="am-welcome" className="text-lg font-serif text-slate-800 leading-snug">
+                <div id="am-right" className="col-span-8 flex flex-col gap-4 text-left">
+                <div id="am-welcome" className="text-lg font-serif text-slate-800 leading-snug pt-1">
                   {welcomeText}
                 </div>
 
-                <div id="am-paragraphs" className="space-y-3">
+                <div id="am-paragraphs" className="space-y-4">
                   {paragraphs.map((p, idx) => (
-                    <p key={idx} className="text-slate-600 leading-relaxed text-xs md:text-sm">
+                    <p key={idx} className="text-black leading-relaxed text-[13px]">
                       {p}
                     </p>
                   ))}
                 </div>
 
-                <div id="am-appraisal" className="bg-blue-50 border border-blue-100 rounded-xl p-5 mt-2 shadow-sm print:bg-white print:border-slate-200">
+                <div id="am-appraisal" className="bg-blue-50 border border-blue-100 rounded-xl p-5 mt-auto shadow-sm print:bg-white print:border-slate-200">
                   <h3 className="text-sm font-serif font-semibold text-slate-900 mb-4 flex items-center gap-2">
                     <Award className="w-4 h-4 text-slate-800" />
                     {appraisalTitle}
@@ -436,10 +436,10 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
                       const normalPart = parts.slice(1).join(':');
                       return (
                         <div key={idx} className="flex items-start gap-2.5">
-                          <span className="am-step-num font-semibold text-slate-900 text-xs md:text-sm flex-shrink-0 mt-0.5">
+                          <span className="am-step-num font-semibold text-slate-900 text-[13px] flex-shrink-0 mt-0.5">
                             {idx + 1}.
                           </span>
-                          <div className="am-step-text text-slate-600 text-xs md:text-sm leading-relaxed">
+                          <div className="am-step-text text-slate-600 text-[13px] leading-relaxed">
                             {boldPart && (
                               <strong className="font-semibold text-slate-900 mr-1">
                                 {boldPart}:
@@ -451,7 +451,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
                       );
                     })}
                   </div>
-                  <div className="mt-5 pt-4 border-t border-slate-200/50 text-xs text-slate-400 leading-relaxed">
+                  <div className="mt-5 pt-4 border-t border-slate-200/50 text-[13px] text-slate-400 leading-relaxed">
                     {websiteCtaPrefix}
                     <a href={`https://${website}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-slate-700 underline underline-offset-2 hover:text-slate-900 transition-colors">
                       {website}
