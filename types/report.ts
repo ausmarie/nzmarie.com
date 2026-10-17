@@ -19,6 +19,7 @@ export interface ReportDocument {
   parent_id: string | null;
   doc_type: DocType;
   suburb_id: string | null;
+  lead_id?: string | null;
   quarter: string | null;
   title: string;
   content: ReportEditorContent | null;

@@ -11,6 +11,7 @@ import { LeadEditModal } from '@/components/admin/LeadEditModal';
 import { PropertyEditModal } from '@/components/admin/PropertyEditModal';
 import { PropertyHistoryView } from '@/components/admin/PropertyHistoryView';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import LeadReportsView from './components/LeadReportsView';
 
 interface Lead {
   id: string;
@@ -176,6 +177,36 @@ export default function LeadsPage() {
   const [eventForm, setEventForm] = useState({ event_type: 'note', title: '', description: '' });
 
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  const [pageView, setPageView] = useState<'leads' | 'reports'>('leads');
+  const [reportLeadId, setReportLeadId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('view') === 'reports') setPageView('reports');
+    const lead = params.get('lead');
+    if (lead) setReportLeadId(lead);
+  }, []);
+
+  const syncUrl = useCallback((view: 'leads' | 'reports', leadId: string | null) => {
+    const next = new URLSearchParams();
+    if (view === 'reports') {
+      next.set('view', 'reports');
+      if (leadId) next.set('lead', leadId);
+    }
+    const qs = next.toString();
+    window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }, []);
+
+  const switchView = useCallback((view: 'leads' | 'reports') => {
+    setPageView(view);
+    syncUrl(view, reportLeadId);
+  }, [reportLeadId, syncUrl]);
+
+  const handleReportLeadChange = useCallback((leadId: string | null) => {
+    setReportLeadId(leadId);
+    syncUrl('reports', leadId);
+  }, [syncUrl]);
 
   const notify = useCallback((type: 'success' | 'error', msg: string) => {
     setNotification({ type, msg });
@@ -525,9 +556,35 @@ export default function LeadsPage() {
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-slate-900">Leads</h1>
+        <div className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-1" aria-label="Leads view mode">
+          <button
+            onClick={() => switchView('leads')}
+            className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${pageView === 'leads' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            data-testid="mode-toggle-leads"
+          >
+            Leads
+          </button>
+          <button
+            onClick={() => switchView('reports')}
+            className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${pageView === 'reports' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            data-testid="mode-toggle-reports"
+          >
+            Reports
+          </button>
+        </div>
       </div>
+
+      {pageView === 'reports' && (
+        <LeadReportsView
+          onSwitchToLeads={() => switchView('leads')}
+          onLeadChange={handleReportLeadChange}
+          initialLeadId={reportLeadId}
+        />
+      )}
+
+      <div className={pageView === 'reports' ? 'hidden' : ''}>
 
       {/* Filters */}
       <div style={{
@@ -1730,6 +1787,7 @@ export default function LeadsPage() {
           {notification.msg}
         </div>
       )}
+      </div>
     </div>
   );
 }

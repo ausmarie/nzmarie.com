@@ -13,6 +13,7 @@ export async function GET(request: Request) {
   const docType = searchParams.get('type');
   const suburbId = searchParams.get('suburb_id');
   const quarter = searchParams.get('quarter');
+  const leadId = searchParams.get('lead_id');
 
   try {
     let sql = `
@@ -39,6 +40,11 @@ export async function GET(request: Request) {
       sql += ` AND rd.quarter = $${paramIdx}`;
       params.push(quarter);
     }
+    if (leadId) {
+      paramIdx++;
+      sql += ` AND rd.lead_id = $${paramIdx}`;
+      params.push(leadId);
+    }
 
     sql += ' ORDER BY rd.sort_order ASC, rd.created_at DESC';
 
@@ -64,7 +70,7 @@ export async function POST(request: Request) {
 
     const body = JSON.parse(rawBody) as Record<string, unknown>;
 
-    const { doc_type, suburb_id, quarter, title, content, parent_id } = body;
+    const { doc_type, suburb_id, quarter, title, content, parent_id, lead_id } = body;
 
     const adminResult = await marieQuery<{ id: string }>(
       `SELECT id FROM admin_users WHERE email = $1 LIMIT 1`,
@@ -76,9 +82,9 @@ export async function POST(request: Request) {
     const userId = adminResult.rows[0].id;
 
     const result = await marieQuery<{ id: string }>(
-      `INSERT INTO report_documents (user_id, doc_type, suburb_id, quarter, title, content, parent_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [userId, doc_type || 'general', suburb_id || null, quarter || null, title || 'Untitled', content ? JSON.stringify(content) : null, parent_id || null]
+      `INSERT INTO report_documents (user_id, doc_type, suburb_id, quarter, title, content, parent_id, lead_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [userId, doc_type || 'general', suburb_id || null, quarter || null, title || 'Untitled', content ? JSON.stringify(content) : null, parent_id || null, lead_id || null]
     );
 
     return NextResponse.json({ success: true, id: result.rows[0].id });
