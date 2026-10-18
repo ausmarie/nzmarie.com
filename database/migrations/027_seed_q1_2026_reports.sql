@@ -40,5 +40,5 @@ FROM report_suburbs rs
 WHERE rs.is_active = TRUE
   AND NOT EXISTS (
     SELECT 1 FROM report_documents rd
-    WHERE rd.suburb_id = rs.id AND rd.quarter = '2026-Q1' AND rd.doc_type = 'report' AND rd.status != 'archived'
+    WHERE rd.suburb_id = rs.id AND rd.quarter = '2026-Q1' AND rd.doc_type = 'report' AND rd.status != 'archived' AND rd.lead_id IS NULL
   );

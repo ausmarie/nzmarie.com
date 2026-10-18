@@ -170,7 +170,7 @@ async function main() {
     `SELECT rd.id, rd.suburb_id, rd.quarter, rs.name as suburb_name, rd.content
      FROM report_documents rd
      JOIN report_suburbs rs ON rd.suburb_id = rs.id
-     WHERE rd.doc_type = 'report' AND rd.quarter IS NOT NULL AND rd.status != 'archived'
+     WHERE rd.doc_type = 'report' AND rd.quarter IS NOT NULL AND rd.status != 'archived' AND rd.lead_id IS NULL
      ORDER BY rs.name, rd.quarter`
   );
   console.log(`Found ${result.rows.length} reports.`);

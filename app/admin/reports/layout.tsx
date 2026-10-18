@@ -58,9 +58,9 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
     const fetchData = async () => {
       try {
         const [docRes, subRes, overviewRes] = await Promise.all([
-          fetch('/api/admin/reports/documents'),
-          fetch('/api/admin/reports/suburbs'),
-          fetch('/api/admin/reports/overview'),
+          fetch('/api/admin/reports/documents', { cache: 'no-store' }),
+          fetch('/api/admin/reports/suburbs', { cache: 'no-store' }),
+          fetch('/api/admin/reports/overview', { cache: 'no-store' }),
         ]);
         const docData = await docRes.json();
         const subData = await subRes.json();

@@ -293,4 +293,29 @@ describe('updateIntroMonthYear', () => {
     const result = updateIntroMonthYear(blocks, 2026, 9);
     expect(result).toEqual([{ type: 'paragraph' }]);
   });
+
+  it('rewrites the featuring date to a quarter label when periodLabel is provided', () => {
+    const blocks = [
+      { type: 'paragraph', content: 'Featuring Latest October 2026 Data' },
+    ];
+    const result = updateIntroMonthYear(blocks, 2026, 9, 'Q3 2026') as any[];
+    expect(result[0].content).toBe('Featuring Latest Q3 2026 Data');
+  });
+
+  it('rewrites a featuring date split across styled runs to a quarter label', () => {
+    const blocks = [
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Spring Market Update (Featuring Latest ', styles: {} },
+          { type: 'text', text: 'October 2026', styles: { bold: true } },
+          { type: 'text', text: ' Data)', styles: {} },
+        ],
+      },
+    ];
+    const result = updateIntroMonthYear(blocks, 2026, 9, 'Q3 2026') as any[];
+    const texts = result[0].content.map((c: any) => (typeof c === 'string' ? c : c.text));
+    expect(texts.join('')).toBe('Spring Market Update (Featuring Latest Q3 2026 Data)');
+    expect(texts.some((t: string) => t.includes('October'))).toBe(false);
+  });
 });

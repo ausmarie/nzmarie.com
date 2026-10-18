@@ -61,15 +61,15 @@ export function extractDaysToSellDescription(blocks: unknown[] | null): string |
 
 const FEATURING_DATE_RE = /Featuring\s+Latest\s+[A-Za-z]+\s+\d{4}\s+Data/;
 
-function featuringReplacement(year: number, month: number): string {
-  return `Featuring Latest ${monthName(month)} ${year} Data`;
+function featuringReplacement(year: number, month: number, periodLabel?: string): string {
+  return `Featuring Latest ${periodLabel ?? `${monthName(month)} ${year}`} Data`;
 }
 
-function rewriteFeaturingDate(text: string, year: number, month: number): string {
-  return text.replace(FEATURING_DATE_RE, featuringReplacement(year, month));
+function rewriteFeaturingDate(text: string, year: number, month: number, periodLabel?: string): string {
+  return text.replace(FEATURING_DATE_RE, featuringReplacement(year, month, periodLabel));
 }
 
-function rewriteFeaturingAcrossRuns(content: any[], year: number, month: number): any[] | null {
+function rewriteFeaturingAcrossRuns(content: any[], year: number, month: number, periodLabel?: string): any[] | null {
   const texts: string[] = [];
   for (const item of content) {
     if (typeof item === 'string') {
@@ -122,7 +122,7 @@ function rewriteFeaturingAcrossRuns(content: any[], year: number, month: number)
     if (i === startIdx) {
       const prefix = texts[i].slice(0, startOff);
       if (prefix) out.push(typeof item === 'string' ? prefix : { ...item, text: prefix });
-      out.push({ type: 'text', text: featuringReplacement(year, month), styles: runStyles });
+      out.push({ type: 'text', text: featuringReplacement(year, month, periodLabel), styles: runStyles });
     }
     if (i === endIdx) {
       const suffix = texts[i].slice(endOff);
@@ -132,14 +132,14 @@ function rewriteFeaturingAcrossRuns(content: any[], year: number, month: number)
   return out;
 }
 
-export function updateIntroMonthYear(blocks: unknown[] | null, year: number, month: number): unknown[] | null {
+export function updateIntroMonthYear(blocks: unknown[] | null, year: number, month: number, periodLabel?: string): unknown[] | null {
   if (!Array.isArray(blocks)) return blocks;
 
   return blocks.map((block: any) => {
     if (!block || typeof block !== 'object') return block;
 
     if (typeof block.content === 'string') {
-      const next = rewriteFeaturingDate(block.content, year, month);
+      const next = rewriteFeaturingDate(block.content, year, month, periodLabel);
       return next === block.content ? block : { ...block, content: next };
     }
 
@@ -147,7 +147,7 @@ export function updateIntroMonthYear(blocks: unknown[] | null, year: number, mon
       let changed = false;
       const content = block.content.map((item: any) => {
         if (typeof item === 'string') {
-          const next = rewriteFeaturingDate(item, year, month);
+          const next = rewriteFeaturingDate(item, year, month, periodLabel);
           if (next !== item) {
             changed = true;
             return next;
@@ -155,7 +155,7 @@ export function updateIntroMonthYear(blocks: unknown[] | null, year: number, mon
           return item;
         }
         if (item && typeof item === 'object' && typeof item.text === 'string') {
-          const next = rewriteFeaturingDate(item.text, year, month);
+          const next = rewriteFeaturingDate(item.text, year, month, periodLabel);
           if (next !== item.text) {
             changed = true;
             return { ...item, text: next };
@@ -167,7 +167,7 @@ export function updateIntroMonthYear(blocks: unknown[] | null, year: number, mon
       if (changed) {
         return { ...block, content };
       }
-      const across = rewriteFeaturingAcrossRuns(block.content, year, month);
+      const across = rewriteFeaturingAcrossRuns(block.content, year, month, periodLabel);
       if (across) {
         return { ...block, content: across };
       }

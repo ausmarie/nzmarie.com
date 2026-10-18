@@ -10,6 +10,8 @@ import {
   formatDaysDiff,
   statDirection,
   computeMarketPulse,
+  computeQuarterlyMarketPulse,
+  quarterLabel,
   buildMarketPulseHTML,
 } from '@/lib/market-pulse';
 import type { MonthlyDataPoint, SuburbDetail } from '@/lib/market-data-aggregator';
@@ -325,6 +327,95 @@ describe('computeMarketPulse', () => {
     expect(result.props.districtLine).toBe('');
     expect(result.props.priceNote).toBe('');
     expect(result.props.medianPrice).toBe('$1.17M');
+  });
+});
+
+describe('quarterLabel', () => {
+  it('formats a quarter key as Qn YYYY', () => {
+    expect(quarterLabel('2026-Q3')).toBe('Q3 2026');
+    expect(quarterLabel('2025-Q1')).toBe('Q1 2025');
+  });
+
+  it('returns an empty string for malformed quarters', () => {
+    expect(quarterLabel('')).toBe('');
+    expect(quarterLabel('2026-Q5')).toBe('');
+    expect(quarterLabel('Q3 2026')).toBe('');
+  });
+});
+
+describe('computeQuarterlyMarketPulse', () => {
+  it('aggregates the quarter months and compares against the previous quarter', () => {
+    const monthly = [
+      point('2026-04', detail(1000000, 10, 60), detail(1100000, 200, 65)),
+      point('2026-05', detail(1100000, 12, 55), detail(1150000, 210, 60)),
+      point('2026-06', detail(1200000, 14, 50), detail(1200000, 220, 55)),
+      point('2026-07', detail(1000000, 3, 40), detail(1100000, 250, 55)),
+      point('2026-08', detail(1200000, 4, 50), detail(1150000, 260, 52)),
+      point('2026-09', detail(1400000, 5, 60), detail(1200000, 270, 50)),
+    ];
+
+    const result = computeQuarterlyMarketPulse(monthly, 'Torbay', '2026-Q3');
+
+    expect(result.hasData).toBe(true);
+    expect(result.usedDistrict).toBe(false);
+    expect(result.anchor).toEqual({ year: 2026, month: 9 });
+    expect(result.previous).toEqual({ year: 2026, month: 6 });
+    expect(result.days).toBe(50);
+
+    expect(result.props.medianPrice).toBe('$1.2M');
+    expect(result.props.salesCount).toBe('12');
+    expect(result.props.daysToSell).toBe('50 Days');
+    expect(result.props.compareLabel).toBe('Compared to Previous Quarter (Q2)');
+    expect(result.props.comparePrice).toBe('+9.1%');
+    expect(result.props.compareSales).toBe('-66.7%');
+    expect(result.props.compareDays).toBe('-5');
+    expect(result.props.salesLabel).toBe('Local Properties Sold');
+    expect(result.props.districtLine).toBe('North Shore Avg: 52 Days');
+    expect(result.props.priceNote).toBe('North Shore Price: $1.15M');
+  });
+
+  it('labels the previous quarter with the year when it crosses a year boundary', () => {
+    const monthly = [
+      point('2025-10', detail(1000000, 5, 50), null),
+      point('2025-11', detail(1000000, 5, 50), null),
+      point('2025-12', detail(1000000, 5, 50), null),
+      point('2026-01', detail(1100000, 6, 45), null),
+    ];
+
+    const result = computeQuarterlyMarketPulse(monthly, 'Torbay', '2026-Q1');
+
+    expect(result.props.compareLabel).toBe('Compared to Previous Quarter (Q4 2025)');
+    expect(result.anchor).toEqual({ year: 2026, month: 3 });
+    expect(result.previous).toEqual({ year: 2025, month: 12 });
+  });
+
+  it('falls back to district data with North Shore labels when the suburb has no rows in the quarter', () => {
+    const monthly = [
+      point('2026-07', null, detail(1150000, 250, 55)),
+      point('2026-08', null, detail(1150000, 260, 52)),
+      point('2026-09', null, detail(1150000, 270, 50)),
+    ];
+
+    const result = computeQuarterlyMarketPulse(monthly, 'Torbay', '2026-Q3');
+
+    expect(result.hasData).toBe(true);
+    expect(result.usedDistrict).toBe(true);
+    expect(result.props.medianPrice).toBe('$1.15M');
+    expect(result.props.salesCount).toBe('780');
+    expect(result.props.salesLabel).toBe('North Shore Properties Sold');
+    expect(result.props.daysLabel).toBe('North Shore Avg Days to Sell');
+    expect(result.props.districtLine).toBe('');
+    expect(result.props.priceNote).toBe('');
+  });
+
+  it('reports no data when the report quarter is missing entirely', () => {
+    const monthly = [point('2026-07', detail(1000000, 3, 40), detail(1100000, 250, 55))];
+
+    const result = computeQuarterlyMarketPulse(monthly, 'Torbay', '2026-Q4');
+
+    expect(result.hasData).toBe(false);
+    expect(result.days).toBeNull();
+    expect(result.props.medianPrice).toBe('\u2014');
   });
 });
 

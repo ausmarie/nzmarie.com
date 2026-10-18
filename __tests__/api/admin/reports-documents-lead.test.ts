@@ -35,7 +35,7 @@ describe('report documents — lead reports support', () => {
       expect(params).toEqual(['lead-123']);
     });
 
-    it('does not filter by lead_id when not provided', async () => {
+    it('excludes lead-generated documents when lead_id is not provided', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [] });
 
       const request = new Request('http://localhost:3000/api/admin/reports/documents');
@@ -43,7 +43,8 @@ describe('report documents — lead reports support', () => {
 
       expect(response.status).toBe(200);
       const [sql] = mockQuery.mock.calls[0] as [string];
-      expect(sql).not.toContain('rd.lead_id');
+      expect(sql).toContain('rd.lead_id IS NULL');
+      expect(sql).not.toContain('rd.lead_id = ');
     });
 
     it('combines lead_id with other filters', async () => {
@@ -56,6 +57,19 @@ describe('report documents — lead reports support', () => {
       expect(sql).toContain('rd.doc_type = $1');
       expect(sql).toContain('rd.lead_id = $2');
       expect(params).toEqual(['general', 'lead-9']);
+    });
+
+    it('still excludes lead documents when other filters are combined', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [] });
+
+      const request = new Request('http://localhost:3000/api/admin/reports/documents?type=general&quarter=2026-Q3');
+      await GET(request);
+
+      const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('rd.doc_type = $1');
+      expect(sql).toContain('rd.quarter = $2');
+      expect(sql).toContain('rd.lead_id IS NULL');
+      expect(params).toEqual(['general', '2026-Q3']);
     });
   });
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import ReportEditor from '@/app/admin/reports/components/ReportEditor';
 import ConfirmModal from '@/app/admin/reports/components/ConfirmModal';
+import GenerateReportModal from '@/app/admin/reports/components/GenerateReportModal';
 import { useReportStore } from '@/app/admin/reports/stores/report-store';
 import type { ReportDocument, ReportEditorContent } from '@/types/report';
 
@@ -12,6 +13,10 @@ interface LeadOption {
   suburb?: string | null;
   status?: string;
   priority?: string;
+  owner_name?: string | null;
+  owner_email?: string | null;
+  owner_phone?: string | null;
+  created_at?: string | null;
 }
 
 interface LeadReportMeta {
@@ -29,30 +34,51 @@ interface LeadReportsViewProps {
 
 const SIDEBAR_KEY = 'leadReportsSidebarCollapsed';
 
+const sidebarBg = '#f7f6f3';
+const sidebarBorder = '#e8e7e4';
+
 export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initialLeadId }: LeadReportsViewProps) {
   const { isSaving, lastSaved } = useReportStore();
 
   const [leads, setLeads] = useState<LeadOption[]>([]);
   const [leadsLoading, setLeadsLoading] = useState(true);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [reportsByLead, setReportsByLead] = useState<Record<string, LeadReportMeta[]>>({});
   const [collapsed, setCollapsed] = useState(false);
 
-  const [reports, setReports] = useState<LeadReportMeta[]>([]);
-  const [reportsLoading, setReportsLoading] = useState(false);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [activeDoc, setActiveDoc] = useState<ReportDocument | null>(null);
   const [docLoading, setDocLoading] = useState(false);
 
   const [title, setTitle] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const getContentRef = useRef<(() => ReportEditorContent | null) | null>(null);
-  const autoSelectedLeadRef = useRef(false);
+  const autoSelectedRef = useRef(false);
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId) || null;
+
+  const loadReportsForLead = useCallback(async (leadId: string): Promise<LeadReportMeta[]> => {
+    try {
+      const res = await fetch(`/api/admin/reports/documents?lead_id=${encodeURIComponent(leadId)}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) {
+        const rows: LeadReportMeta[] = (data.documents || []).map((d: ReportDocument) => ({
+          id: d.id,
+          title: d.title,
+          status: d.status,
+          updated_at: d.updated_at,
+        }));
+        setReportsByLead((prev) => ({ ...prev, [leadId]: rows }));
+        return rows;
+      }
+    } catch { /* ignore */ }
+    return [];
+  }, []);
 
   useEffect(() => {
     try {
@@ -68,12 +94,20 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
         const data = await res.json();
         if (cancelled) return;
         if (data.success) {
-          const rows: LeadOption[] = data.leads || [];
+          const rows: LeadOption[] = (data.leads || []).slice().sort(
+            (a: LeadOption, b: LeadOption) =>
+              new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+          );
           setLeads(rows);
-          if (!autoSelectedLeadRef.current && rows.length > 0) {
-            autoSelectedLeadRef.current = true;
-            const match = initialLeadId ? rows.find((l) => l.id === initialLeadId) : null;
-            setSelectedLeadId(match ? match.id : rows[0].id);
+          if (!autoSelectedRef.current && initialLeadId) {
+            const match = rows.find((l) => l.id === initialLeadId);
+            if (match) {
+              autoSelectedRef.current = true;
+              setSelectedLeadId(match.id);
+              setExpanded((prev) => ({ ...prev, [match.id]: true }));
+              const reportRows = await loadReportsForLead(match.id);
+              if (!cancelled && reportRows.length > 0) setActiveDocId(reportRows[0].id);
+            }
           }
         }
       } catch { /* ignore */ } finally {
@@ -82,43 +116,10 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
     };
     loadLeads();
     return () => { cancelled = true; };
-  }, [initialLeadId]);
+  }, [initialLeadId, loadReportsForLead]);
 
   useEffect(() => {
     onLeadChange?.(selectedLeadId);
-    if (!selectedLeadId) {
-      setReports([]);
-      setActiveDocId(null);
-      setActiveDoc(null);
-      setTitle('');
-      return;
-    }
-    let cancelled = false;
-    setReportsLoading(true);
-    setActiveDocId(null);
-    setActiveDoc(null);
-    setTitle('');
-    const loadReports = async () => {
-      try {
-        const res = await fetch(`/api/admin/reports/documents?lead_id=${encodeURIComponent(selectedLeadId)}`, { cache: 'no-store' });
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.success) {
-          const rows: LeadReportMeta[] = (data.documents || []).map((d: ReportDocument) => ({
-            id: d.id,
-            title: d.title,
-            status: d.status,
-            updated_at: d.updated_at,
-          }));
-          setReports(rows);
-          if (rows.length > 0) setActiveDocId(rows[0].id);
-        }
-      } catch { /* ignore */ } finally {
-        if (!cancelled) setReportsLoading(false);
-      }
-    };
-    loadReports();
-    return () => { cancelled = true; };
   }, [selectedLeadId, onLeadChange]);
 
   useEffect(() => {
@@ -129,6 +130,8 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
     }
     let cancelled = false;
     setDocLoading(true);
+    setActiveDoc(null);
+    setTitle('');
     const loadDoc = async () => {
       try {
         const res = await fetch(`/api/admin/reports/documents/${activeDocId}`, { cache: 'no-store' });
@@ -160,49 +163,48 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
     });
   }, []);
 
-  const handleCreateReport = useCallback(async () => {
-    if (!selectedLead || creating) return;
-    setCreating(true);
-    try {
-      const address = selectedLead.property_address;
-      const content = [
-        {
-          type: 'heading',
-          props: { level: 1 },
-          content: [{ type: 'text', text: `Property Report — ${address}`, styles: {} }],
-        },
-        { type: 'paragraph', content: [{ type: 'text', text: '', styles: {} }] },
-      ];
-      const res = await fetch('/api/admin/reports/documents', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          doc_type: 'general',
-          title: `Property Report — ${address}`,
-          content,
-          lead_id: selectedLead.id,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.id) {
-        setReports((prev) => [
-          { id: data.id, title: `Property Report — ${address}`, status: 'draft', updated_at: new Date().toISOString() },
-          ...prev,
-        ]);
-        setActiveDocId(data.id);
-        setToast('Report created.');
-      } else {
-        setToast('Failed to create report.');
-      }
-    } catch {
-      setToast('Failed to create report.');
-    } finally {
-      setCreating(false);
+  const handleLeadClick = useCallback(async (leadId: string) => {
+    const isExpanded = !!expanded[leadId];
+    setSelectedLeadId(leadId);
+    if (isExpanded) {
+      setExpanded((prev) => ({ ...prev, [leadId]: false }));
+      return;
     }
-  }, [selectedLead, creating]);
+    setExpanded((prev) => ({ ...prev, [leadId]: true }));
+    const belongsToLead = activeDocId && (reportsByLead[leadId] || []).some((r) => r.id === activeDocId);
+    if (!belongsToLead) {
+      let rows = reportsByLead[leadId];
+      if (!rows) rows = await loadReportsForLead(leadId);
+      if (rows.length > 0) {
+        setActiveDocId(rows[0].id);
+      } else {
+        setActiveDocId(null);
+      }
+    }
+  }, [expanded, activeDocId, reportsByLead, loadReportsForLead]);
+
+  const handleReportClick = useCallback((leadId: string, docId: string) => {
+    setSelectedLeadId(leadId);
+    setExpanded((prev) => ({ ...prev, [leadId]: true }));
+    setActiveDocId(docId);
+  }, []);
+
+  const handleCreateReport = useCallback(() => {
+    if (!selectedLeadId) return;
+    setShowGenerate(true);
+  }, [selectedLeadId]);
+
+  const handleGenerated = useCallback(async (docId: string) => {
+    setShowGenerate(false);
+    if (!selectedLeadId) return;
+    setExpanded((prev) => ({ ...prev, [selectedLeadId]: true }));
+    await loadReportsForLead(selectedLeadId);
+    setActiveDocId(docId);
+    setToast('Report generated.');
+  }, [selectedLeadId, loadReportsForLead]);
 
   const handleSaveNow = useCallback(async () => {
-    if (!activeDocId) return;
+    if (!activeDocId || docLoading || !activeDoc) return;
     try {
       const waitForAutosave = async () => {
         const start = Date.now();
@@ -221,23 +223,35 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
         setToast('Failed to save.');
         return;
       }
-      setReports((prev) => prev.map((r) => (r.id === activeDocId ? { ...r, title } : r)));
+      if (selectedLeadId) {
+        setReportsByLead((prev) => ({
+          ...prev,
+          [selectedLeadId]: (prev[selectedLeadId] || []).map((r) => (r.id === activeDocId ? { ...r, title } : r)),
+        }));
+      }
       setToast('Saved.');
     } catch {
       setToast('Failed to save.');
     }
-  }, [activeDocId, title, activeDoc]);
+  }, [activeDocId, docLoading, title, activeDoc, selectedLeadId]);
 
   const handleDelete = useCallback(async () => {
-    if (!activeDocId) return;
+    const target = pendingDelete;
+    if (!target) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/reports/documents/${activeDocId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/reports/documents/${target.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
-        const remaining = reports.filter((r) => r.id !== activeDocId);
-        setReports(remaining);
-        setActiveDocId(remaining.length > 0 ? remaining[0].id : null);
+        if (selectedLeadId) {
+          const remaining = (reportsByLead[selectedLeadId] || []).filter((r) => r.id !== target.id);
+          setReportsByLead((prev) => ({ ...prev, [selectedLeadId]: remaining }));
+          if (activeDocId === target.id) {
+            setActiveDocId(remaining.length > 0 ? remaining[0].id : null);
+          }
+        } else if (activeDocId === target.id) {
+          setActiveDocId(null);
+        }
         setToast('Report deleted.');
       } else {
         setToast('Failed to delete report.');
@@ -246,9 +260,9 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
       setToast('Failed to delete report.');
     } finally {
       setDeleting(false);
-      setShowDelete(false);
+      setPendingDelete(null);
     }
-  }, [activeDocId, reports]);
+  }, [pendingDelete, activeDocId, selectedLeadId, reportsByLead]);
 
   const metaLine = selectedLead
     ? [selectedLead.suburb, activeDoc?.updated_at ? new Date(activeDoc.updated_at).toLocaleDateString('en-NZ') : null]
@@ -257,33 +271,22 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
     : '';
 
   return (
-    <div
-      className="lead-reports-root flex rounded-xl border border-slate-200 bg-white overflow-hidden"
-      style={{ height: 'calc(100vh - 200px)', minHeight: 560 }}
-      data-testid="lead-reports-view"
-    >
+    <>
       <style>{`
-        .lead-reports-print-hide { display: none !important; }
         @media print {
           nav { display: none !important; }
-          .lead-reports-sidebar, .lead-reports-toolbar, .reports-editor-status { display: none !important; }
+          .leads-mode-chrome { display: none !important; }
+          .lead-reports-sidebar, .lead-reports-toolbar, .reports-editor-status, .lead-reports-home { display: none !important; }
+          .lead-generate-modal { display: none !important; }
           .lead-reports-root {
+            position: static !important;
             display: block !important;
             height: auto !important;
-            min-height: 0 !important;
-            border: none !important;
-            border-radius: 0 !important;
             overflow: visible !important;
           }
-          .lead-reports-editor-pane {
+          .lead-reports-main {
             overflow: visible !important;
-            padding: 0 !important;
             background: white !important;
-          }
-          .lead-reports-paper {
-            border: none !important;
-            box-shadow: none !important;
-            max-width: 100% !important;
           }
           .report-editor-container {
             max-width: 100% !important;
@@ -312,225 +315,455 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
             print-color-adjust: exact !important;
           }
         }
+        .lead-report-row { position: relative; }
+        .lead-report-row-del { opacity: 0; transition: opacity 0.12s ease; }
+        .lead-report-row:hover .lead-report-row-del { opacity: 1; }
+        .lead-report-row.is-active .lead-report-row-del { opacity: 1; }
+        @media print {
+          .lead-report-row-del { display: none !important; }
+        }
       `}</style>
 
-      {/* Sidebar */}
-      {!collapsed ? (
-        <aside
-          className="lead-reports-sidebar flex flex-col w-64 shrink-0 border-r border-slate-200 bg-slate-50"
-          data-testid="lead-reports-sidebar"
-        >
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 bg-white">
-            <div className="flex items-center gap-0.5 text-xs font-semibold">
-              <button
-                onClick={onSwitchToLeads}
-                className="px-2 py-1 rounded text-slate-500 hover:text-slate-900 transition-colors"
-                data-testid="sidebar-leads-toggle"
-              >
-                Leads
-              </button>
-              <span className="text-slate-300">|</span>
-              <span className="px-2 py-1 rounded bg-blue-600 text-white">Reports</span>
-            </div>
-            <button
-              onClick={toggleCollapsed}
-              title="Collapse sidebar"
-              className="flex items-center justify-center w-6 h-6 rounded bg-blue-500 text-white text-xs font-bold hover:bg-blue-600 transition-colors"
-              data-testid="sidebar-collapse"
-            >
-              ◀
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {leadsLoading ? (
-              <div className="space-y-2 p-1">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-12 rounded-lg bg-slate-200 animate-pulse" />
-                ))}
-              </div>
-            ) : leads.length === 0 ? (
-              <p className="text-xs text-slate-400 p-2">No leads yet.</p>
-            ) : (
-              leads.map((lead) => {
-                const isSelected = lead.id === selectedLeadId;
-                return (
-                  <button
-                    key={lead.id}
-                    onClick={() => setSelectedLeadId(lead.id)}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                      isSelected ? 'bg-blue-100 text-blue-900' : 'hover:bg-slate-100 text-slate-700'
-                    }`}
-                    data-testid="lead-list-item"
-                  >
-                    <div className="flex items-start gap-1.5">
-                      <span className="text-xs mt-0.5 shrink-0" aria-hidden="true">📍</span>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">{lead.property_address}</div>
-                        {lead.suburb && <div className="text-[11px] text-slate-500 truncate">{lead.suburb}</div>}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          <div className="p-2 border-t border-slate-200 bg-white">
-            <button
-              onClick={handleCreateReport}
-              disabled={!selectedLeadId || creating}
-              className="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              data-testid="new-report-btn"
-            >
-              {creating ? 'Creating…' : '+ New Report'}
-            </button>
-          </div>
-        </aside>
-      ) : (
-        <div className="lead-reports-sidebar flex flex-col items-center w-10 shrink-0 border-r border-slate-200 bg-slate-50 py-2">
-          <button
+      <div
+        className="lead-reports-root"
+        style={{
+          position: 'fixed', top: '64px', left: 0, right: 0, bottom: 0,
+          display: 'flex', overflow: 'hidden', background: 'white',
+        }}
+        data-testid="lead-reports-view"
+      >
+        {collapsed ? (
+          <div
             onClick={toggleCollapsed}
             title="Expand sidebar"
-            className="flex items-center justify-center w-6 h-6 rounded bg-blue-500 text-white text-xs font-bold hover:bg-blue-600 transition-colors"
+            style={{
+              width: 20, minWidth: 20, height: '100%', cursor: 'pointer',
+              background: sidebarBg, borderRight: `1px solid ${sidebarBorder}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#999', fontSize: '0.75rem', flexShrink: 0, userSelect: 'none',
+            }}
             data-testid="sidebar-expand"
           >
             ▶
-          </button>
-        </div>
-      )}
-
-      {/* Right pane */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="lead-reports-toolbar flex items-center gap-2 px-4 py-2 border-b border-slate-200 bg-white" style={{ overflowX: 'auto' }}>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Untitled report"
-            disabled={!activeDocId}
-            className="min-w-0 flex-1 max-w-[280px] border-0 outline-none text-sm font-semibold text-slate-800 placeholder:text-slate-300 bg-transparent"
-            data-testid="report-title-input"
-          />
-          {metaLine && (
-            <span className="text-xs text-slate-400 whitespace-nowrap hidden md:inline" data-testid="report-meta">
-              {metaLine}
-            </span>
-          )}
-          <span className="text-[11px] text-slate-500 whitespace-nowrap">
-            {activeDoc ? (activeDoc.status === 'draft' ? 'Draft' : 'Finalised') : ''}
-          </span>
-          <span className="text-[11px] text-slate-500 whitespace-nowrap" data-testid="save-status">
-            {isSaving ? 'Saving…' : lastSaved ? `● Saved at ${lastSaved}` : ''}
-          </span>
-          <div className="ml-auto flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleSaveNow}
-              disabled={!activeDocId}
-              className="px-3 py-1.5 rounded-md text-xs border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40"
-              data-testid="save-btn"
-            >
-              Save
-            </button>
-            <button
-              onClick={handleCreateReport}
-              disabled={!selectedLeadId || creating}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40"
-            >
-              + New Report
-            </button>
-            <button
-              onClick={() => window.print()}
-              disabled={!activeDocId}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40"
-              data-testid="print-btn"
-            >
-              Print
-            </button>
-            <button
-              onClick={() => window.print()}
-              disabled={!activeDocId}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-40"
-              data-testid="export-pdf-btn"
-            >
-              Export PDF
-            </button>
-            <button
-              onClick={() => setShowDelete(true)}
-              disabled={!activeDocId}
-              className="px-3 py-1.5 rounded-md text-xs font-medium border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors disabled:opacity-40"
-              data-testid="delete-btn"
-            >
-              Delete
-            </button>
           </div>
-        </div>
+        ) : (
+          <aside
+            className="lead-reports-sidebar"
+            style={{
+              width: 240, minWidth: 240, height: '100%', overflow: 'hidden',
+              background: sidebarBg, borderRight: `1px solid ${sidebarBorder}`,
+              display: 'flex', flexDirection: 'column',
+            }}
+            data-testid="lead-reports-sidebar"
+          >
+            <div style={{ padding: '12px 12px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <button
+                    onClick={onSwitchToLeads}
+                    style={{
+                      cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: '3px 8px',
+                      borderRadius: 6, border: 'none', color: '#666', background: 'transparent',
+                      transition: 'color 0.1s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#1a73e8'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; }}
+                    data-testid="sidebar-leads-toggle"
+                  >
+                    Leads
+                  </button>
+                  <span style={{
+                    fontSize: '0.7rem', fontWeight: 700, padding: '3px 8px', borderRadius: 6,
+                    background: '#1a73e8', color: 'white',
+                  }}>
+                    Reports
+                  </span>
+                </div>
+                <span
+                  onClick={toggleCollapsed}
+                  title="Collapse sidebar"
+                  style={{
+                    cursor: 'pointer', fontSize: '0.75rem', color: '#999', padding: '2px 6px',
+                    borderRadius: 4, lineHeight: 1, userSelect: 'none',
+                    transition: 'color 0.1s, background 0.1s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#333'; e.currentTarget.style.background = '#e8e7e4'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#999'; e.currentTarget.style.background = 'transparent'; }}
+                  data-testid="sidebar-collapse"
+                >
+                  ◀
+                </span>
+              </div>
+            </div>
 
-        <div className="lead-reports-editor-pane flex-1 overflow-y-auto bg-slate-100 p-6">
-          {!selectedLeadId ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm">
-              <span className="text-3xl mb-3" aria-hidden="true">📄</span>
-              Select an address on the left to open its reports.
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {leadsLoading ? (
+                <div style={{ padding: 12 }}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} style={{ height: 32, borderRadius: 6, background: '#e8e7e4', marginBottom: 8, animation: 'sk-pulse 1.5s infinite' }} />
+                  ))}
+                  <style>{`@keyframes sk-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
+                </div>
+              ) : leads.length === 0 ? (
+                <p style={{ padding: 12, fontSize: '0.75rem', color: '#999' }}>No leads yet.</p>
+              ) : (
+                leads.map((lead) => {
+                  const isExpanded = !!expanded[lead.id];
+                  const isSelectedLead = lead.id === selectedLeadId;
+                  const children = reportsByLead[lead.id] || [];
+                  return (
+                    <div key={lead.id}>
+                      <div
+                        onClick={() => handleLeadClick(lead.id)}
+                        style={{
+                          padding: '6px 12px', cursor: 'pointer', fontSize: '0.8rem',
+                          fontWeight: 600, color: '#555',
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          background: isSelectedLead && !isExpanded ? '#dbeafe' : 'transparent',
+                          userSelect: 'none',
+                        }}
+                        onMouseEnter={(e) => { if (!isSelectedLead) e.currentTarget.style.background = '#e8e7e4'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = isSelectedLead && !isExpanded ? '#dbeafe' : 'transparent'; }}
+                        data-testid="lead-list-item"
+                      >
+                        <span style={{
+                          transform: isExpanded ? 'rotate(90deg)' : 'none',
+                          transition: 'transform 0.15s', fontSize: '0.65rem', color: '#1a73e8',
+                          flexShrink: 0,
+                        }}>
+                          ▶
+                        </span>
+                        <span style={{ fontSize: '0.9rem', flexShrink: 0 }} aria-hidden="true">📍</span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {lead.property_address}
+                          </div>
+                          {lead.suburb && (
+                            <div style={{ fontSize: '0.65rem', fontWeight: 400, color: '#999', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {lead.suburb}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div>
+                          {children.length === 0 ? (
+                            <div style={{ padding: '4px 12px 6px 36px', fontSize: '0.7rem', color: '#aaa' }}>
+                              No reports
+                            </div>
+                          ) : (
+                            children.map((report) => {
+                              const isActiveDoc = report.id === activeDocId;
+                              return (
+                                <div
+                                  key={report.id}
+                                  className={`lead-report-row${isActiveDoc ? ' is-active' : ''}`}
+                                  onClick={() => handleReportClick(lead.id, report.id)}
+                                  style={{
+                                    padding: '5px 12px 5px 36px', cursor: 'pointer',
+                                    fontSize: '0.75rem', fontWeight: isActiveDoc ? 600 : 400,
+                                    color: isActiveDoc ? '#1a73e8' : '#666',
+                                    display: 'flex', alignItems: 'center', gap: 6,
+                                    background: isActiveDoc ? '#dbeafe' : 'transparent',
+                                    userSelect: 'none',
+                                  }}
+                                  onMouseEnter={(e) => { if (!isActiveDoc) e.currentTarget.style.background = '#e8e7e4'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = isActiveDoc ? '#dbeafe' : 'transparent'; }}
+                                  data-testid="report-list-item"
+                                >
+                                  <span aria-hidden="true">📄</span>
+                                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
+                                    {report.title}
+                                  </span>
+                                  {report.status === 'draft' && (
+                                    <span style={{ fontSize: '0.6rem', color: '#aaa', flexShrink: 0 }}>Draft</span>
+                                  )}
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPendingDelete({ id: report.id, title: report.title });
+                                    }}
+                                    title="Delete report"
+                                    aria-label="Delete report"
+                                    className="lead-report-row-del"
+                                    style={{
+                                      border: 'none', background: 'transparent', cursor: 'pointer',
+                                      padding: '0 2px', fontSize: '0.8rem', color: '#9ca3af',
+                                      flexShrink: 0, lineHeight: 1,
+                                    }}
+                                    data-testid="report-delete-btn"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
-          ) : reportsLoading && !activeDocId ? (
-            <div className="mx-auto max-w-[900px] space-y-4">
-              <div className="h-8 w-2/3 bg-slate-200 rounded animate-pulse" />
-              <div className="h-4 w-1/2 bg-slate-200 rounded animate-pulse" />
-              <div className="h-64 bg-slate-200 rounded animate-pulse" />
-            </div>
-          ) : !activeDocId ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm">
-              <span className="text-3xl mb-3" aria-hidden="true">📝</span>
-              <p className="mb-4">No reports for this address yet.</p>
+
+            <div style={{ padding: 10, borderTop: `1px solid ${sidebarBorder}`, background: 'white' }}>
               <button
                 onClick={handleCreateReport}
-                disabled={creating}
-                className="px-4 py-2 rounded-lg text-xs font-semibold border border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors disabled:opacity-40"
+                disabled={!selectedLeadId}
+                style={{
+                  width: '100%', padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                  border: '1px solid #059669', background: '#ecfdf5', color: '#059669',
+                  fontSize: '0.75rem', fontWeight: 600,
+                  opacity: !selectedLeadId ? 0.4 : 1,
+                }}
+                data-testid="new-report-btn"
               >
-                {creating ? 'Creating…' : '+ Create first report'}
+                + New Report
               </button>
             </div>
-          ) : docLoading && !activeDoc ? (
-            <div className="mx-auto max-w-[900px] space-y-4">
-              <div className="h-8 w-2/3 bg-slate-200 rounded animate-pulse" />
-              <div className="h-4 w-1/2 bg-slate-200 rounded animate-pulse" />
-              <div className="h-64 bg-slate-200 rounded animate-pulse" />
+          </aside>
+        )}
+
+        <div className="lead-reports-main" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+          {activeDocId && (
+          <div
+            className="lead-reports-toolbar"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '8px 24px', borderBottom: `1px solid ${sidebarBorder}`,
+              background: 'white', flexShrink: 0, overflowX: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Untitled report"
+                style={{
+                  border: 'none', outline: 'none', fontSize: '1.1rem', fontWeight: 600,
+                  color: '#333', background: 'transparent', width: '100%', maxWidth: 360, minWidth: 120,
+                }}
+                data-testid="report-title-input"
+              />
+              {metaLine && (
+                <span style={{ fontSize: '0.8rem', color: '#999', whiteSpace: 'nowrap' }} data-testid="report-meta">
+                  {metaLine}
+                </span>
+              )}
             </div>
-          ) : activeDoc ? (
-            <div className="lead-reports-paper mx-auto bg-white shadow-sm border border-slate-200" style={{ maxWidth: 900 }}>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: '0.75rem', color: '#999', whiteSpace: 'nowrap' }}>
+                {activeDoc?.status === 'draft' ? 'Draft' : 'Finalised'}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: '#999', whiteSpace: 'nowrap' }} data-testid="save-status">
+                {isSaving ? 'Saving…' : lastSaved ? `● Saved at ${lastSaved}` : ''}
+              </span>
+
+              <button
+                onClick={handleSaveNow}
+                style={{
+                  padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
+                  border: '1px solid #ddd', background: 'white', cursor: 'pointer', color: '#555',
+                }}
+                data-testid="save-btn"
+              >
+                Save
+              </button>
+              <button
+                onClick={handleCreateReport}
+                style={{
+                  padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
+                  border: '1px solid #059669', background: '#ecfdf5', cursor: 'pointer',
+                  color: '#059669', fontWeight: 500,
+                }}
+                data-testid="toolbar-new-report-btn"
+              >
+                + New Report
+              </button>
+              <button
+                onClick={() => window.print()}
+                style={{
+                  padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
+                  border: '1px solid #ddd', background: 'white', cursor: 'pointer', color: '#555',
+                }}
+                data-testid="print-btn"
+              >
+                Print
+              </button>
+              <button
+                onClick={() => window.print()}
+                style={{
+                  padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
+                  border: '1px solid #1a73e8', background: '#1a73e8', cursor: 'pointer',
+                  color: 'white', fontWeight: 500,
+                }}
+                data-testid="export-pdf-btn"
+              >
+                Export PDF
+              </button>
+              <button
+                onClick={() => activeDocId && setPendingDelete({ id: activeDocId, title })}
+                style={{
+                  padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
+                  border: '1px solid #fecaca', background: '#fef2f2', cursor: 'pointer',
+                  color: '#dc2626', fontWeight: 500,
+                }}
+                data-testid="delete-btn"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          )}
+
+          <div style={{ flex: 1, overflowY: 'auto', background: '#f7f6f3' }}>
+            {!selectedLeadId ? (
+              <div className="lead-reports-home" style={{ maxWidth: 960, margin: '0 auto', padding: '32px 24px' }} data-testid="lead-reports-home">
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#222', margin: '0 0 4px' }}>
+                  Lead Reports
+                </h2>
+                <p style={{ fontSize: '0.85rem', color: '#999', margin: '0 0 20px' }} data-testid="lead-reports-count">
+                  {leads.length} Lead{leads.length !== 1 ? 's' : ''}
+                </p>
+                {leadsLoading ? (
+                  <div>
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} style={{ height: 110, borderRadius: 10, background: '#e8e7e4', marginBottom: 12, animation: 'sk-pulse 1.5s infinite' }} />
+                    ))}
+                    <style>{`@keyframes sk-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
+                  </div>
+                ) : leads.length === 0 ? (
+                  <div style={{
+                    padding: '60px 32px', background: 'white', borderRadius: 12,
+                    border: '2px dashed #eee', textAlign: 'center', color: '#999', fontSize: '0.9rem',
+                  }}>
+                    No leads yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {leads.map((lead) => (
+                    <div
+                      key={lead.id}
+                      onClick={() => handleLeadClick(lead.id)}
+                      style={{
+                        padding: '18px 22px', background: 'white', borderRadius: 10,
+                        border: `1px solid ${sidebarBorder}`, cursor: 'pointer',
+                        transition: 'box-shadow 0.15s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
+                      data-testid="home-lead-item"
+                    >
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '1.1rem', fontWeight: 600, color: '#333' }}>
+                          {lead.property_address}
+                        </span>
+                        {lead.suburb && (
+                          <span style={{ fontSize: '0.85rem', color: '#999' }}>{lead.suburb}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 20px', marginTop: 10, fontSize: '0.85rem', color: '#666' }}>
+                        {lead.owner_name && (
+                          <span><span style={{ color: '#aaa' }}>Owner:</span> {lead.owner_name}</span>
+                        )}
+                        {lead.owner_phone && (
+                          <span><span style={{ color: '#aaa' }}>Phone:</span> {lead.owner_phone}</span>
+                        )}
+                        {lead.owner_email && (
+                          <span><span style={{ color: '#aaa' }}>Email:</span> {lead.owner_email}</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, fontSize: '0.75rem' }}>
+                        {lead.status && (
+                          <span style={{
+                            padding: '3px 10px', borderRadius: 8,
+                            background: lead.status === 'new' ? '#dbeafe' : lead.status === 'contacted' ? '#fef3c7' : '#d1fae5',
+                            color: lead.status === 'new' ? '#1e40af' : lead.status === 'contacted' ? '#92400e' : '#065f46',
+                            fontWeight: 500,
+                          }}>
+                            {lead.status}
+                          </span>
+                        )}
+                        {lead.created_at && (
+                          <span style={{ color: '#aaa' }}>
+                            Added {new Date(lead.created_at).toLocaleDateString('en-NZ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  </div>
+                )}
+              </div>
+            ) : !activeDocId ? (
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '0.9rem' }}>
+                <span style={{ fontSize: '2rem', marginBottom: 12 }} aria-hidden="true">📝</span>
+                <p style={{ marginBottom: 16 }}>No reports for this address yet.</p>
+                <button
+                  onClick={handleCreateReport}
+                  style={{
+                    padding: '8px 18px', borderRadius: 8, cursor: 'pointer',
+                    border: '1px solid #059669', background: '#ecfdf5', color: '#059669',
+                    fontSize: '0.8rem', fontWeight: 600,
+                  }}
+                >
+                  + Create first report
+                </button>
+              </div>
+            ) : docLoading && !activeDoc ? (
+              <div style={{ padding: '32px 40px', maxWidth: 900, margin: '0 auto' }}>
+                <div style={{ height: 28, width: '60%', background: '#eee', borderRadius: 8, animation: 'sk-pulse 1.5s infinite 0.1s', marginBottom: 16 }} />
+                <div style={{ height: 16, width: '80%', background: '#eee', borderRadius: 6, animation: 'sk-pulse 1.5s infinite 0.2s', marginBottom: 8 }} />
+                <div style={{ height: 16, width: '65%', background: '#eee', borderRadius: 6, animation: 'sk-pulse 1.5s infinite 0.3s' }} />
+                <style>{`@keyframes sk-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
+              </div>
+            ) : activeDoc ? (
               <ReportEditor
                 key={activeDocId}
                 docId={activeDocId!}
                 initialContent={activeDoc.content ?? null}
                 getContentRef={getContentRef}
               />
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
+
+        <GenerateReportModal
+          open={showGenerate}
+          leadId={selectedLeadId || undefined}
+          defaultSuburbName={selectedLead?.suburb || ''}
+          defaultAddressName={selectedLead?.property_address || ''}
+          onClose={() => setShowGenerate(false)}
+          onGenerated={handleGenerated}
+        />
+
+        <ConfirmModal
+          open={!!pendingDelete}
+          title={`Delete "${pendingDelete?.title || 'this report'}"?`}
+          message="Are you sure you want to delete this report? This action is permanent and cannot be undone."
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={handleDelete}
+          loading={deleting}
+          confirmLabel="Confirm Delete"
+        />
+
+        {toast && (
+          <div
+            style={{
+              position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 99999, background: '#065f46', color: 'white',
+              padding: '10px 24px', borderRadius: 10, fontSize: '0.9rem',
+              fontWeight: 500, boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+            }}
+            role="status"
+          >
+            {toast}
+          </div>
+        )}
       </div>
-
-      <ConfirmModal
-        open={showDelete}
-        title={`Delete "${title || 'this report'}"?`}
-        message="Are you sure you want to delete this report? This action is permanent and cannot be undone."
-        onCancel={() => setShowDelete(false)}
-        onConfirm={handleDelete}
-        loading={deleting}
-        confirmLabel="Confirm Delete"
-      />
-
-      {toast && (
-        <div
-          style={{
-            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-            zIndex: 99999, background: '#065f46', color: 'white',
-            padding: '10px 24px', borderRadius: 10, fontSize: '0.9rem',
-            fontWeight: 500, boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-          }}
-          role="status"
-        >
-          {toast}
-        </div>
-      )}
-    </div>
+    </>
   );
 }

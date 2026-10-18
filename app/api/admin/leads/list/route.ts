@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
 
-// Lightweight lead list for the Leads Reports-mode sidebar (address + suburb only)
+// Lightweight lead list for the Leads Reports-mode sidebar + home overview
 export async function GET() {
   const session = await auth();
   if (!session?.user?.email || !isAdmin(session.user.email)) {
@@ -12,7 +12,8 @@ export async function GET() {
 
   try {
     const result = await marieDB.query(
-      `SELECT id, property_address, suburb, status, priority
+      `SELECT id, property_address, suburb, status, priority,
+              owner_name, owner_email, owner_phone, created_at
        FROM leads
        ORDER BY created_at DESC
        LIMIT 1000`

@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import TemplateSelector from './components/TemplateSelector';
-import { useTemplate } from './hooks/useTemplate';
+import GenerateReportModal from './components/GenerateReportModal';
 import { useReportStore } from './stores/report-store';
 
 interface SuburbDoc {
@@ -22,19 +21,12 @@ interface SuburbEntry {
   reports: SuburbDoc[];
 }
 
-function getCurrentQuarter(): string {
-  const now = new Date();
-  const q = Math.ceil((now.getMonth() + 1) / 3);
-  return `${now.getFullYear()}-Q${q}`;
-}
-
 export default function ReportsPage() {
   const router = useRouter();
   const [suburbs, setSuburbs] = useState<SuburbEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showTemplate, setShowTemplate] = useState(false);
-  const [selectedSuburbId, setSelectedSuburbId] = useState<string | null>(null);
-  const { generateReport } = useTemplate();
+  const [selectedSuburbName, setSelectedSuburbName] = useState<string | null>(null);
   const bumpRefreshKey = useReportStore(s => s.bumpRefreshKey);
   const idToSlug = useReportStore(s => s.idToSlug);
   const suburbRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -57,7 +49,7 @@ export default function ReportsPage() {
   }, [suburbs]);
 
   useEffect(() => {
-    fetch('/api/admin/reports/overview')
+    fetch('/api/admin/reports/overview', { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (data.success) setSuburbs(data.suburbs);
@@ -66,8 +58,8 @@ export default function ReportsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleGenerateReport = (suburbId: string) => {
-    setSelectedSuburbId(suburbId);
+  const handleGenerateReport = (suburbName: string) => {
+    setSelectedSuburbName(suburbName);
     setShowTemplate(true);
   };
 
@@ -134,7 +126,7 @@ export default function ReportsPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => handleGenerateReport(suburb.id)}
+                      onClick={() => handleGenerateReport(suburb.name)}
                       style={{
                         padding: '6px 14px', borderRadius: 6, border: '1px solid #1a73e8',
                         background: 'white', cursor: 'pointer', color: '#1a73e8',
@@ -190,19 +182,15 @@ export default function ReportsPage() {
         </div>
       )}
 
-      <TemplateSelector
+      <GenerateReportModal
         open={showTemplate}
-        onClose={() => { setShowTemplate(false); setSelectedSuburbId(null); }}
-        onGenerate={async (suburbId, reportQuarter, startQuarter, endQuarter, reportYear, reportMonth) => {
-          const id = await generateReport(suburbId, reportQuarter, startQuarter, endQuarter, reportYear, reportMonth);
-          if (id) {
-            bumpRefreshKey();
-            router.push(`/admin/reports/${id}`);
-          }
-          return id;
+        defaultSuburbName={selectedSuburbName || undefined}
+        onClose={() => { setShowTemplate(false); setSelectedSuburbName(null); }}
+        onGenerated={(id) => {
+          setShowTemplate(false);
+          bumpRefreshKey();
+          router.push(`/admin/reports/${id}`);
         }}
-        preselectedSuburbId={selectedSuburbId}
-        preselectedQuarter={getCurrentQuarter()}
       />
     </div>
   );

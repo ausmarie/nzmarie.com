@@ -1,4 +1,5 @@
 import type { MonthlyDataPoint, SuburbDetail } from './market-data-aggregator';
+import { aggregateToQuarterly, previousQuarterKey } from './quarterly-aggregator';
 
 export const MONTH_NAMES = [
   'January',
@@ -92,19 +93,12 @@ function previousLabel(year: number, month: number, anchorYear: number): string 
   return year === anchorYear ? monthName(month) : monthLabel(year, month);
 }
 
-export function computeMarketPulse(
-  monthly: MonthlyDataPoint[],
+function buildPulse(
+  anchorPoint: MonthlyDataPoint | null,
+  previousPoint: MonthlyDataPoint | null,
   suburbName: string,
-  year: number,
-  month: number
-): MarketPulseResult {
-  const previous = shiftMonth(year, month, -1);
-  const anchorYM = `${year}-${pad(month)}`;
-  const previousYM = `${previous.year}-${pad(previous.month)}`;
-
-  const anchorPoint = monthly.find((m) => m.period === anchorYM) ?? null;
-  const previousPoint = monthly.find((m) => m.period === previousYM) ?? null;
-
+  compareLabel: string
+): { hasData: boolean; usedDistrict: boolean; days: number | null; props: MarketPulseProps } {
   const localAnchor: SuburbDetail | null = anchorPoint?.suburbs[suburbName] ?? null;
   const districtAnchor: SuburbDetail | null = anchorPoint?.cityDetail ?? null;
 
@@ -145,7 +139,7 @@ export function computeMarketPulse(
       showDistrictNotes && districtAnchor?.median != null
         ? `North Shore Price: ${formatMillions(districtAnchor.median)}`
         : '',
-    compareLabel: `Compared to Previous Month (${previousLabel(previous.year, previous.month, year)})`,
+    compareLabel,
     comparePrice: formatPct(pricePct),
     compareSales: formatPct(salesPct),
     compareDays: formatDaysDiff(daysDiff),
@@ -154,13 +148,70 @@ export function computeMarketPulse(
     statDaysLabel: 'Days to Sell',
   };
 
+  return { hasData, usedDistrict, days, props };
+}
+
+export function computeMarketPulse(
+  monthly: MonthlyDataPoint[],
+  suburbName: string,
+  year: number,
+  month: number
+): MarketPulseResult {
+  const previous = shiftMonth(year, month, -1);
+  const anchorYM = `${year}-${pad(month)}`;
+  const previousYM = `${previous.year}-${pad(previous.month)}`;
+
+  const anchorPoint = monthly.find((m) => m.period === anchorYM) ?? null;
+  const previousPoint = monthly.find((m) => m.period === previousYM) ?? null;
+
+  const core = buildPulse(
+    anchorPoint,
+    previousPoint,
+    suburbName,
+    `Compared to Previous Month (${previousLabel(previous.year, previous.month, year)})`
+  );
+
+  return { ...core, anchor: { year, month }, previous };
+}
+
+export function quarterLabel(quarter: string): string {
+  const m = /^(\d{4})-Q([1-4])$/.exec(quarter || '');
+  return m ? `Q${m[2]} ${m[1]}` : '';
+}
+
+function quarterEndMonths(quarter: string): { year: number; month: number } | null {
+  const m = /^(\d{4})-Q([1-4])$/.exec(quarter || '');
+  if (!m) return null;
+  return { year: Number(m[1]), month: Number(m[2]) * 3 };
+}
+
+function quarterCompareLabel(anchorQuarter: string, prevQuarter: string | null): string {
+  if (!prevQuarter) return 'Compared to Previous Quarter';
+  const prevLabel = quarterLabel(prevQuarter);
+  if (!prevLabel) return 'Compared to Previous Quarter';
+  const sameYear = prevQuarter.split('-Q')[0] === anchorQuarter.split('-Q')[0];
+  return `Compared to Previous Quarter (${sameYear ? prevLabel.split(' ')[0] : prevLabel})`;
+}
+
+export function computeQuarterlyMarketPulse(
+  monthly: MonthlyDataPoint[],
+  suburbName: string,
+  quarter: string
+): MarketPulseResult {
+  const rows = aggregateToQuarterly(monthly);
+  const anchorPoint = rows.find((r) => r.period === quarter) ?? null;
+  const prevKey = previousQuarterKey(quarter);
+  const previousPoint = prevKey ? rows.find((r) => r.period === prevKey) ?? null : null;
+
+  const anchorEnd = quarterEndMonths(quarter) ?? { year: 0, month: 1 };
+  const previousEnd = (prevKey ? quarterEndMonths(prevKey) : null) ?? { year: 0, month: 1 };
+
+  const core = buildPulse(anchorPoint, previousPoint, suburbName, quarterCompareLabel(quarter, prevKey));
+
   return {
-    hasData,
-    usedDistrict,
-    anchor: { year, month },
-    previous,
-    days,
-    props,
+    ...core,
+    anchor: { year: anchorEnd.year, month: anchorEnd.month },
+    previous: { year: previousEnd.year, month: previousEnd.month },
   };
 }
 

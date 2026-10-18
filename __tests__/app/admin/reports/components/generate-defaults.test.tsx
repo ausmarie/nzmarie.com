@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import TemplateSelector from '@/app/admin/reports/components/TemplateSelector';
 import ReportToolbar from '@/app/admin/reports/components/ReportToolbar';
 import { useReportStore } from '@/app/admin/reports/stores/report-store';
 
@@ -11,8 +10,13 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_MONTH = new Date().getMonth() + 1;
+const CURRENT_QUARTER = `${CURRENT_YEAR}-Q${Math.ceil(CURRENT_MONTH / 3)}`;
+const CURRENT_MM = String(CURRENT_MONTH).padStart(2, '0');
+
 function mockFetch() {
-  global.fetch = vi.fn().mockImplementation((url: string) => {
+  global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     const urlStr = String(url);
     if (urlStr.includes('/api/admin/reports/suburbs')) {
       return Promise.resolve({
@@ -22,6 +26,9 @@ function mockFetch() {
           suburbs: [{ id: 'sub-1', name: 'Takapuna' }],
         }),
       }) as any;
+    }
+    if (urlStr.includes('/api/admin/reports/templates/generate') && (init?.method || 'GET').toUpperCase() === 'POST') {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, id: 'doc-1' }) }) as any;
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) }) as any;
   });
@@ -46,7 +53,11 @@ function renderToolbar() {
   );
 }
 
-describe('Generate Report — Data Start Quarter defaults to 2025-Q1', () => {
+function openModal() {
+  fireEvent.click(screen.getByText('+ Generate Report'));
+}
+
+describe('ReportToolbar Generate Report modal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useReportStore.setState({ slugMap: {}, idToSlug: {}, refreshKey: 0 });
@@ -57,65 +68,23 @@ describe('Generate Report — Data Start Quarter defaults to 2025-Q1', () => {
     cleanup();
   });
 
-  it('TemplateSelector opens with 2025-Q1 selected', async () => {
-    render(
-      <TemplateSelector
-        open
-        onClose={vi.fn()}
-        onGenerate={vi.fn()}
-        preselectedSuburbId={null}
-      />
-    );
-    const startSelect = (await screen.findByLabelText(/Data Start Quarter/i)) as HTMLSelectElement;
-    expect(startSelect.value).toBe('2025-Q1');
-  });
-
-  it('TemplateSelector resets to 2025-Q1 when reopened', async () => {
-    const onGenerate = vi.fn();
-    const { rerender } = render(
-      <TemplateSelector
-        open={false}
-        onClose={vi.fn()}
-        onGenerate={onGenerate}
-        preselectedSuburbId={null}
-      />
-    );
-    rerender(
-      <TemplateSelector
-        open
-        onClose={vi.fn()}
-        onGenerate={onGenerate}
-        preselectedSuburbId={null}
-      />
-    );
-    const startSelect = (await screen.findByLabelText(/Data Start Quarter/i)) as HTMLSelectElement;
-    expect(startSelect.value).toBe('2025-Q1');
-  });
-
-  it('TemplateSelector ignores preselectedQuarter for Data Start Quarter', async () => {
-    render(
-      <TemplateSelector
-        open
-        onClose={vi.fn()}
-        onGenerate={vi.fn()}
-        preselectedSuburbId={null}
-        preselectedQuarter="2026-Q3"
-      />
-    );
-    const startSelect = (await screen.findByLabelText(/Data Start Quarter/i)) as HTMLSelectElement;
-    expect(startSelect.value).toBe('2025-Q1');
-  });
-
-  it('ReportToolbar Generate Report modal opens with 2025-Q1 selected', async () => {
+  it('opens with the current Report Quarter and 2025-Q1 Data Start Quarter', async () => {
     renderToolbar();
-    fireEvent.click(screen.getByText('+ Generate Report'));
+    openModal();
+
+    const reportQuarter = (await screen.findByLabelText(/Report Quarter/i)) as HTMLSelectElement;
+    expect(reportQuarter.value).toBe(CURRENT_QUARTER);
+
     const startSelect = (await screen.findByLabelText(/Data Start Quarter/i)) as HTMLSelectElement;
     expect(startSelect.value).toBe('2025-Q1');
+
+    const endSelect = screen.getByLabelText(/Data End Quarter/i) as HTMLSelectElement;
+    expect(endSelect.value).toBe(CURRENT_QUARTER);
   });
 
-  it('ReportToolbar resets to 2025-Q1 after user changed it and reopened', async () => {
+  it('resets to the defaults after a change and reopen', async () => {
     renderToolbar();
-    fireEvent.click(screen.getByText('+ Generate Report'));
+    openModal();
 
     const startSelect = (await screen.findByLabelText(/Data Start Quarter/i)) as HTMLSelectElement;
     fireEvent.change(startSelect, { target: { value: '2024-Q1' } });
@@ -123,96 +92,74 @@ describe('Generate Report — Data Start Quarter defaults to 2025-Q1', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
 
-    fireEvent.click(screen.getByText('+ Generate Report'));
+    openModal();
     const reopened = (await screen.findByLabelText(/Data Start Quarter/i)) as HTMLSelectElement;
     await waitFor(() => expect(reopened.value).toBe('2025-Q1'));
   });
-});
 
-describe('Generate Report — Report Quarter derived from Report Month', () => {
-  const CURRENT_YEAR = new Date().getFullYear();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    useReportStore.setState({ slugMap: {}, idToSlug: {}, refreshKey: 0 });
-    mockFetch();
-  });
-
-  afterEach(() => {
-    cleanup();
-  });
-
-  it.each([
-    [2, `${CURRENT_YEAR}-Q1`],
-    [3, `${CURRENT_YEAR}-Q1`],
-    [4, `${CURRENT_YEAR}-Q2`],
-    [6, `${CURRENT_YEAR}-Q2`],
-    [7, `${CURRENT_YEAR}-Q3`],
-    [9, `${CURRENT_YEAR}-Q3`],
-    [10, `${CURRENT_YEAR}-Q4`],
-    [12, `${CURRENT_YEAR}-Q4`],
-  ])('ReportToolbar: month %i maps to quarter %s', async (month, expectedQuarter) => {
+  it('switches to month mode with 2025-01 Data Start Month and the current Report Month', async () => {
     renderToolbar();
-    fireEvent.click(screen.getByText('+ Generate Report'));
+    openModal();
 
-    const monthSelect = (await screen.findByLabelText(/Report Month/i)) as HTMLSelectElement;
-    fireEvent.change(monthSelect, { target: { value: String(month) } });
+    fireEvent.click(await screen.findByTestId('gen-period-month'));
 
-    const quarterSelect = (await screen.findByLabelText(/Report Quarter/i)) as HTMLSelectElement;
-    expect(quarterSelect.value).toBe(expectedQuarter);
+    expect((screen.getByLabelText(/Data Start Month/i) as HTMLSelectElement).value).toBe('2025-01');
+    expect((screen.getByTestId('gen-month') as HTMLSelectElement).value).toBe(String(CURRENT_MONTH));
+    expect((screen.getByTestId('gen-end-month') as HTMLSelectElement).value).toBe(`${CURRENT_YEAR}-${CURRENT_MM}`);
+    expect(screen.queryByLabelText(/Report Quarter/i)).toBeNull();
   });
 
-  it('ReportToolbar: changing year updates quarter to that year', async () => {
+  it('moves Data End Month with Report Year and Report Month', async () => {
     renderToolbar();
-    fireEvent.click(screen.getByText('+ Generate Report'));
+    openModal();
+    fireEvent.click(await screen.findByTestId('gen-period-month'));
 
-    const monthSelect = (await screen.findByLabelText(/Report Month/i)) as HTMLSelectElement;
-    fireEvent.change(monthSelect, { target: { value: '5' } });
+    fireEvent.change(screen.getByTestId('gen-year'), { target: { value: '2025' } });
+    expect((screen.getByTestId('gen-end-month') as HTMLSelectElement).value).toBe(`2025-${CURRENT_MM}`);
 
-    const yearSelect = (await screen.findByLabelText(/Report Year/i)) as HTMLSelectElement;
-    fireEvent.change(yearSelect, { target: { value: '2025' } });
-
-    const quarterSelect = (await screen.findByLabelText(/Report Quarter/i)) as HTMLSelectElement;
-    expect(quarterSelect.value).toBe('2025-Q2');
+    fireEvent.change(screen.getByTestId('gen-month'), { target: { value: '5' } });
+    expect((screen.getByTestId('gen-end-month') as HTMLSelectElement).value).toBe('2025-05');
   });
 
-  it.each([
-    [1, `${CURRENT_YEAR}-Q1`],
-    [5, `${CURRENT_YEAR}-Q2`],
-    [8, `${CURRENT_YEAR}-Q3`],
-    [11, `${CURRENT_YEAR}-Q4`],
-  ])('TemplateSelector: month %i maps to quarter %s', async (month, expectedQuarter) => {
-    render(
-      <TemplateSelector
-        open
-        onClose={vi.fn()}
-        onGenerate={vi.fn()}
-        preselectedSuburbId={null}
-      />
-    );
-    const monthSelect = (await screen.findByLabelText(/Report Month/i)) as HTMLSelectElement;
-    fireEvent.change(monthSelect, { target: { value: String(month) } });
+  it('derives the report name from the report suburb', async () => {
+    renderToolbar();
+    openModal();
 
-    const quarterSelect = (await screen.findByLabelText(/Report Quarter/i)) as HTMLSelectElement;
-    expect(quarterSelect.value).toBe(expectedQuarter);
+    await waitFor(() => {
+      expect(screen.getByTestId('gen-name-input')).toHaveProperty(
+        'value',
+        `Q${Math.ceil(CURRENT_MONTH / 3)} ${CURRENT_YEAR} Takapuna`
+      );
+    });
   });
 
-  it('TemplateSelector: changing year updates quarter to that year', async () => {
-    render(
-      <TemplateSelector
-        open
-        onClose={vi.fn()}
-        onGenerate={vi.fn()}
-        preselectedSuburbId={null}
-      />
-    );
-    const monthSelect = (await screen.findByLabelText(/Report Month/i)) as HTMLSelectElement;
-    fireEvent.change(monthSelect, { target: { value: '8' } });
+  it('generates and navigates to the generated document id', async () => {
+    const existingSlug = `takapuna-q${Math.ceil(CURRENT_MONTH / 3)}-${CURRENT_YEAR}`;
+    useReportStore.setState({
+      slugMap: { [existingSlug]: 'old-doc' },
+      idToSlug: { 'old-doc': existingSlug },
+    });
+    renderToolbar();
+    openModal();
 
-    const yearSelect = (await screen.findByLabelText(/Report Year/i)) as HTMLSelectElement;
-    fireEvent.change(yearSelect, { target: { value: '2027' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('gen-generate-btn').hasAttribute('disabled')).toBe(false);
+    });
+    fireEvent.click(screen.getByTestId('gen-generate-btn'));
 
-    const quarterSelect = (await screen.findByLabelText(/Report Quarter/i)) as HTMLSelectElement;
-    expect(quarterSelect.value).toBe('2027-Q3');
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/admin/reports/doc-1');
+    });
+
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const generateCall = calls.find(([url, init]) =>
+      String(url).includes('/api/admin/reports/templates/generate') &&
+      ((init as RequestInit | undefined)?.method || '').toUpperCase() === 'POST'
+    )!;
+    const body = JSON.parse(String((generateCall[1] as RequestInit).body));
+    expect(body.suburb_id).toBe('sub-1');
+    expect(body.period_type).toBe('quarter');
+    expect(body.report_name).toBe(`Q${Math.ceil(CURRENT_MONTH / 3)} ${CURRENT_YEAR} Takapuna`);
+    expect(body).not.toHaveProperty('lead_id');
   });
 });

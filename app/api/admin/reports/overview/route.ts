@@ -35,7 +35,7 @@ export async function GET() {
         rd.status,
         rd.created_at
       FROM report_suburbs rs
-      LEFT JOIN report_documents rd ON rd.suburb_id = rs.id AND rd.status != 'archived'
+      LEFT JOIN report_documents rd ON rd.suburb_id = rs.id AND rd.status != 'archived' AND rd.lead_id IS NULL
       WHERE rs.is_active = TRUE
       ORDER BY rd.sort_order ASC, rd.created_at DESC`
     );

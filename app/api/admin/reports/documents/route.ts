@@ -44,6 +44,8 @@ export async function GET(request: Request) {
       paramIdx++;
       sql += ` AND rd.lead_id = $${paramIdx}`;
       params.push(leadId);
+    } else {
+      sql += ` AND rd.lead_id IS NULL`;
     }
 
     sql += ' ORDER BY rd.sort_order ASC, rd.created_at DESC';

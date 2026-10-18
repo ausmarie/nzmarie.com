@@ -6,7 +6,7 @@ function quarterKeyParts(key: string): { year: number; quarter: number } | null 
   return { year: Number(m[1]), quarter: Number(m[2]) };
 }
 
-function previousQuarterKey(key: string): string | null {
+export function previousQuarterKey(key: string): string | null {
   const p = quarterKeyParts(key);
   if (!p) return null;
   return p.quarter === 1 ? `${p.year - 1}-Q4` : `${p.year}-Q${p.quarter - 1}`;
