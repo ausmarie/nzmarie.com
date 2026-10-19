@@ -46,6 +46,22 @@ interface SuburbDownloadRow {
   download_count?: string | number;
 }
 
+interface TodaySentSuburbRow {
+  suburb?: string;
+  sent_count?: string | number;
+}
+
+interface RecentAppraisalRow {
+  id?: string;
+  client_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  suburb?: string | null;
+  property_address?: string | null;
+  contact_status?: string | null;
+  created_at?: string | Date | null;
+}
+
 interface TrendRow {
   suburb?: string;
   campaign_key?: string;
@@ -589,6 +605,14 @@ export async function GET(request: Request) {
             (SELECT json_agg(row_to_json(s)) FROM scans_by_campaign_cte s) as scan_campaigns,
             (SELECT json_agg(row_to_json(s)) FROM downloads_by_suburb_cte s) as downloads_by_suburb,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(day_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, day_bucket ORDER BY day_bucket) s) as sent_daily,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
+              SELECT suburb, COUNT(DISTINCT outreach_property_id)::int AS sent_count
+              FROM sent_logs_buckets
+              WHERE day_bucket = date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'Pacific/Auckland')
+                ${suburbFilter ? sql`AND suburb = ${suburb}` : sql``}
+              GROUP BY suburb
+              ORDER BY sent_count DESC, suburb ASC
+            ) s) as today_suburb_sent,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(week_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, week_bucket ORDER BY week_bucket) s) as sent_weekly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(month_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, month_bucket ORDER BY month_bucket) s) as sent_monthly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(quarter_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, quarter_bucket ORDER BY quarter_bucket) s) as sent_quarterly,
@@ -602,7 +626,13 @@ export async function GET(request: Request) {
                      d.total_count, d.first_sent_at, d.last_sent_at
               FROM dispatch_by_suburb_cte d
             ) s) as dispatch_by_suburb,
-            (SELECT json_agg(row_to_json(r)) FROM recent_downloads_cte r) as recent_downloads
+            (SELECT json_agg(row_to_json(r)) FROM recent_downloads_cte r) as recent_downloads,
+            (SELECT COALESCE(json_agg(row_to_json(a)), '[]') FROM (
+              SELECT id, client_name, email, phone, suburb, property_address, contact_status, created_at
+              FROM appraisal_leads
+              ORDER BY created_at DESC
+              LIMIT 5
+            ) a) as recent_appraisals
         `);
 
         const row = dbResult.rows[0] as Record<string, unknown>;
@@ -623,6 +653,33 @@ export async function GET(request: Request) {
           suburb: item?.suburb || 'Unknown',
           sent_count: Number(item?.sent_count) || 0,
         }));
+
+        const todaySentSuburbs: SentSummaryItem[] = (Array.isArray(row.today_suburb_sent) ? row.today_suburb_sent as TodaySentSuburbRow[] : [])
+          .filter((item) => !!item?.suburb)
+          .map((item) => ({
+            suburb: item.suburb as string,
+            sent_count: Number(item.sent_count) || 0,
+          }))
+          .filter((item) => item.sent_count > 0)
+          .sort((a, b) => b.sent_count - a.sent_count || a.suburb.localeCompare(b.suburb));
+
+        const recentAppraisals = (Array.isArray(row.recent_appraisals) ? row.recent_appraisals as RecentAppraisalRow[] : [])
+          .filter((item) => !!item?.id)
+          .map((item) => ({
+            id: item.id as string,
+            client_name: item.client_name || 'Unknown',
+            email: item.email || '',
+            phone: item.phone || '',
+            suburb: item.suburb || '',
+            property_address: item.property_address || '',
+            contact_status: item.contact_status || '',
+            created_at: item.created_at ? new Date(item.created_at).toISOString() : null,
+          }))
+          .sort((a, b) => {
+            const ta = a.created_at ? new Date(a.created_at).getTime() : Number.NEGATIVE_INFINITY;
+            const tb = b.created_at ? new Date(b.created_at).getTime() : Number.NEGATIVE_INFINITY;
+            return tb - ta;
+          });
 
         const reportsResult = await db.execute(sql`
           SELECT suburb, quarter, year, file_url
@@ -789,6 +846,7 @@ export async function GET(request: Request) {
           monthBookings: Number(row.month_bookings) || 0,
           qrCodesTotal: Number(row.qr_codes_total) || 0,
           pdfReportsTotal: Number(row.pdf_reports_total) || 0,
+          recentAppraisals,
           outreachBySuburb,
           sentSummary: {
             total_sent: quarterlySentSummaries.length > 0
@@ -796,6 +854,10 @@ export async function GET(request: Request) {
               : Number(row.sent_summary_total_sent) || sentSummary.reduce((sum: number, item) => sum + Number(item.sent_count || 0), 0),
             suburb_count: Number(row.sent_summary_suburb_count) || sentSummary.length,
             suburbs: sentSummary,
+            today: {
+              total_sent: todaySentSuburbs.reduce((sum, item) => sum + item.sent_count, 0),
+              suburbs: todaySentSuburbs,
+            },
             quarterly: quarterlySentSummaries,
           },
           scanStats: {

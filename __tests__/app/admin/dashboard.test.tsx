@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, within } from '@testing-library/react';
 import React from 'react';
 
 let useSessionMock: any;
@@ -476,6 +476,239 @@ describe('Dashboard Stats API', () => {
     expect(screen.getByText('209 sent')).toBeTruthy();
     expect(screen.getByText('Oteha: 5')).toBeTruthy();
     expect(screen.getByText('Oteha: 209')).toBeTruthy();
+  });
+
+  it('renders today sent counts with every suburb under Total Sent', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          stats: {
+            newLeads: 0,
+            highPriorityLeads: 0,
+            pendingOutreach: 0,
+            todayFollowups: 0,
+            overdueFollowups: 0,
+            todayDownloads: 0,
+            sentSummary: {
+              total_sent: 214,
+              suburb_count: 2,
+              suburbs: [
+                { suburb: 'Oteha', sent_count: 209 },
+                { suburb: 'Torbay', sent_count: 5 },
+              ],
+              today: {
+                total_sent: 19,
+                suburbs: [
+                  { suburb: 'Albany', sent_count: 12 },
+                  { suburb: 'Torbay', sent_count: 7 },
+                ],
+              },
+              quarterly: [],
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [],
+          pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+        }),
+      });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Sent')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    const totalSentCard = screen.getByText('Total Sent').closest('div.bg-white') as HTMLElement;
+    expect(within(totalSentCard).getByText('Today')).toBeTruthy();
+    expect(within(totalSentCard).getByText('19 sent')).toBeTruthy();
+    expect(within(totalSentCard).getByText('Albany: 12')).toBeTruthy();
+    expect(within(totalSentCard).getByText('Torbay: 7')).toBeTruthy();
+  });
+
+  it('shows an empty today state when nothing was sent today', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          stats: {
+            newLeads: 0,
+            highPriorityLeads: 0,
+            pendingOutreach: 0,
+            todayFollowups: 0,
+            overdueFollowups: 0,
+            todayDownloads: 0,
+            sentSummary: {
+              total_sent: 214,
+              suburb_count: 1,
+              suburbs: [{ suburb: 'Oteha', sent_count: 209 }],
+              today: { total_sent: 0, suburbs: [] },
+              quarterly: [],
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [],
+          pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+        }),
+      });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Sent')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    const totalSentCard = screen.getByText('Total Sent').closest('div.bg-white') as HTMLElement;
+    expect(within(totalSentCard).getByText('Today')).toBeTruthy();
+    expect(within(totalSentCard).getByText('0 sent')).toBeTruthy();
+    expect(within(totalSentCard).getByText('No sends today')).toBeTruthy();
+  });
+
+  it('renders the latest appraisals between Total Sent and Total Scans', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          stats: {
+            newLeads: 0,
+            highPriorityLeads: 0,
+            pendingOutreach: 0,
+            todayFollowups: 0,
+            overdueFollowups: 0,
+            todayDownloads: 0,
+            totalBookings: 9,
+            recentAppraisals: [
+              {
+                id: 'appraisal-1',
+                client_name: 'Vi',
+                email: 'vipleiku@gmail.com',
+                phone: '+64274039537',
+                suburb: 'Sunnynook',
+                property_address: '249 Sunset Road, Sunnynook',
+                contact_status: 'not_contacted',
+                created_at: '2026-10-06T05:30:08.784Z',
+              },
+              {
+                id: 'appraisal-2',
+                client_name: 'Louis Augustine',
+                email: 'nzlouis.com@gmail.com',
+                phone: '+642102588639',
+                suburb: 'Northcross',
+                property_address: '5 Cottam Grove, Northcross',
+                contact_status: 'not_contacted',
+                created_at: '2026-07-02T07:35:16.083Z',
+              },
+            ],
+            sentSummary: {
+              total_sent: 214,
+              suburb_count: 1,
+              suburbs: [{ suburb: 'Oteha', sent_count: 209 }],
+              today: { total_sent: 0, suburbs: [] },
+              quarterly: [],
+            },
+            scanStats: { total_scans: 42, total_unique: 18, campaigns: [] },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [],
+          pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+        }),
+      });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    const { container } = render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Appraisals')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    const cards = Array.from(container.querySelectorAll('div.min-h-\\[192px\\]'));
+    const labels = cards.map((card) =>
+      ['Total Sent', 'Total Appraisals', 'Total Scans', 'Total Downloads']
+        .find((label) => card.textContent?.includes(label)) ?? ''
+    );
+    expect(labels.slice(0, 3)).toEqual(['Total Sent', 'Total Appraisals', 'Total Scans']);
+
+    const appraisalCard = cards.find((card) => card.textContent?.includes('Total Appraisals')) as HTMLElement;
+    expect(within(appraisalCard).getByText('9')).toBeTruthy();
+    expect(within(appraisalCard).getByText('Vi')).toBeTruthy();
+    expect(within(appraisalCard).getByText('vipleiku@gmail.com')).toBeTruthy();
+    expect(within(appraisalCard).getByText('Sunnynook')).toBeTruthy();
+    expect(within(appraisalCard).getByText('Louis Augustine')).toBeTruthy();
+    expect(within(appraisalCard).getByText('nzlouis.com@gmail.com')).toBeTruthy();
+    expect(within(appraisalCard).getAllByText(/Oct/).length).toBeGreaterThan(0);
+  });
+
+  it('shows an empty appraisals state when there are none', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          stats: {
+            newLeads: 0,
+            highPriorityLeads: 0,
+            pendingOutreach: 0,
+            todayFollowups: 0,
+            overdueFollowups: 0,
+            todayDownloads: 0,
+            totalBookings: 0,
+            recentAppraisals: [],
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [],
+          pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+        }),
+      });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Appraisals')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    expect(screen.getByText('No appraisals yet')).toBeTruthy();
   });
 
   it('renders Scan Trends chart section', async () => {

@@ -33,7 +33,13 @@ interface SentSummary {
   total_sent: number;
   suburb_count: number;
   suburbs: SentSummaryItem[];
+  today: TodaySentSummary;
   quarterly: QuarterlySentSummary[];
+}
+
+interface TodaySentSummary {
+  total_sent: number;
+  suburbs: SentSummaryItem[];
 }
 
 interface ScanCampaign {
@@ -75,6 +81,7 @@ interface DashboardStats {
   scanStats: ScanStats;
   downloadsBySuburb: SuburbDownload[];
   recentDownloads: RecentDownload[];
+  recentAppraisals: RecentAppraisal[];
   dispatchTrend: DispatchTrend;
 }
 
@@ -94,6 +101,17 @@ interface RecentDownload {
   downloaded_at: string;
   source: string;
   tracking_code: string | null;
+}
+
+interface RecentAppraisal {
+  id: string;
+  client_name: string;
+  email: string;
+  phone: string;
+  suburb: string;
+  property_address: string;
+  contact_status: string;
+  created_at: string | null;
 }
 
 interface FollowUp {
@@ -273,6 +291,30 @@ export default function AdminDashboardPage() {
             <div className="text-sm text-slate-600">Total Sent</div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 space-y-2.5">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-700">Today</span>
+                <span className="text-xs text-slate-500">
+                  {stats?.sentSummary?.today?.total_sent ?? 0} sent
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {stats?.sentSummary?.today?.suburbs && stats.sentSummary.today.suburbs.length > 0 ? (
+                  stats.sentSummary.today.suburbs.map((item) => (
+                    <span
+                      key={item.suburb}
+                      className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-medium border border-emerald-100"
+                    >
+                      {item.suburb}: {item.sent_count}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
+                    No sends today
+                  </span>
+                )}
+              </div>
+            </div>
             {stats?.sentSummary?.quarterly && stats.sentSummary.quarterly.length > 0 ? (
               stats.sentSummary.quarterly.map((q) => (
                 <div key={q.quarter_key} className="flex flex-col gap-1">
@@ -309,6 +351,50 @@ export default function AdminDashboardPage() {
                   </span>
                 )}
               </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-2xl">📋</span>
+              <span className="text-xs font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                Appraisals
+              </span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900 mb-1">
+              {stats?.totalBookings ?? 0}
+            </div>
+            <div className="text-sm text-slate-600">Total Appraisals</div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+            {stats?.recentAppraisals && stats.recentAppraisals.length > 0 ? (
+              stats.recentAppraisals.slice(0, 3).map((item) => (
+                <div key={item.id} className="flex flex-col gap-0.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-700 truncate">{item.client_name}</span>
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap">
+                      {item.created_at
+                        ? new Date(item.created_at).toLocaleString("en-NZ", {
+                            day: "2-digit",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-500 truncate">{item.email}</span>
+                  {item.suburb && (
+                    <span className="text-[11px] text-slate-400 truncate">{item.suburb}</span>
+                  )}
+                </div>
+              ))
+            ) : (
+              <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
+                No appraisals yet
+              </span>
             )}
           </div>
         </div>

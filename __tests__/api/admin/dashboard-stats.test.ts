@@ -73,6 +73,7 @@ describe('GET /api/admin/dashboard/stats', () => {
       total_sent: 10,
       suburb_count: 1,
       suburbs: [{ suburb: 'Albany', sent_count: 10 }],
+      today: { total_sent: 0, suburbs: [] },
       quarterly: [],
     });
     expect(body.stats.outreachBySuburb).toHaveLength(1);
@@ -182,8 +183,179 @@ describe('GET /api/admin/dashboard/stats', () => {
         { suburb: 'Albany', sent_count: 5 },
         { suburb: 'Torbay', sent_count: 3 },
       ],
+      today: { total_sent: 0, suburbs: [] },
       quarterly: [],
     });
+  });
+
+  it('returns today sent counts per suburb sorted by count', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_summary_suburbs: [{ suburb: 'Albany', sent_count: 10 }],
+      sent_summary_suburb_count: '1',
+      sent_summary_total_sent: '10',
+      today_suburb_sent: [
+        { suburb: 'Torbay', sent_count: '7' },
+        { suburb: 'Albany', sent_count: '12' },
+        { suburb: 'Oteha', sent_count: 0 },
+      ],
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+    };
+
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      capturedSql += JSON.stringify(sql?.queryChunks ?? []);
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(capturedSql).toContain('today_suburb_sent');
+    expect(capturedSql).toContain('CURRENT_TIMESTAMP AT TIME ZONE');
+    expect(body.stats.sentSummary.today).toEqual({
+      total_sent: 19,
+      suburbs: [
+        { suburb: 'Albany', sent_count: 12 },
+        { suburb: 'Torbay', sent_count: 7 },
+      ],
+    });
+  });
+
+  it('filters today sent counts by suburb', async () => {    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      today_suburb_sent: [{ suburb: 'Oteha', sent_count: '4' }],
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+    };
+
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      capturedSql += JSON.stringify(sql?.queryChunks ?? []);
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest('Oteha'));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(capturedSql).toContain('AND suburb = ');
+    expect(body.stats.sentSummary.today).toEqual({
+      total_sent: 4,
+      suburbs: [{ suburb: 'Oteha', sent_count: 4 }],
+    });
+  });
+
+  it('returns the latest appraisals with contact details and time', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '9', month_bookings: '2', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      recent_appraisals: [
+        {
+          id: 'old-1',
+          client_name: 'Earlier Lead',
+          email: 'earlier@example.com',
+          phone: '021 000 0001',
+          suburb: 'Albany',
+          property_address: '1 Old Street, Albany',
+          contact_status: 'contacted',
+          created_at: '2026-09-01T02:00:00.000Z',
+        },
+        {
+          id: 'new-1',
+          client_name: 'Latest Lead',
+          email: 'latest@example.com',
+          phone: '021 000 0002',
+          suburb: 'Sunnynook',
+          property_address: '249 Sunset Road, Sunnynook',
+          contact_status: 'not_contacted',
+          created_at: '2026-10-06T05:30:08.784Z',
+        },
+        { id: 'bad-1', client_name: 'Missing Created At', email: 'none@example.com' },
+      ],
+      today_suburb_sent: [],
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+    };
+
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      capturedSql += JSON.stringify(sql?.queryChunks ?? []);
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(capturedSql).toContain('recent_appraisals');
+    expect(capturedSql).toContain('FROM appraisal_leads');
+    expect(body.stats.totalBookings).toBe(9);
+    expect(body.stats.recentAppraisals).toEqual([
+      {
+        id: 'new-1',
+        client_name: 'Latest Lead',
+        email: 'latest@example.com',
+        phone: '021 000 0002',
+        suburb: 'Sunnynook',
+        property_address: '249 Sunset Road, Sunnynook',
+        contact_status: 'not_contacted',
+        created_at: '2026-10-06T05:30:08.784Z',
+      },
+      {
+        id: 'old-1',
+        client_name: 'Earlier Lead',
+        email: 'earlier@example.com',
+        phone: '021 000 0001',
+        suburb: 'Albany',
+        property_address: '1 Old Street, Albany',
+        contact_status: 'contacted',
+        created_at: '2026-09-01T02:00:00.000Z',
+      },
+      {
+        id: 'bad-1',
+        client_name: 'Missing Created At',
+        email: 'none@example.com',
+        phone: '',
+        suburb: '',
+        property_address: '',
+        contact_status: '',
+        created_at: null,
+      },
+    ]);
+  });
+
+  it('returns an empty recent appraisals list when none exist', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+    };
+
+    vi.mocked(db.execute).mockResolvedValue({ rows: [mockRow] } as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stats.recentAppraisals).toEqual([]);
   });
 
   it('returns scan stats and normalizes campaign names', async () => {
