@@ -272,7 +272,7 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
             border-bottom: 1px solid rgba(226, 232, 240, 0.7) !important;
             box-sizing: border-box !important;
             font-size: 0.75rem !important;
-            color: #94a3b8 !important;
+            color: #475569 !important;
             font-weight: 500 !important;
           }
           .print-page-footer {
@@ -291,7 +291,7 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
             box-sizing: border-box !important;
             overflow: hidden !important;
             font-size: 11px !important;
-            color: #94a3b8 !important;
+            color: #000000 !important;
           }
           .print-page-footer-text {
             flex: 1 1 auto !important;
@@ -300,15 +300,15 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             font-size: 11px !important;
-            color: #94a3b8 !important;
-            font-weight: 300 !important;
+            color: #000000 !important;
+            font-weight: 400 !important;
           }
           .print-page-footer-page {
             flex-shrink: 0 !important;
             white-space: nowrap !important;
             font-size: 11px !important;
-            color: #94a3b8 !important;
-            font-weight: 300 !important;
+            color: #000000 !important;
+            font-weight: 400 !important;
             letter-spacing: 0.025em !important;
           }
           .page-count::before {

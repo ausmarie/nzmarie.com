@@ -264,7 +264,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
       {!isEditMode ? (
         <div
           id="am-root"
-          className="max-w-[210mm] mx-auto bg-white min-h-[297mm] shadow-lg border border-slate-200/50 rounded-sm relative flex flex-col justify-between text-slate-800 pt-[70px] px-[40px] pb-[40px] print:shadow-none print:border-none print:p-0 print:max-w-none print:min-h-0 print:bg-transparent"
+          className="max-w-[210mm] mx-auto bg-white min-h-[297mm] shadow-lg border border-slate-200/50 rounded-sm relative flex flex-col justify-between text-slate-800 pt-[70px] px-[40px] pb-[10px] print:shadow-none print:border-none print:p-0 print:max-w-none print:min-h-0 print:bg-transparent"
         >
           <style>{`
             #am-root {
@@ -308,7 +308,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
               #am-root {
                 width: 210mm !important;
                 height: 297mm !important;
-                padding: 70px 40px 40px 40px !important;
+                padding: 70px 40px 10px 40px !important;
                 margin: 0 !important;
                 border: none !important;
                 box-shadow: none !important;
@@ -333,6 +333,7 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
               /* Print: footnotes readable */
               #am-footer p {
                 font-size: 10px !important;
+                color: #000000 !important;
               }
             }
           `}</style>
@@ -462,17 +463,17 @@ export default function AboutMarieEditor({ docId, initialContent, onContentChang
             </div>
           </div>
 
-          <div id="am-footer" className="mt-auto pt-6 border-t border-slate-200 text-left space-y-2">
-            <p className="text-[10px] text-slate-500 leading-relaxed">
+          <div id="am-footer" className="mt-auto pt-3 border-t border-slate-200 text-left space-y-2">
+            <p className="text-[10px] text-black leading-relaxed">
               {disclaimer1}
             </p>
             {disclaimer2 && (
-              <p className="text-[10px] text-slate-500 leading-relaxed">
+              <p className="text-[10px] text-black leading-relaxed">
                 {disclaimer2}
               </p>
             )}
             {disclaimer3 && (
-              <p className="text-[10px] text-slate-500 leading-relaxed">
+              <p className="text-[10px] text-black leading-relaxed">
                 {disclaimer3}
               </p>
             )}

@@ -627,13 +627,13 @@ describe('AboutMarieEditor', () => {
       expect(footer!.className).not.toContain('w-10');
     });
 
-    it('footer disclaimer text uses readable slate-500', () => {
+    it('footer disclaimer text uses solid black', () => {
       render(<AboutMarieEditor {...defaultProps} />);
       const footer = document.getElementById('am-footer');
       const paragraphs = footer!.querySelectorAll('p');
       expect(paragraphs.length).toBeGreaterThan(0);
       paragraphs.forEach((p) => {
-        expect(p.className).toContain('text-slate-500');
+        expect(p.className).toContain('text-black');
       });
     });
 
