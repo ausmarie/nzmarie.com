@@ -29,6 +29,18 @@ export function periodLabel(year: number, code: string): string {
   return `${year}-${normalized}`;
 }
 
+export function reportDocumentPeriodKey(
+  periodType: ReportPeriodType,
+  year: number,
+  month: number,
+  quarter: string
+): string {
+  if (periodType === 'month') {
+    return `${year}-${String(month).padStart(2, '0')}`;
+  }
+  return quarter;
+}
+
 export function parsePeriodParts(value?: string | null): ReportPeriodParts | null {
   if (!value) return null;
   const trimmed = value.trim().toUpperCase();

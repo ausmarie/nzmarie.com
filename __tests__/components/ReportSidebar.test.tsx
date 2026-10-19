@@ -29,6 +29,7 @@ const mockStore = {
       introDoc: { id: 'd1', title: 'Torbay Introduction', status: 'published' },
       letterDoc: { id: 'd2', title: 'Torbay Letter', status: 'published' },
       reports: [
+        { id: 'd3m', title: '09 2026 Torbay', quarter: '2026-09', status: 'published', createdAt: '2026-09-01' },
         { id: 'd3', title: 'Q2 2026 Report', quarter: '2026-Q2', status: 'published', createdAt: '2026-07-01' },
       ],
     },
@@ -107,6 +108,14 @@ describe('ReportSidebar', () => {
     expect(screen.getByText('Takapuna 2026-Q2 Report')).toBeDefined();
     clickSuburbName('Bayswater');
     expect(screen.getByText('Bayswater Introduction')).toBeDefined();
+  });
+
+  it('shows a monthly report label as year and month in the sidebar', () => {
+    render(<ReportSidebar />);
+    clickSuburbName('Torbay');
+
+    expect(screen.getByText('09 2026 Torbay')).toBeDefined();
+    expect(screen.getByText('2026-09')).toBeDefined();
   });
 
   it('lists North Shore before other suburbs', () => {

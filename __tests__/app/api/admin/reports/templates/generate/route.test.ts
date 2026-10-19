@@ -254,6 +254,9 @@ describe('report generate API', () => {
     expect(content).toContain('The average Days to Sell of 42 days during September 2026');
     expect(content).not.toContain('Source: REINZ');
 
+    const params = getInsertedParams();
+    expect(params[2]).toBe('2026-09');
+
     expect(getMonthlyData).toHaveBeenCalledWith(
       ['Torbay'],
       'North Shore City',
@@ -549,6 +552,7 @@ describe('report generate API — period_type flow', () => {
     expect(generateChartImageUrl).not.toHaveBeenCalled();
 
     const params = getInsertedParams();
+    expect(params[2]).toBe('2026-06');
     expect(params[5]).toBe('lead-9');
 
     const content = params[4] as string;
@@ -614,7 +618,7 @@ describe('report generate API — period_type flow', () => {
 
     expect(response.status).toBe(200);
     const params = getInsertedParams();
-    expect(params[2]).toBe('2026-Q3');
+    expect(params[2]).toBe('2026-08');
     expect(params[3]).toBe('Torbay 2026 Market Report');
 
     const content = params[4] as string;

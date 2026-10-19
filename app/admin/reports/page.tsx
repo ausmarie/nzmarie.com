@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import GenerateReportModal from './components/GenerateReportModal';
 import { useReportStore } from './stores/report-store';
+import { periodSortValue } from '@/lib/report-period';
 
 interface SuburbDoc {
   id: string;
@@ -96,7 +97,7 @@ export default function ReportsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {suburbs.map((suburb) => {
-            const sortedReports = [...suburb.reports].sort((a, b) => b.quarter.localeCompare(a.quarter));
+            const sortedReports = [...suburb.reports].sort((a, b) => periodSortValue(b.quarter) - periodSortValue(a.quarter));
             const allDocs: Array<{ id: string; title: string; icon: string; badge?: string; status?: string; type: string }> = [];
 
             if (suburb.introDoc) allDocs.push({ ...suburb.introDoc, icon: '📝', type: 'intro', badge: 'intro' });

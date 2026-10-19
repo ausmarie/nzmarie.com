@@ -267,7 +267,7 @@ describe('GenerateReportModal', () => {
     expect(call!.body.start_month).toBe('2025-01');
     expect(call!.body.end_month).toBe('2025-12');
     expect(call!.body.lead_id).toBe('lead-7');
-    expect(call!.body.quarter).toMatch(/^\d{4}-Q[1-4]$/);
+    expect(call!.body.quarter).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/);
     expect(typeof call!.body.report_year).toBe('number');
     expect(typeof call!.body.report_month).toBe('number');
     const now = new Date();

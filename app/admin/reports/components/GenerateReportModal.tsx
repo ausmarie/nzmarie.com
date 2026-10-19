@@ -178,7 +178,7 @@ export default function GenerateReportModal({ open, leadId, defaultSuburbName, d
           ...(periodType === 'quarter'
             ? { quarter: reportQuarter, start_quarter: startQuarter, end_quarter: endQuarter }
             : {
-                quarter: monthToQuarter(genYear, genMonth),
+                quarter: `${genYear}-${pad2(genMonth)}`,
                 report_year: genYear,
                 report_month: genMonth,
                 start_month: startMonth,
@@ -191,7 +191,7 @@ export default function GenerateReportModal({ open, leadId, defaultSuburbName, d
       if (data.success && data.id) {
         onGenerated(data.id, {
           suburbName: selectedSuburb?.name || genSuburbName,
-          quarter: periodType === 'quarter' ? reportQuarter : monthToQuarter(genYear, genMonth),
+          quarter: periodType === 'quarter' ? reportQuarter : `${genYear}-${pad2(genMonth)}`,
           periodType,
           reportYear: genYear,
           reportMonth: genMonth,

@@ -5,6 +5,7 @@ import ReportEditor from '@/app/admin/reports/components/ReportEditor';
 import ConfirmModal from '@/app/admin/reports/components/ConfirmModal';
 import GenerateReportModal from '@/app/admin/reports/components/GenerateReportModal';
 import { useReportStore } from '@/app/admin/reports/stores/report-store';
+import { useCtrlS } from '@/app/admin/reports/hooks/useCtrlS';
 import type { ReportDocument, ReportEditorContent } from '@/types/report';
 
 interface LeadOption {
@@ -23,6 +24,7 @@ interface LeadReportMeta {
   id: string;
   title: string;
   status: string;
+  quarter: string | null;
   updated_at: string;
 }
 
@@ -71,6 +73,7 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
           id: d.id,
           title: d.title,
           status: d.status,
+          quarter: d.quarter,
           updated_at: d.updated_at,
         }));
         setReportsByLead((prev) => ({ ...prev, [leadId]: rows }));
@@ -234,6 +237,8 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
       setToast('Failed to save.');
     }
   }, [activeDocId, docLoading, title, activeDoc, selectedLeadId]);
+
+  useCtrlS(handleSaveNow);
 
   const handleDelete = useCallback(async () => {
     const target = pendingDelete;
@@ -476,8 +481,10 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
                                   <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
                                     {report.title}
                                   </span>
-                                  {report.status === 'draft' && (
-                                    <span style={{ fontSize: '0.6rem', color: '#aaa', flexShrink: 0 }}>Draft</span>
+                                  {report.quarter && (
+                                    <span style={{ fontSize: '0.6rem', color: '#aaa', flexShrink: 0 }} data-testid="report-period">
+                                      {report.quarter}
+                                    </span>
                                   )}
                                   <button
                                     onClick={(e) => {

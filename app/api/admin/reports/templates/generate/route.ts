@@ -5,6 +5,7 @@ import { isAdmin } from '@/lib/permissions';
 import { generateChartImageUrl, generateMetricChartImageUrl, type ChartPeriodType, type LeadChartMetric } from '@/lib/report-charts';
 import { getMonthlyData } from '@/lib/market-data-aggregator';
 import { computeMarketPulse, computeQuarterlyMarketPulse, formatMillions, monthLabel, quarterLabel, shiftMonth, MONTH_NAMES, type MarketPulseResult } from '@/lib/market-pulse';
+import { reportDocumentPeriodKey } from '@/lib/report-period';
 import { extractDaysToSellDescription, filterOutDaysToSellFromIntro, updateIntroMonthYear } from './intro-utils';
 
 interface TrendRow {
@@ -540,6 +541,8 @@ export async function POST(request: Request) {
       }
     }
 
+    const storedQuarter = reportDocumentPeriodKey(pulsePeriodType, reportYear, reportMonth, reportQuarter);
+
     const suburbResult = await marieQuery<{ id: string; name: string }>(
       `SELECT id, name FROM report_suburbs WHERE id = $1`,
       [suburb_id]
@@ -623,7 +626,7 @@ export async function POST(request: Request) {
     const result = await marieQuery<{ id: string }>(
       `INSERT INTO report_documents (user_id, doc_type, suburb_id, quarter, title, content, lead_id)
        VALUES ($1, 'report', $2, $3, $4, $5, $6) RETURNING id`,
-      [userId, suburb_id, reportQuarter, title, JSON.stringify(content), lead_id ?? null]
+      [userId, suburb_id, storedQuarter, title, JSON.stringify(content), lead_id ?? null]
     );
 
     return NextResponse.json({ success: true, id: result.rows[0].id });

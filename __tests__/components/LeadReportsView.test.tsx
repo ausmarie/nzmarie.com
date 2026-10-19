@@ -23,9 +23,17 @@ const mockLeads = [
   { id: 'lead-3', property_address: '8 Rimu Street', suburb: 'Browns Bay', status: 'new', priority: 'medium', owner_name: 'Bob Jones', owner_email: 'bob@example.com', owner_phone: '0215551234', created_at: '2026-10-03T00:00:00.000Z' },
 ];
 
-const mockDocs = [
-  { id: 'doc-1', title: 'Property Report — 249 Sunset Road', status: 'draft', updated_at: '2026-10-01T00:00:00.000Z' },
-  { id: 'doc-2', title: 'CMA — 249 Sunset Road', status: 'draft', updated_at: '2026-10-02T00:00:00.000Z' },
+type MockDoc = {
+  id: string;
+  title: string;
+  status: string;
+  quarter: string | null;
+  updated_at: string;
+};
+
+const mockDocs: MockDoc[] = [
+  { id: 'doc-1', title: 'Property Report — 249 Sunset Road', status: 'draft', quarter: null, updated_at: '2026-10-01T00:00:00.000Z' },
+  { id: 'doc-2', title: 'CMA — 249 Sunset Road', status: 'draft', quarter: null, updated_at: '2026-10-02T00:00:00.000Z' },
 ];
 
 const mockDocDetail = {
@@ -51,7 +59,10 @@ const mockSuburbs = [
   { id: 'sub-browns-bay', name: 'Browns Bay' },
 ];
 
-const fetchState = { docGate: null as Promise<void> | null };
+const fetchState = {
+  docGate: null as Promise<void> | null,
+  docs: null as MockDoc[] | null,
+};
 
 function installFetchMock() {
   global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -70,7 +81,7 @@ function installFetchMock() {
     }
     if (url.includes('/api/admin/reports/documents?lead_id=')) {
       if (url.includes('lead-1')) {
-        return json({ success: true, documents: mockDocs });
+        return json({ success: true, documents: fetchState.docs ?? mockDocs });
       }
       return json({ success: true, documents: [] });
     }
@@ -101,6 +112,7 @@ describe('LeadReportsView', () => {
     vi.clearAllMocks();
     localStorage.clear();
     fetchState.docGate = null;
+    fetchState.docs = null;
     installFetchMock();
   });
 
@@ -420,6 +432,26 @@ describe('LeadReportsView', () => {
     expect(children[1].textContent).toContain('CMA — 249 Sunset Road');
   });
 
+  it('shows report names with quarterly and monthly periods instead of the draft status in the sidebar', async () => {
+    fetchState.docs = [
+      { id: 'doc-q', title: 'Q3 2026 2/65 Target Road', status: 'draft', quarter: '2026-Q3', updated_at: '2026-10-01T00:00:00.000Z' },
+      { id: 'doc-m', title: '09 2026 2/65 Target Road', status: 'draft', quarter: '2026-09', updated_at: '2026-10-02T00:00:00.000Z' },
+    ];
+
+    render(<LeadReportsView onSwitchToLeads={vi.fn()} initialLeadId="lead-1" />);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('report-period')).toHaveLength(2);
+    });
+    const periods = screen.getAllByTestId('report-period').map((el) => el.textContent);
+    expect(periods).toEqual(['2026-Q3', '2026-09']);
+
+    const sidebarText = screen.getByTestId('lead-reports-sidebar').textContent || '';
+    expect(sidebarText).toContain('Q3 2026 2/65 Target Road');
+    expect(sidebarText).toContain('09 2026 2/65 Target Road');
+    expect(sidebarText).not.toContain('Draft');
+  });
+
   it('collapses an expanded address to hide its child reports', async () => {
     render(<LeadReportsView onSwitchToLeads={vi.fn()} initialLeadId="lead-1" />);
 
@@ -511,6 +543,27 @@ describe('LeadReportsView', () => {
       const body = JSON.parse(String((puts[0][1] as RequestInit).body));
       expect(body.id).toBe('doc-2');
       expect(Array.isArray(body.content)).toBe(true);
+    });
+  });
+
+  it('saves the active report when Ctrl+S is pressed', async () => {
+    render(<LeadReportsView onSwitchToLeads={vi.fn()} initialLeadId="lead-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-report-editor').textContent).toBe('doc-1');
+    });
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+
+    await waitFor(() => {
+      const puts = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+        (c: unknown[]) =>
+          String(c[0]).includes('/api/admin/reports/documents') &&
+          (((c[1] as RequestInit | undefined)?.method) || 'GET') === 'PUT'
+      );
+      expect(puts.length).toBeGreaterThan(0);
+      const body = JSON.parse(String((puts[0][1] as RequestInit).body));
+      expect(body.id).toBe('doc-1');
     });
   });
 

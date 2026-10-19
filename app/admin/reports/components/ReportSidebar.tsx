@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import ConfirmModal from './ConfirmModal';
 import { useReportStore, OverviewSuburb } from '../stores/report-store';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import { periodSortValue } from '@/lib/report-period';
 
 const SUBURB_ORDER = ['North Shore', ...SUBURB_PRIORITY_ORDER];
 
@@ -243,7 +244,7 @@ export default function ReportSidebar() {
           const allDocs: Array<{ id: string; title: string; icon: string; meta?: string }> = [];
           if (suburb.introDoc) allDocs.push({ id: suburb.introDoc.id, title: suburb.introDoc.title, icon: '📝' });
           if (suburb.letterDoc) allDocs.push({ id: suburb.letterDoc.id, title: suburb.letterDoc.title, icon: '📬' });
-          for (const r of [...suburb.reports].sort((a, b) => b.quarter.localeCompare(a.quarter))) {
+          for (const r of [...suburb.reports].sort((a, b) => periodSortValue(b.quarter) - periodSortValue(a.quarter))) {
             allDocs.push({ id: r.id, title: r.title, icon: '📊', meta: r.quarter });
           }
 
