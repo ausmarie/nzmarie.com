@@ -696,8 +696,8 @@ const filteredReports = useMemo(() => {
 
       {isModalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between">
+          <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between p-6 pb-4">
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Upload report files</h2>
                 <p className="text-sm text-slate-500">Select the suburb, period, and document labels.</p>
@@ -707,6 +707,7 @@ const filteredReports = useMemo(() => {
               </button>
             </div>
 
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6">
             <div className="mt-5">
               <span className="text-sm font-medium text-slate-700">Period</span>
               <div className="mt-2 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
@@ -810,8 +811,9 @@ const filteredReports = useMemo(() => {
                 ))}
               </div>
             )}
+            </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3">
+            <div className="flex shrink-0 items-center justify-end gap-3 border-t border-slate-100 px-6 py-4">
               <button type="button" onClick={() => setIsModalOpen(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancel</button>
               <button type="button" onClick={handleUploadSubmit} disabled={isUploading || !selectedFiles.length} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300">
                 {isUploading ? 'Uploading...' : 'Upload selected files'}
