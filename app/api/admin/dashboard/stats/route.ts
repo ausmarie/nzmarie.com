@@ -5,6 +5,7 @@ import { getCachedOrFetch } from '@/lib/redis';
 import { db } from '@/lib/drizzle';
 import { ensureCampaignTablesExist } from '@/lib/campaign-tracker';
 import { formatReportKey } from '@/lib/format-report';
+import { periodLabel, periodSortValue } from '@/lib/report-period';
 import { sql } from 'drizzle-orm';
 
 interface SuburbCountRow {
@@ -73,6 +74,7 @@ interface TrendRow {
 interface SuburbDispatchRow {
   suburb?: string;
   campaign_key?: string;
+  period_key?: string | null;
   sent_count?: string | number;
   junk_count?: string | number;
   total_count?: string | number;
@@ -462,8 +464,12 @@ export async function GET(request: Request) {
               SELECT
                 CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
                   THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-](Q[1-4])')
-                  WHEN sr.quarter IS NOT NULL AND sr.year IS NOT NULL
+                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
+                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
+                  WHEN sr.quarter ~ '^Q[1-4]$' AND sr.year IS NOT NULL
                   THEN sr.year || '-' || sr.quarter
+                  WHEN sr.quarter ~ '^M[0-9]{2}$' AND sr.year IS NOT NULL
+                  THEN sr.year || '-' || substring(sr.quarter from 'M([0-9]{2})')
                 END AS quarter_key,
                 sl.suburb,
                 COUNT(DISTINCT sl.outreach_property_id) AS sent_count,
@@ -474,16 +480,23 @@ export async function GET(request: Request) {
                 ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
               GROUP BY 1, 2
             ),
-            dispatch_report_quarters AS MATERIALIZED (
+            dispatch_report_periods AS MATERIALIZED (
               SELECT DISTINCT
                 sr.suburb,
-                (sr.year::int * 4 + (substring(sr.quarter from 'Q([1-4])')::int - 1)) AS q_index,
-                (sr.year::text || '_Q' || substring(sr.quarter from 'Q([1-4])') || '_' || sr.suburb) AS campaign_key
+                CASE WHEN sr.quarter ~ '^Q[1-4]$' THEN 'quarter' ELSE 'month' END AS period_type,
+                CASE WHEN sr.quarter ~ '^Q[1-4]$'
+                  THEN sr.year::int * 4 + (substring(sr.quarter from 'Q([1-4])')::int - 1)
+                END AS q_index,
+                CASE WHEN sr.quarter ~ '^Q[1-4]$'
+                  THEN sr.year::text || '-Q' || substring(sr.quarter from 'Q([1-4])')
+                  ELSE sr.year::text || '-' || substring(sr.quarter from 'M([0-9]{2})')
+                END AS period_key,
+                (sr.year::text || '_' || sr.quarter || '_' || sr.suburb) AS campaign_key
               FROM suburb_reports sr
               WHERE sr.status = 'active'
                 AND sr.suburb IS NOT NULL
-                AND sr.quarter IS NOT NULL
                 AND sr.year IS NOT NULL
+                AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
                 ${suburbFilter ? sql`AND sr.suburb = ${suburb}` : sql``}
             ),
             dispatch_send_logs AS MATERIALIZED (
@@ -492,11 +505,23 @@ export async function GET(request: Request) {
                 CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
                   THEN substring(sl.campaign_key from '^([0-9]{4})')::int * 4
                        + (substring(sl.campaign_key from '[_-]Q([1-4])')::int - 1)
+                  WHEN sr.quarter ~ '^Q[1-4]$'
+                  THEN sr.year::int * 4 + (substring(sr.quarter from 'Q([1-4])')::int - 1)
                 END AS q_index,
+                CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
+                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-](Q[1-4])')
+                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
+                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
+                  WHEN sr.quarter ~ '^Q[1-4]$'
+                  THEN sr.year::text || '-Q' || substring(sr.quarter from 'Q([1-4])')
+                  WHEN sr.quarter ~ '^M[0-9]{2}$'
+                  THEN sr.year::text || '-' || substring(sr.quarter from 'M([0-9]{2})')
+                END AS period_key,
                 sl.outreach_property_id AS pid,
                 sl.sent_at,
                 sl.campaign_key
               FROM outreach_send_logs sl
+              LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
               WHERE sl.suburb IS NOT NULL
                 ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
             ),
@@ -512,57 +537,81 @@ export async function GET(request: Request) {
               WHERE q_index IS NOT NULL
               GROUP BY suburb, q_index
             ),
+            dispatch_month_sent AS MATERIALIZED (
+              SELECT
+                suburb,
+                period_key,
+                COUNT(DISTINCT pid) AS sent_count,
+                MIN(sent_at) AS first_sent_at,
+                MAX(sent_at) AS last_sent_at,
+                MIN(campaign_key) AS campaign_key
+              FROM dispatch_send_logs
+              WHERE q_index IS NULL AND period_key IS NOT NULL
+              GROUP BY suburb, period_key
+            ),
             dispatch_audience_props AS MATERIALIZED (
-              SELECT rq.suburb, rq.q_index, op.id AS pid
-              FROM dispatch_report_quarters rq
+              SELECT rq.suburb, rq.period_key, op.id AS pid
+              FROM dispatch_report_periods rq
               LEFT JOIN dispatch_quarter_sent prev
                 ON prev.suburb = rq.suburb AND prev.q_index = rq.q_index - 1
               JOIN outreach_properties op
                 ON op.suburb = rq.suburb AND LOWER(op.status) IN ('pending', 'sent')
-              WHERE prev.suburb IS NULL
+              WHERE rq.period_type = 'quarter'
+                AND prev.suburb IS NULL
               UNION
-              SELECT rq.suburb, rq.q_index, prevq.pid
-              FROM dispatch_report_quarters rq
+              SELECT rq.suburb, rq.period_key, prevq.pid
+              FROM dispatch_report_periods rq
               JOIN dispatch_send_logs prevq
                 ON prevq.suburb = rq.suburb AND prevq.q_index = rq.q_index - 1
+              WHERE rq.period_type = 'quarter'
+              UNION
+              SELECT rq.suburb, rq.period_key, op.id
+              FROM dispatch_report_periods rq
+              JOIN outreach_properties op
+                ON op.suburb = rq.suburb AND LOWER(op.status) IN ('pending', 'sent')
+              WHERE rq.period_type = 'month'
             ),
-            dispatch_quarter_aud AS MATERIALIZED (
+            dispatch_period_aud AS MATERIALIZED (
               SELECT
                 aud.suburb,
-                aud.q_index,
+                aud.period_key,
                 COUNT(DISTINCT aud.pid) AS total_count,
                 COUNT(DISTINCT aud.pid) FILTER (
                   WHERE p.no_junk_mail = TRUE
                     AND NOT EXISTS (
                       SELECT 1 FROM dispatch_send_logs sl2
                       WHERE sl2.suburb = aud.suburb
-                        AND sl2.q_index = aud.q_index
+                        AND sl2.period_key = aud.period_key
                         AND sl2.pid = aud.pid
                     )
                 ) AS junk_count
               FROM dispatch_audience_props aud
               LEFT JOIN outreach_properties op ON op.id = aud.pid
               LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
-              GROUP BY aud.suburb, aud.q_index
+              GROUP BY aud.suburb, aud.period_key
             ),
             dispatch_by_suburb_cte AS (
               SELECT
                 rq.suburb,
-                COALESCE(s.campaign_key, rq.campaign_key) AS campaign_key,
-                COALESCE(s.sent_count, 0) AS sent_count,
+                COALESCE(s.campaign_key, ms.campaign_key, rq.campaign_key) AS campaign_key,
+                rq.period_key,
+                COALESCE(s.sent_count, ms.sent_count, 0) AS sent_count,
                 COALESCE(a.junk_count, 0) AS junk_count,
                 COALESCE(a.total_count, 0) AS total_count,
-                s.first_sent_at,
-                s.last_sent_at
-              FROM dispatch_report_quarters rq
-              LEFT JOIN dispatch_quarter_aud a
-                ON a.suburb = rq.suburb AND a.q_index = rq.q_index
+                COALESCE(s.first_sent_at, ms.first_sent_at) AS first_sent_at,
+                COALESCE(s.last_sent_at, ms.last_sent_at) AS last_sent_at
+              FROM dispatch_report_periods rq
+              LEFT JOIN dispatch_period_aud a
+                ON a.suburb = rq.suburb AND a.period_key = rq.period_key
               LEFT JOIN dispatch_quarter_sent s
                 ON s.suburb = rq.suburb AND s.q_index = rq.q_index
+              LEFT JOIN dispatch_month_sent ms
+                ON ms.suburb = rq.suburb AND ms.period_key = rq.period_key
               UNION ALL
               SELECT
                 n.suburb,
                 n.campaign_key,
+                NULL::text AS period_key,
                 n.sent_count,
                 0::bigint AS junk_count,
                 n.sent_count AS total_count,
@@ -576,7 +625,7 @@ export async function GET(request: Request) {
                   MIN(sent_at) AS first_sent_at,
                   MAX(sent_at) AS last_sent_at
                 FROM dispatch_send_logs
-                WHERE q_index IS NULL
+                WHERE period_key IS NULL
                 GROUP BY suburb, campaign_key
               ) n
             )
@@ -691,14 +740,16 @@ export async function GET(request: Request) {
         const reportsMap = new Map<string, string>();
         for (const r of (Array.isArray(reportsResult.rows) ? reportsResult.rows as unknown as ActiveReportRow[] : [])) {
           if (!r.suburb || !r.quarter || r.year == null) continue;
-          const key = `${r.suburb.trim().toLowerCase()}|${r.year}-${r.quarter.toUpperCase()}`;
+          const key = `${r.suburb.trim().toLowerCase()}|${periodLabel(Number(r.year), r.quarter).toUpperCase()}`;
           if (!reportsMap.has(key)) reportsMap.set(key, r.file_url || '');
         }
 
         const quarterlyMap = new Map<string, QuarterlySentSuburb[]>();
         for (const item of (Array.isArray(row.quarterly_suburb_sent) ? row.quarterly_suburb_sent as QuarterlySuburbSentRow[] : [])) {
           if (!item.quarter_key || !item.suburb) continue;
-          const reportUrl = reportsMap.get(`${item.suburb.trim().toLowerCase()}|${item.quarter_key.toUpperCase()}`) || null;
+          const reportUrl = /^[0-9]{4}-Q[1-4]$/.test(item.quarter_key)
+            ? reportsMap.get(`${item.suburb.trim().toLowerCase()}|${item.quarter_key.toUpperCase()}`) || null
+            : null;
           let arr = quarterlyMap.get(item.quarter_key);
           if (!arr) { arr = []; quarterlyMap.set(item.quarter_key, arr); }
           arr.push({
@@ -720,7 +771,7 @@ export async function GET(request: Request) {
               return tb - ta;
             }),
           }))
-          .sort((a, b) => b.quarter_key.localeCompare(a.quarter_key));
+          .sort((a, b) => periodSortValue(b.quarter_key) - periodSortValue(a.quarter_key));
 
         const scanCampaigns: ScanCampaignItem[] = Array.isArray(row.scan_campaigns) ? (row.scan_campaigns as ScanCampaignRow[]).map((item) => ({
           campaign_key: item?.campaign_key || '',
@@ -763,10 +814,23 @@ export async function GET(request: Request) {
           const junk = Number(item.junk_count) || 0;
           const total = Number(item.total_count) || 0;
           const unsent = Number.isFinite(Number(item.unsent_count)) ? Number(item.unsent_count) : Math.max(0, total - sent - junk);
-          const reportKey = formatReportKey(item.campaign_key || item.suburb, item.suburb as string);
-          const ckMatch = (item.campaign_key || '').match(/^(\d{4})[_-](Q[1-4])/i);
-          const quarterKey = ckMatch ? `${ckMatch[1]}-${ckMatch[2].toUpperCase()}` : null;
-          const reportUrl = quarterKey ? reportsMap.get(`${(item.suburb as string).trim().toLowerCase()}|${quarterKey.toUpperCase()}`) || null : null;
+          const periodKey = item.period_key || null;
+          const periodCampaignKey = periodKey
+            ? (/^[0-9]{4}-[0-9]{2}$/.test(periodKey)
+              ? `${periodKey.slice(0, 4)}_M${periodKey.slice(5)}_${item.suburb}`
+              : `${periodKey.replace('-Q', '_Q')}_${item.suburb}`)
+            : item.campaign_key || item.suburb;
+          const reportKey = formatReportKey(periodCampaignKey, item.suburb as string);
+          const ckMatch = (item.campaign_key || '').match(/^(\d{4})[_-](Q[1-4]|M[0-9]{2})/i);
+          const campaignPeriod = ckMatch
+            ? (ckMatch[2].toUpperCase().startsWith('M')
+              ? `${ckMatch[1]}-${ckMatch[2].slice(1)}`
+              : `${ckMatch[1]}-${ckMatch[2].toUpperCase()}`)
+            : null;
+          const quarterKey = periodKey || campaignPeriod;
+          const reportUrl = quarterKey && /^[0-9]{4}-Q[1-4]$/.test(quarterKey)
+            ? reportsMap.get(`${(item.suburb as string).trim().toLowerCase()}|${quarterKey.toUpperCase()}`) || null
+            : null;
 
           const existing = dispatchMap.get(reportKey);
           if (!existing) {

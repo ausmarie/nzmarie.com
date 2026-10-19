@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
+import { invalidateDashboardStatsCache } from '@/lib/redis';
 
 const r2 = new S3Client({
   region: 'auto',
@@ -39,12 +40,21 @@ export async function POST(request: Request) {
 
         for (const item of uploads) {
           const suburb = String(item?.suburb || '').trim();
-          const quarter = String(item?.quarter || '').trim();
+          const periodType = String(item?.period_type || 'quarter').trim().toLowerCase() === 'month' ? 'month' : 'quarter';
+          const month = Number(item?.month);
+          let quarter = String(item?.quarter || '').trim();
           const year = Number(item?.year);
           const docLabel = String(item?.label || 'Main Report').trim() || 'Main Report';
           const fileUrl = String(item?.fileUrl || '').trim();
           const fileName = String(item?.fileName || 'report.pdf').trim() || 'report.pdf';
           const fileSize = Number(item?.fileSize || 0);
+
+          if (periodType === 'month') {
+            if (!Number.isInteger(month) || month < 1 || month > 12) {
+              return NextResponse.json({ error: 'Invalid upload month' }, { status: 400 });
+            }
+            quarter = `M${String(month).padStart(2, '0')}`;
+          }
 
           if (!suburb || !quarter || Number.isNaN(year) || !fileUrl) {
             return NextResponse.json({ error: 'Invalid upload metadata' }, { status: 400 });
@@ -75,17 +85,18 @@ export async function POST(request: Request) {
           }
 
           const result = await marieDB.query(
-            `INSERT INTO suburb_reports (suburb, quarter, year, doc_label, file_url, file_name, file_size, uploaded_by, status)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+            `INSERT INTO suburb_reports (suburb, quarter, year, period_type, doc_label, file_url, file_name, file_size, uploaded_by, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
              ON CONFLICT (suburb, quarter, year, doc_label)
              DO UPDATE SET
-               file_url = $5,
-               file_name = $6,
-               file_size = $7,
+               period_type = $4,
+               file_url = $6,
+               file_name = $7,
+               file_size = $8,
                uploaded_at = NOW(),
                updated_at = NOW()
              RETURNING *`,
-            [suburb, quarter, year, docLabel, fileUrl, fileName, fileSize, session.user.email]
+            [suburb, quarter, year, periodType, docLabel, fileUrl, fileName, fileSize, session.user.email]
           );
 
           finalized.push({
@@ -96,6 +107,8 @@ export async function POST(request: Request) {
             report: result.rows[0],
           });
         }
+
+        await invalidateDashboardStatsCache();
 
         return NextResponse.json({
           success: true,
@@ -211,8 +224,8 @@ export async function POST(request: Request) {
       const fileUrl = `${publicDomain}/${key}`;
 
       const result = await marieDB.query(
-        `INSERT INTO suburb_reports (suburb, quarter, year, doc_label, file_url, file_name, file_size, uploaded_by, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
+        `INSERT INTO suburb_reports (suburb, quarter, year, period_type, doc_label, file_url, file_name, file_size, uploaded_by, status)
+         VALUES ($1, $2, $3, 'quarter', $4, $5, $6, $7, $8, 'active')
          ON CONFLICT (suburb, quarter, year, doc_label)
          DO UPDATE SET
            file_url = $5,
@@ -234,6 +247,8 @@ export async function POST(request: Request) {
         report: result.rows[0],
       });
     }
+
+    await invalidateDashboardStatsCache();
 
     return NextResponse.json({
       success: true,

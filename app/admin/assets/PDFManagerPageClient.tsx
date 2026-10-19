@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { SkeletonPDFManager } from '@/components/admin/Skeleton';
 import { isAdmin } from '@/lib/permissions';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import { monthCode, periodLabel } from '@/lib/report-period';
 import { FaUpload, FaDownload, FaTimes, FaCloudUploadAlt, FaFolderOpen, FaQrcode, FaTrash, FaExternalLinkAlt } from 'react-icons/fa';
 
 interface SuburbReport {
@@ -14,6 +15,8 @@ interface SuburbReport {
   suburb: string;
   quarter: string;
   year: number;
+  period_type?: string | null;
+  label?: string;
   doc_label?: string | null;
   file_url: string;
   file_name: string;
@@ -82,7 +85,12 @@ const SUBURB_URLS: Record<string, string> = {
 };
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 const CURRENT_YEAR = new Date().getFullYear();
+const CURRENT_MONTH = new Date().getMonth() + 1;
 const YEARS = [CURRENT_YEAR + 3, CURRENT_YEAR + 2, CURRENT_YEAR + 1, CURRENT_YEAR, CURRENT_YEAR - 1, CURRENT_YEAR - 2];
 
 const DOC_LABEL_OPTIONS = ['Main Report', 'Letter', 'About Marie'] as const;
@@ -102,6 +110,8 @@ export default function PDFManagerPageClient() {
   const [suburb, setSuburb] = useState('Oteha');
   const [year, setYear] = useState(CURRENT_YEAR.toString());
   const [quarter, setQuarter] = useState('Q2');
+  const [periodType, setPeriodType] = useState<'quarter' | 'month'>('quarter');
+  const [month, setMonth] = useState(String(CURRENT_MONTH));
   const [selectedFiles, setSelectedFiles] = useState<Array<{ file: File; label: string }>>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -169,7 +179,8 @@ export default function PDFManagerPageClient() {
 
   const handleDeleteReport = async (item: SuburbReport) => {
     const label = item.doc_label || 'Main Report';
-    if (!confirm(`Delete "${item.file_name}" (${label}) for ${item.suburb} ${item.year}-${item.quarter}?\n\nThis will remove the document and its storage. This cannot be undone.`)) {
+    const period = item.label || periodLabel(Number(item.year), item.quarter);
+    if (!confirm(`Delete "${item.file_name}" (${label}) for ${item.suburb} ${period}?\n\nThis will remove the document and its storage. This cannot be undone.`)) {
       return;
     }
     try {
@@ -238,12 +249,34 @@ export default function PDFManagerPageClient() {
 
     setIsUploading(true);
     try {
-      const uploadResults = [] as Array<{ suburb: string; quarter: string; year: string; label: string; fileName: string; fileSize: number; fileUrl: string }>;
+      const uploadQuarter = periodType === 'month' ? monthCode(Number(month)) : quarter;
+      const uploadPeriod = periodType === 'month'
+        ? `${year}-${String(Number(month)).padStart(2, '0')}`
+        : `${year}-${quarter}`;
+      const uploadResults = [] as Array<{
+        suburb: string;
+        quarter: string;
+        year: string;
+        period_type: 'quarter' | 'month';
+        month?: number;
+        label: string;
+        fileName: string;
+        fileSize: number;
+        fileUrl: string;
+      }>;
       for (const { file, label } of selectedFiles) {
         const presignRes = await fetch('/api/admin/pdf/upload-url', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ suburb, quarter, year: Number(year), fileName: file.name, label }),
+          body: JSON.stringify({
+            suburb,
+            quarter: uploadQuarter,
+            year: Number(year),
+            fileName: file.name,
+            label,
+            period_type: periodType,
+            month: periodType === 'month' ? Number(month) : undefined,
+          }),
         });
         const signedData = await presignRes.json();
         if (!presignRes.ok || !signedData.url) {
@@ -263,8 +296,10 @@ export default function PDFManagerPageClient() {
 
         uploadResults.push({
           suburb,
-          quarter,
+          quarter: uploadQuarter,
           year,
+          period_type: periodType,
+          month: periodType === 'month' ? Number(month) : undefined,
           label,
           fileName: file.name,
           fileSize: file.size,
@@ -280,7 +315,7 @@ export default function PDFManagerPageClient() {
 
       const data = await res.json();
       if (res.ok && data.success) {
-        showNotify('success', `${data.count || selectedFiles.length} document(s) for ${suburb} ${year}-${quarter} uploaded successfully`);
+        showNotify('success', `${data.count || selectedFiles.length} document(s) for ${suburb} ${uploadPeriod} uploaded successfully`);
         setIsModalOpen(false);
         setSelectedFiles([]);
         fetchReports();
@@ -484,7 +519,7 @@ const filteredReports = useMemo(() => {
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <h2 className="text-xl font-semibold text-slate-900">Upload suburb reports</h2>
-                  <p className="text-sm text-slate-600">Store PDFs for each suburb and quarter.</p>
+                  <p className="text-sm text-slate-600">Store PDFs for each suburb and period.</p>
                 </div>
                 <button
                   type="button"
@@ -509,7 +544,7 @@ const filteredReports = useMemo(() => {
                       <thead>
                         <tr className="border-b border-slate-200 bg-slate-50">
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Suburb</th>
-                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Quarter / Year</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Period</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">File</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">Label</th>
                           <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-slate-600">Downloads</th>
@@ -521,7 +556,7 @@ const filteredReports = useMemo(() => {
                         {filteredReports.map((report, index) => (
                           <tr key={report.id} className={`border-b border-slate-200 hover:bg-slate-50 ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}>
                             <td className="px-4 py-3 text-sm font-medium text-slate-900">{report.suburb}</td>
-                            <td className="px-4 py-3 text-sm text-slate-600">{report.quarter} {report.year}</td>
+                            <td className="px-4 py-3 text-sm text-slate-600">{report.label || periodLabel(Number(report.year), report.quarter)}</td>
                             <td className="px-4 py-3 text-sm text-slate-600 truncate max-w-xs">{report.file_name}</td>
                             <td className="px-4 py-3 text-sm">
                               <span className="inline-flex rounded-full bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700">
@@ -665,14 +700,34 @@ const filteredReports = useMemo(() => {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold text-slate-900">Upload report files</h2>
-                <p className="text-sm text-slate-500">Select the suburb, quarter, and document labels.</p>
+                <p className="text-sm text-slate-500">Select the suburb, period, and document labels.</p>
               </div>
               <button type="button" onClick={() => setIsModalOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
                 <FaTimes className="text-lg" />
               </button>
             </div>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <div className="mt-5">
+              <span className="text-sm font-medium text-slate-700">Period</span>
+              <div className="mt-2 inline-flex rounded-xl border border-slate-200 bg-slate-50 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setPeriodType('quarter')}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${periodType === 'quarter' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+                >
+                  Quarterly
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPeriodType('month')}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${periodType === 'month' ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+                >
+                  Monthly
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
               <label className="space-y-2 text-sm font-medium text-slate-700">
                 <span>Suburb</span>
                 <select value={suburb} onChange={e => setSuburb(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none">
@@ -691,14 +746,25 @@ const filteredReports = useMemo(() => {
                 </select>
               </label>
 
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                <span>Quarter</span>
-                <select value={quarter} onChange={e => setQuarter(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none">
-                  {QUARTERS.map(item => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </label>
+              {periodType === 'quarter' ? (
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  <span>Quarter</span>
+                  <select value={quarter} onChange={e => setQuarter(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none">
+                    {QUARTERS.map(item => (
+                      <option key={item} value={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  <span>Month</span>
+                  <select value={month} onChange={e => setMonth(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-sky-500 focus:outline-none">
+                    {MONTHS.map((item, index) => (
+                      <option key={item} value={String(index + 1)}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
 
             <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">

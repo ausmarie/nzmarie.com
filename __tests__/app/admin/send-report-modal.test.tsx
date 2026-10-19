@@ -41,12 +41,12 @@ describe('SendReportModal', () => {
 
     const select = (await screen.findByRole('combobox')) as HTMLSelectElement;
     expect(select.options.length).toBe(1);
-    expect(select.options[0].textContent).toBe('Torbay 2026 Q2 (3 documents)');
+    expect(select.options[0].textContent).toBe('Torbay 2026-Q2 (3 documents)');
     expect(select.value).toBe('Torbay|2026|Q2');
 
     expect(
-      ((await screen.findByDisplayValue('Torbay 2026 Q2 Market Report')) as HTMLInputElement).value
-    ).toBe('Torbay 2026 Q2 Market Report');
+      ((await screen.findByDisplayValue('Torbay 2026-Q2 Market Report')) as HTMLInputElement).value
+    ).toBe('Torbay 2026-Q2 Market Report');
     expect(
       ((await screen.findByDisplayValue('2026_Q2_Torbay')) as HTMLInputElement).value
     ).toBe('2026_Q2_Torbay');
@@ -68,8 +68,8 @@ describe('SendReportModal', () => {
     const select = (await screen.findByRole('combobox')) as HTMLSelectElement;
     expect(select.options.length).toBe(2);
     const labels = Array.from(select.options).map((o) => o.textContent);
-    expect(labels).toContain('Torbay 2026 Q2 (3 documents)');
-    expect(labels).toContain('Torbay 2026 Q1');
+    expect(labels).toContain('Torbay 2026-Q2 (3 documents)');
+    expect(labels).toContain('Torbay 2026-Q1');
   });
 
   it('sends the Main Report document id with campaign key when confirming dispatch', async () => {
@@ -107,7 +107,7 @@ describe('SendReportModal', () => {
     expect(body.property_ids).toEqual(['p1', 'p2']);
     expect(body.suburb_report_id).toBe('rep-1');
     expect(body.campaign_key).toBe('2026_Q2_Torbay');
-    expect(body.report_title).toBe('Torbay 2026 Q2 Market Report');
+    expect(body.report_title).toBe('Torbay 2026-Q2 Market Report');
     expect(onClose).toHaveBeenCalled();
   });
 });

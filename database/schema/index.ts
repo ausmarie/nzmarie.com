@@ -105,6 +105,7 @@ export const suburbReports = pgTable('suburb_reports', {
   suburb: varchar('suburb', { length: 100 }).notNull(),
   quarter: varchar('quarter', { length: 10 }).notNull(),
   year: integer('year').notNull(),
+  period_type: varchar('period_type', { length: 10 }).notNull().default('quarter'),
   doc_label: varchar('doc_label', { length: 100 }).notNull().default('Main Report'),
   file_url: text('file_url').notNull(),
   file_name: varchar('file_name', { length: 255 }).notNull(),

@@ -13,6 +13,17 @@ if (redisUrl && redisToken) {
   }
 }
 
+export async function invalidateDashboardStatsCache(): Promise<void> {
+  if (!redis) return;
+  try {
+    const keys = await redis.keys('dashboard:stats:*');
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch {
+  }
+}
+
 export async function getCachedOrFetch<T>(
   key: string,
   fetchFn: () => Promise<T>,

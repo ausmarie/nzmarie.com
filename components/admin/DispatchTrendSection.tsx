@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import { periodSortValue } from '@/lib/report-period';
 
 export type TrendGranularity = 'daily' | 'weekly' | 'monthly' | 'quarterly';
 
@@ -72,7 +73,7 @@ function formatDate(value: string | null): string {
 }
 
 function formatReportName(name: string): string {
-  if (/-Q\d-\d{4}/i.test(name)) {
+  if (/-Q\d-\d{4}|-M\d{2}-\d{4}/i.test(name)) {
     return name;
   }
   return name.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase());
@@ -197,7 +198,7 @@ function SuburbDispatchTimeline({
 }) {
   if (suburbs.length === 0) return null;
 
-  const stripQuarterSuffix = (name: string) => name.replace(/-Q\d-\d{4}$/i, '').trim();
+  const stripQuarterSuffix = (name: string) => name.replace(/-(Q\d|M\d{2})-\d{4}$/i, '').trim();
 
   const mergedMap = new Map<string, SuburbDispatch>();
   for (const s of suburbs) {
@@ -228,14 +229,18 @@ function SuburbDispatchTimeline({
 
   const quarterGroups = new Map<string, SuburbDispatch[]>();
   for (const s of merged) {
-    const match = s.suburb.match(/-(Q\d)-(\d{4})$/i);
-    const quarterKey = s.quarter_key || (match ? `${match[2]}-${match[1].toUpperCase()}` : 'Other');
+    const match = s.suburb.match(/-(Q\d|M\d{2})-(\d{4})$/i);
+    const quarterKey = s.quarter_key || (match
+      ? (match[1].toUpperCase().startsWith('M')
+        ? `${match[2]}-${match[1].slice(1)}`
+        : `${match[2]}-${match[1].toUpperCase()}`)
+      : 'Other');
     let arr = quarterGroups.get(quarterKey);
     if (!arr) { arr = []; quarterGroups.set(quarterKey, arr); }
     arr.push(s);
   }
 
-  const sortedQuarters = Array.from(quarterGroups.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  const sortedQuarters = Array.from(quarterGroups.entries()).sort((a, b) => periodSortValue(b[0]) - periodSortValue(a[0]));
 
   return (
     <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6">
@@ -279,7 +284,7 @@ function SuburbDispatchTimeline({
                 const sa = a.sent_count > 0 ? 0 : 1;
                 const sb = b.sent_count > 0 ? 0 : 1;
                 if (sa !== sb) return sa - sb;
-                const stripQuarter = (name: string) => name.replace(/-Q\d-\d{4}$/i, '').trim();
+                const stripQuarter = (name: string) => name.replace(/-(Q\d|M\d{2})-\d{4}$/i, '').trim();
                 const ia = SUBURB_PRIORITY_ORDER.indexOf(stripQuarter(a.suburb) as (typeof SUBURB_PRIORITY_ORDER)[number]);
                 const ib = SUBURB_PRIORITY_ORDER.indexOf(stripQuarter(b.suburb) as (typeof SUBURB_PRIORITY_ORDER)[number]);
                 return (ia === -1 ? SUBURB_PRIORITY_ORDER.length : ia) - (ib === -1 ? SUBURB_PRIORITY_ORDER.length : ib);

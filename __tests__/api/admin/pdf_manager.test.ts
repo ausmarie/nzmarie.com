@@ -5,6 +5,7 @@ import { POST as downloadPOST } from '@/app/api/reports/download/route';
 import { auth } from '@/lib/auth';
 import { marieDB, query } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
+import { invalidateDashboardStatsCache } from '@/lib/redis';
 
 vi.mock('@/lib/auth', () => ({
   auth: vi.fn(),
@@ -32,10 +33,15 @@ vi.mock('@/lib/r2-storage', () => ({
   deleteFromR2: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@/lib/redis', () => ({
+  invalidateDashboardStatsCache: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe('PDF Manager & Report Download API Routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(isAdmin).mockReturnValue(true);
+    vi.mocked(invalidateDashboardStatsCache).mockResolvedValue(undefined);
     vi.useFakeTimers();
   });
 
@@ -100,6 +106,7 @@ describe('PDF Manager & Report Download API Routes', () => {
       expect(data.count).toBe(1);
       expect(data.reports[0].report.suburb).toBe('Oteha');
       expect(data.reports[0].doc_label).toBe('Main Report');
+      expect(invalidateDashboardStatsCache).toHaveBeenCalledTimes(1);
     });
 
     it('generates a unique timestamp-prefixed R2 key on every upload', async () => {
@@ -355,6 +362,7 @@ describe('PDF Manager & Report Download API Routes', () => {
         expect.stringContaining('DELETE FROM suburb_reports'),
         ['report-1']
       );
+      expect(invalidateDashboardStatsCache).toHaveBeenCalledTimes(1);
     });
   });
 

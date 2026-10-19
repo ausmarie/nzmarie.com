@@ -23,6 +23,16 @@ describe('formatReportKey', () => {
     expect(formatReportKey('2026_Q2_Report', 'Torbay')).toBe('Torbay-Q2-2026');
   });
 
+  it('formats 2026_M09_Oteha to Oteha-M09-2026', () => {
+    expect(formatReportKey('2026_M09_Oteha', 'Oteha')).toBe('Oteha-M09-2026');
+  });
+
+  it('formats monthly campaign without suburb when suburb is passed', () => {
+    expect(formatReportKey('2026_M09', 'Oteha')).toBe('Oteha-M09-2026');
+    expect(formatReportKey('2026_M09_Report', 'Oteha')).toBe('Oteha-M09-2026');
+    expect(formatReportKey('2026_09_Oteha', 'Oteha')).toBe('Oteha-M09-2026');
+  });
+
   it('handles Torbay-Q2-2026 directly', () => {
     expect(formatReportKey('Torbay-Q2-2026', 'Torbay')).toBe('Torbay-Q2-2026');
   });

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { DateTime } from 'luxon';
+import { periodLabel, periodSortValue } from '@/lib/report-period';
 import { FaFilePdf, FaPaperPlane, FaTimes, FaCheckCircle } from 'react-icons/fa';
 
 interface PdfReport {
@@ -13,6 +14,7 @@ interface PdfReport {
   file_url: string;
   file_name: string;
   title?: string;
+  label?: string;
 }
 
 interface ReportSet {
@@ -20,6 +22,7 @@ interface ReportSet {
   suburb: string;
   quarter: string;
   year: number;
+  label: string;
   mainReportId: string;
   docCount: number;
 }
@@ -52,10 +55,11 @@ function buildReportSets(reports: PdfReport[]): ReportSet[] {
       suburb: first.suburb,
       quarter: first.quarter,
       year: first.year,
+      label: first.label || periodLabel(Number(first.year), first.quarter),
       mainReportId: main.id,
       docCount: docs.length,
     };
-  }).sort((a, b) => b.year - a.year || b.quarter.localeCompare(a.quarter) || a.suburb.localeCompare(b.suburb));
+  }).sort((a, b) => periodSortValue(b.label) - periodSortValue(a.label) || a.suburb.localeCompare(b.suburb));
 }
 
 export default function SendReportModal({
@@ -122,7 +126,7 @@ export default function SendReportModal({
       setSelectedSetKey(target.key);
     }
     setSelectedReportId(target.mainReportId);
-    setCustomTitle(`${target.suburb} ${target.year} ${target.quarter} Market Report`);
+    setCustomTitle(`${target.suburb} ${target.label} Market Report`);
     setCampaignKey(`${target.year}_${target.quarter}_${target.suburb}`);
   }, [reportSets, selectedSetKey]);
 
@@ -175,7 +179,7 @@ export default function SendReportModal({
               <FaPaperPlane className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-semibold">Send Quarterly Report</h3>
+              <h3 className="text-base font-semibold">Send Market Report</h3>
               <p className="text-xs text-slate-400">Selected {selectedIds.length} target addresses</p>
             </div>
           </div>
@@ -209,13 +213,13 @@ export default function SendReportModal({
                 >
                   {reportSets.map((set) => (
                     <option key={set.key} value={set.key}>
-                      {set.suburb} {set.year} {set.quarter}
+                      {set.suburb} {set.label}
                       {set.docCount > 1 ? ` (${set.docCount} documents)` : ''}
                     </option>
                   ))}
                 </select>
                 <p className="mt-1.5 text-xs text-slate-400">
-                  One quarterly report set per suburb — documents are grouped into a single set.
+                  One report set per suburb — documents are grouped into a single set.
                 </p>
               </>
             ) : (

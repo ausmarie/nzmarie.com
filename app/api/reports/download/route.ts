@@ -74,6 +74,7 @@ export async function POST(req: Request) {
 
     const suburbReportResult = await query<{ id: string; file_url: string }>(
       `SELECT id, file_url FROM suburb_reports WHERE suburb = $1 AND status = 'active'
+       AND quarter ~ '^Q[1-4]$'
        ORDER BY
          CASE WHEN COALESCE(doc_label, 'Main Report') = 'Main Report' THEN 0 ELSE 1 END,
          year DESC, quarter DESC, uploaded_at DESC

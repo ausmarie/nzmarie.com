@@ -26,6 +26,7 @@ import {
 import { aggregateLikedStreets, filterLikedItemsByStreet, extractStreetFromLikedItem } from '@/lib/liked-street-filter';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import { openGoogleMaps, buildPropertyAddress } from '@/lib/clipboard';
+import { periodLabel, periodSortValue } from '@/lib/report-period';
 
 interface OutreachProperty {
   id: string;
@@ -263,7 +264,7 @@ export default function OutreachPage() {
   const [sentStatusFilter, setSentStatusFilter] = useState<'all' | 'sent' | 'unsent'>('all');
   const [sortMode, setSortMode] = useState<'address' | 'time'>('address');
   const [sentDateFilter, setSentDateFilter] = useState<string[]>([todayDateKey()]);
-  const [availableReports, setAvailableReports] = useState<Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string }>>([]);
+  const [availableReports, setAvailableReports] = useState<Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string; label: string }>>([]);
 
   // Today's Run: shared street-clusters data (fetched when Pending + Unsent).
   const [todayRunBudget, setTodayRunBudget] = useState<number>(() => {
@@ -328,8 +329,9 @@ export default function OutreachPage() {
         const res = await fetch('/api/admin/pdf/reports?status=active');
         if (res.ok) {
           const data = await res.json();
-          const reports = (data.reports || []).map((r: { suburb: string; quarter: string; year: number; id: string; uploaded_at?: string }) => ({
+          const reports = (data.reports || []).map((r: { suburb: string; quarter: string; year: number; id: string; uploaded_at?: string; label?: string }) => ({
             suburb: r.suburb, quarter: r.quarter, year: r.year, id: r.id, uploaded_at: r.uploaded_at || '',
+            label: r.label || periodLabel(Number(r.year), r.quarter),
           }));
           if (!cancelled) setAvailableReports(reports);
         }
@@ -341,13 +343,13 @@ export default function OutreachPage() {
   const sentQuarterOptions = useMemo(() => {
     const latestByQuarter = new Map<string, string>();
     for (const r of availableReports) {
-      const label = `${r.year}-${r.quarter}`;
+      const label = r.label;
       const ts = r.uploaded_at || '';
       const cur = latestByQuarter.get(label);
       if (cur === undefined || ts > cur) latestByQuarter.set(label, ts);
     }
     return [...latestByQuarter.entries()]
-      .sort((a, b) => (b[1] || '').localeCompare(a[1] || '') || b[0].localeCompare(a[0]))
+      .sort((a, b) => (b[1] || '').localeCompare(a[1] || '') || periodSortValue(b[0]) - periodSortValue(a[0]))
       .map(([q]) => q);
   }, [availableReports]);
 
@@ -3005,8 +3007,7 @@ export default function OutreachPage() {
                     {prop.suburb}, {prop.city}
                   </div>
 
-                  {(activeTab === 'pending' || activeTab === 'sent') && prop.latest_send_title &&
-                    (!activeQuarter || `${prop.latest_send_year}-${prop.latest_send_quarter}` === activeQuarter) && (
+                  {(activeTab === 'pending' || activeTab === 'sent') && prop.latest_send_title && (
                     <div style={{
                       fontSize: '0.8rem', color: '#7c3aed', marginBottom: '14px',
                       padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px',
@@ -4121,8 +4122,8 @@ export function ReportFilterSection({
   setLastSoldPreset,
   onClearRunFilter,
 }: {
-  availableReports: Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string }>;
-  setAvailableReports: React.Dispatch<React.SetStateAction<Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string }>>>;
+  availableReports: Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string; label: string }>;
+  setAvailableReports: React.Dispatch<React.SetStateAction<Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string; label: string }>>>;
   reportSuburbFilter: string;
   setReportSuburbFilter: React.Dispatch<React.SetStateAction<string>>;
   
@@ -4196,15 +4197,16 @@ export function ReportFilterSection({
         const res = await fetch('/api/admin/pdf/reports?status=active');
         if (res.ok) {
           const data = await res.json();
-          const reports = (data.reports || []).map((r: { suburb: string; quarter: string; year: number; id: string; uploaded_at?: string }) => ({
+          const reports = (data.reports || []).map((r: { suburb: string; quarter: string; year: number; id: string; uploaded_at?: string; label?: string }) => ({
             suburb: r.suburb, quarter: r.quarter, year: r.year, id: r.id, uploaded_at: r.uploaded_at || '',
+            label: r.label || periodLabel(Number(r.year), r.quarter),
           }));
           setAvailableReports(reports);
           setLoaded(true);
           const optimistic = optimisticDefault;
           if (optimistic) {
-            const exists = reports.some((r: { suburb: string; quarter: string; year: number }) =>
-              r.suburb === optimistic.suburb && `${r.year}-${r.quarter}` === optimistic.label
+            const exists = reports.some((r: { suburb: string; quarter: string; year: number; label: string }) =>
+              r.suburb === optimistic.suburb && r.label === optimistic.label
             );
             if (!exists) {
               setDefaultReport(null);
@@ -4260,13 +4262,13 @@ export function ReportFilterSection({
   const allQuarters = useMemo(() => {
     const latestByQuarter = new Map<string, string>();
     for (const r of availableReports) {
-      const label = `${r.year}-${r.quarter}`;
+      const label = r.label;
       const ts = r.uploaded_at || '';
       const cur = latestByQuarter.get(label);
       if (cur === undefined || ts > cur) latestByQuarter.set(label, ts);
     }
     return [...latestByQuarter.entries()]
-      .sort((a, b) => (b[1] || '').localeCompare(a[1] || '') || b[0].localeCompare(a[0]))
+      .sort((a, b) => (b[1] || '').localeCompare(a[1] || '') || periodSortValue(b[0]) - periodSortValue(a[0]))
       .map(([q]) => q);
   }, [availableReports]);
 
@@ -4281,7 +4283,7 @@ export function ReportFilterSection({
     for (const r of availableReports) {
       if (r.suburb === 'North Shore') continue;
       if (activeQuarter) {
-        const label = `${r.year}-${r.quarter}`;
+        const label = r.label;
         if (label !== activeQuarter) continue;
       }
       const ts = r.uploaded_at || '';

@@ -16,6 +16,25 @@ describe('parseReportQuarter', () => {
     expect(parseReportQuarter('2025-q1')?.campaignPattern).toBe('^2025[_-]Q1');
   });
 
+  it('parses a month into a monthly campaign pattern', () => {
+    expect(parseReportQuarter('2026-09')).toEqual({
+      quarter: 'M09',
+      year: 2026,
+      key: '2026-09',
+      campaignPattern: '^2026[_-](M09|09)',
+    });
+  });
+
+  it('matches real monthly campaign key formats with the generated pattern', () => {
+    const qi = parseReportQuarter('2026-09')!;
+    const re = new RegExp(qi.campaignPattern);
+    expect(re.test('2026_M09_Oteha')).toBe(true);
+    expect(re.test('2026-09')).toBe(true);
+    expect(re.test('2026_09_Oteha')).toBe(true);
+    expect(re.test('2026_Q3_Oteha')).toBe(false);
+    expect(re.test('2025_M09_Oteha')).toBe(false);
+  });
+
   it('returns null for empty, malformed, or invalid quarter values', () => {
     expect(parseReportQuarter(null)).toBeNull();
     expect(parseReportQuarter(undefined)).toBeNull();

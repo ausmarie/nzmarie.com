@@ -1,0 +1,2 @@
+ALTER TABLE suburb_reports
+ADD COLUMN IF NOT EXISTS period_type VARCHAR(10) NOT NULL DEFAULT 'quarter';

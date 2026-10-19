@@ -17,10 +17,10 @@ const q3Stats: Stats = {
 };
 
 const reports = [
-  { suburb: 'Oteha', quarter: 'Q2', year: 2026, id: '1', uploaded_at: '2026-01-15' },
-  { suburb: 'Oteha', quarter: 'Q3', year: 2026, id: '2', uploaded_at: '2026-04-15' },
-  { suburb: 'Torbay', quarter: 'Q2', year: 2026, id: '3', uploaded_at: '2026-01-14' },
-  { suburb: 'Browns Bay', quarter: 'Q2', year: 2026, id: '4', uploaded_at: '2026-01-10' },
+  { suburb: 'Oteha', quarter: 'Q2', year: 2026, id: '1', uploaded_at: '2026-01-15', label: '2026-Q2' },
+  { suburb: 'Oteha', quarter: 'Q3', year: 2026, id: '2', uploaded_at: '2026-04-15', label: '2026-Q3' },
+  { suburb: 'Torbay', quarter: 'Q2', year: 2026, id: '3', uploaded_at: '2026-01-14', label: '2026-Q2' },
+  { suburb: 'Browns Bay', quarter: 'Q2', year: 2026, id: '4', uploaded_at: '2026-01-10', label: '2026-Q2' },
 ];
 
 const flush = () => new Promise((r) => setTimeout(r, 0));

@@ -3,6 +3,8 @@ import { auth } from '@/lib/auth';
 import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
+import { periodLabel } from '@/lib/report-period';
+import { invalidateDashboardStatsCache } from '@/lib/redis';
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -21,6 +23,7 @@ export async function GET(request: Request) {
       suburb,
       quarter,
       year,
+      period_type,
       doc_label,
       file_url,
       file_name,
@@ -61,10 +64,14 @@ export async function GET(request: Request) {
 
   try {
     const result = await marieDB.query(query, params);
+    const reports = result.rows.map((row) => ({
+      ...row,
+      label: periodLabel(Number(row.year), String(row.quarter || '')),
+    }));
 
     return NextResponse.json({
-      reports: result.rows,
-      total: result.rows.length,
+      reports,
+      total: reports.length,
     });
   } catch (error) {
     console.error('Error fetching reports:', error);
@@ -140,6 +147,8 @@ export async function DELETE(request: Request) {
 
     // Then delete from database
     await marieDB.query(`DELETE FROM suburb_reports WHERE id = $1`, [id]);
+
+    await invalidateDashboardStatsCache();
 
     console.log(`Report deleted - R2: ${r2DeleteSucceeded}, DB: true`, {
       id,
