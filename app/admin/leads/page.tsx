@@ -279,11 +279,14 @@ export default function LeadsPage() {
     }
   }, [statusFilter, priorityFilter, sourceFilter, suburbFilter, search, isClassic]);
 
+  const sessionEmail = session?.user?.email ?? null;
+  const canViewLeads = Boolean(sessionEmail && isAdmin(sessionEmail));
+
   useEffect(() => {
-    if (session?.user && isAdmin(session.user.email)) {
+    if (canViewLeads) {
       fetchLeads();
     }
-  }, [session, fetchLeads]);
+  }, [canViewLeads, fetchLeads]);
 
   useEffect(() => {
     if (!isClassic && allLeads.length === 0 && leads.length > 0) {
@@ -921,14 +924,8 @@ export default function LeadsPage() {
                   >
                     {/* Image section */}
                     <div style={{ position: "relative" }}>
-                      <a
-                        href={lead.property_url || '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ display: "block", height: "220px", textDecoration: "none", color: "inherit" }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        {fixedImageUrl ? (
+                      {(() => {
+                        const imageNode = fixedImageUrl ? (
                           <Image
                             src={fixedImageUrl}
                             alt={lead.property_address}
@@ -964,8 +961,26 @@ export default function LeadsPage() {
                               </span>
                             </div>
                           </div>
-                        )}
-                      </a>
+                        );
+
+                        const imageStyle = { display: "block", height: "220px", textDecoration: "none", color: "inherit" } as const;
+
+                        return lead.property_url ? (
+                          <a
+                            href={lead.property_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={imageStyle}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {imageNode}
+                          </a>
+                        ) : (
+                          <div style={imageStyle} onClick={e => e.stopPropagation()}>
+                            {imageNode}
+                          </div>
+                        );
+                      })()}
 
                       {/* Suburb badge */}
                       {lead.suburb && (
