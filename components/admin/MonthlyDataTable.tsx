@@ -3,6 +3,8 @@
 import React, { useState, useMemo } from 'react';
 import type { MonthlyDataPoint, SuburbDetail } from '@/lib/market-data-aggregator';
 import { aggregateToQuarterly } from '@/lib/quarterly-aggregator';
+import AnalyticsRangeSelector from './AnalyticsRangeSelector';
+import { DEFAULT_ANALYTICS_RANGE, type AnalyticsRange } from '@/lib/analytics-range';
 
 const SUBURB_COLORS = [
   '#2563EB', '#DC2626', '#16A34A', '#D97706', '#8B5CF6',
@@ -147,6 +149,8 @@ interface Props {
   activeFocusSuburb: string;
   availableSuburbs: string[];
   onFocusChange: (suburb: string) => void;
+  range?: AnalyticsRange;
+  onRangeChange?: (range: AnalyticsRange) => void;
 }
 
 export default function MonthlyDataTable({
@@ -156,6 +160,8 @@ export default function MonthlyDataTable({
   activeFocusSuburb,
   availableSuburbs,
   onFocusChange,
+  range = DEFAULT_ANALYTICS_RANGE,
+  onRangeChange,
 }: Props) {
   const isDistrict = activeFocusSuburb === 'North Shore City';
   const activeData = useMemo(
@@ -178,21 +184,16 @@ export default function MonthlyDataTable({
   });
   const noDetail = !isDistrict && (activeData.length === 0 || !hasDetail);
 
-  if (activeData.length === 0) {
-    return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Analysis Data</h3>
-        <div className="flex items-center justify-center h-[100px] text-gray-400 text-sm">
-          No market data yet. Upload a REINZ Excel file above to get started.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">Analysis Data</h3>
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <h3 className="text-lg font-semibold text-gray-900">Analysis Data</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <AnalyticsRangeSelector
+          value={range}
+          onChange={onRangeChange ?? (() => {})}
+          ariaLabel="Analysis Data range"
+          testIdPrefix="analysis-range"
+        />
         <div className="flex bg-gray-100 rounded-lg p-0.5">
           <button
             onClick={() => onModeChange('monthly')}
@@ -212,6 +213,23 @@ export default function MonthlyDataTable({
           </button>
         </div>
       </div>
+    </div>
+  );
+
+  if (activeData.length === 0) {
+    return (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        {header}
+        <div className="flex items-center justify-center h-[100px] text-gray-400 text-sm">
+          No market data yet. Upload a REINZ Excel file above to get started.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      {header}
 
       <div className="flex flex-wrap gap-2 mb-4">
         {availableSuburbs.map((s) => {

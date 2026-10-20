@@ -276,6 +276,42 @@ describe('MonthlyDataTable', () => {
     expect(onFocusChange).toHaveBeenCalledWith('North Shore City');
   });
 
+  it('renders the range selector with 2 years selected and calls onRangeChange', () => {
+    const onRangeChange = vi.fn();
+    render(
+      <MonthlyDataTable
+        monthlyData={mockData}
+        dataMode="monthly"
+        onModeChange={onModeChange}
+        activeFocusSuburb="Oteha"
+        availableSuburbs={availableSuburbs}
+        onFocusChange={onFocusChange}
+        range="2y"
+        onRangeChange={onRangeChange}
+      />
+    );
+
+    expect(screen.getByTestId('analysis-range-2y').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('analysis-range-5y+'));
+    expect(onRangeChange).toHaveBeenCalledWith('5y+');
+  });
+
+  it('renders the range selector in the empty state', () => {
+    render(
+      <MonthlyDataTable
+        monthlyData={[]}
+        dataMode="monthly"
+        onModeChange={onModeChange}
+        activeFocusSuburb="Oteha"
+        availableSuburbs={availableSuburbs}
+        onFocusChange={onFocusChange}
+      />
+    );
+
+    expect(screen.getByTestId('analysis-range-5y')).toBeDefined();
+  });
+
   it('calls onModeChange when toggle is clicked', () => {
     render(
       <MonthlyDataTable

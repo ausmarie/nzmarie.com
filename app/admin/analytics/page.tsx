@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
@@ -8,11 +8,19 @@ import { SkeletonAnalytics } from '@/components/admin/Skeleton';
 import MarketTrendsChart from '@/components/admin/MarketTrendsChart';
 import ExcelUploadForm from '@/components/admin/ExcelUploadForm';
 import MonthlyDataTable from '@/components/admin/MonthlyDataTable';
+import AnalyticsRangeSelector from '@/components/admin/AnalyticsRangeSelector';
 import ScanTrendsChart from '@/components/admin/ScanTrendsChart';
 import SuburbSectionAnalytics from '@/components/admin/SuburbSectionAnalytics';
 import { isSuperAdmin } from '@/lib/permissions';
 import type { MonthlyDataPoint } from '@/lib/market-data-aggregator';
 import { sortSuburbs, SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import {
+  ANALYTICS_ALL_DATA_FROM,
+  ANALYTICS_ALL_DATA_TO,
+  DEFAULT_ANALYTICS_RANGE,
+  filterByAnalyticsRange,
+  type AnalyticsRange,
+} from '@/lib/analytics-range';
 const CARD_BADGE_STYLES = {
   blue: 'bg-blue-100 text-blue-700',
   green: 'bg-green-100 text-green-700',
@@ -99,6 +107,8 @@ export default function AnalyticsPage() {
   const [showDistrict, setShowDistrict] = useState(true);
   const [activeFocusSuburb, setActiveFocusSuburb] = useState<string>('Oteha');
   const [tableDataMode, setTableDataMode] = useState<DataMode>('monthly');
+  const [chartRange, setChartRange] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_RANGE);
+  const [tableRange, setTableRange] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_RANGE);
 
   const [lastSoldData, setLastSoldData] = useState<{
     suburbs: Array<{
@@ -281,7 +291,7 @@ export default function AnalyticsPage() {
     setChartLoading(true);
     setChartNeedsMigration(false);
     try {
-      const res = await fetch(`/api/admin/analytics/chart-data?suburbs=${suburbs.map(encodeURIComponent).join(',')}&district=North Shore City`);
+      const res = await fetch(`/api/admin/analytics/chart-data?suburbs=${suburbs.map(encodeURIComponent).join(',')}&district=North Shore City&from=${ANALYTICS_ALL_DATA_FROM}&to=${ANALYTICS_ALL_DATA_TO}`);
       const data = await res.json();
       if (reqId !== chartReqIdRef.current) return;
       if (data.needsMigration) {
@@ -299,6 +309,18 @@ export default function AnalyticsPage() {
   }, []);
 
   const selectedSuburbsKey = selectedSuburbs.join(',');
+  const tableMonthlyData = useMemo(
+    () => filterByAnalyticsRange(monthlyData, tableRange),
+    [monthlyData, tableRange]
+  );
+  const chartMonthlyData = useMemo(
+    () => filterByAnalyticsRange(monthlyData, chartRange),
+    [monthlyData, chartRange]
+  );
+  const chartQuarterlyData = useMemo(
+    () => filterByAnalyticsRange(quarterlyData, chartRange),
+    [quarterlyData, chartRange]
+  );
 
   useEffect(() => {
     if (status === 'authenticated' && session?.user?.email && isSuperAdmin(session.user.email)) {
@@ -486,9 +508,11 @@ export default function AnalyticsPage() {
 
       {/* Market Data Table */}
       <MonthlyDataTable
-        monthlyData={monthlyData}
+        monthlyData={tableMonthlyData}
         dataMode={tableDataMode}
         onModeChange={setTableDataMode}
+        range={tableRange}
+        onRangeChange={setTableRange}
         activeFocusSuburb={activeFocusSuburb}
         availableSuburbs={availableSuburbs}
         onFocusChange={(suburb) => {
@@ -505,15 +529,23 @@ export default function AnalyticsPage() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-gray-900">REINZ Market Trends</h2>
-          <div className="flex bg-gray-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setDataMode('monthly')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dataMode === 'monthly' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            >Monthly</button>
-            <button
-              onClick={() => setDataMode('quarterly')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dataMode === 'quarterly' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-            >Quarterly</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <AnalyticsRangeSelector
+              value={chartRange}
+              onChange={setChartRange}
+              ariaLabel="REINZ Market Trends range"
+              testIdPrefix="reinz-range"
+            />
+            <div className="flex bg-gray-100 rounded-lg p-0.5">
+              <button
+                onClick={() => setDataMode('monthly')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dataMode === 'monthly' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >Monthly</button>
+              <button
+                onClick={() => setDataMode('quarterly')}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dataMode === 'quarterly' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >Quarterly</button>
+            </div>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -547,7 +579,7 @@ export default function AnalyticsPage() {
           </button>
         </div>
         {(() => {
-          const activeData = dataMode === 'monthly' ? monthlyData : quarterlyData;
+          const activeData = dataMode === 'monthly' ? chartMonthlyData : chartQuarterlyData;
           if (chartNeedsMigration) {
             return (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 flex items-center justify-center h-[200px]">

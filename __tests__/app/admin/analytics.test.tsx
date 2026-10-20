@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 let chartDataCalls = 0;
+let chartDataResponse: any = { success: true, data: { monthlyData: [], quarterlyData: [] } };
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -22,7 +23,9 @@ vi.mock('@/components/admin/Skeleton', () => ({
 }));
 
 vi.mock('@/components/admin/MarketTrendsChart', () => ({
-  default: () => <div>MarketTrendsChart Mock</div>,
+  default: ({ data }: any) => (
+    <div data-testid="market-trends-chart">{data.map((point: { period: string }) => point.period).join(',')}</div>
+  ),
 }));
 
 vi.mock('@/components/admin/ExcelUploadForm', () => ({
@@ -65,6 +68,7 @@ vi.mock('@/components/admin/MonthlyDataTable', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  chartDataResponse = { success: true, data: { monthlyData: [], quarterlyData: [] } };
   global.fetch = vi.fn().mockImplementation((url: string) => {
     if (typeof url === 'string' && url.includes('/api/admin/analytics/scans')) {
       return Promise.resolve({
@@ -76,7 +80,7 @@ beforeEach(() => {
       chartDataCalls += 1;
       return Promise.resolve({
         ok: true,
-        json: async () => ({ success: true, data: { monthlyData: [], quarterlyData: [] } }),
+        json: async () => chartDataResponse,
       });
     }
     if (typeof url === 'string' && url.includes('/api/admin/analytics/available-suburbs')) {
@@ -209,5 +213,51 @@ describe('Analytics Page — suburb sync between sections', () => {
       const reinzAlbany = screen.getAllByText('Albany');
       expect(reinzAlbany[0].className).toContain('text-gray-600');
     });
+  });
+
+  it('loads the full history, defaults to 2 years, and reveals older REINZ data with 5 years+', async () => {
+    chartDataResponse = {
+      success: true,
+      data: {
+        monthlyData: [
+          { period: '2020-06' },
+          { period: '2024-06' },
+          { period: '2025-01' },
+          { period: '2026-01' },
+        ],
+        quarterlyData: [
+          { period: '2020-Q2' },
+          { period: '2025-Q1' },
+          { period: '2026-Q1' },
+        ],
+      },
+    };
+
+    const AnalyticsPage = (await import('../../../app/admin/analytics/page')).default;
+    const qc = createQueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <AnalyticsPage />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('market-trends-chart').textContent).toBe('2025-01,2026-01');
+    });
+
+    const chartCall = (global.fetch as any).mock.calls.find(
+      (call: unknown[]) => typeof call[0] === 'string' && call[0].includes('/api/admin/analytics/chart-data')
+    );
+    expect(String(chartCall?.[0])).toContain('from=1900-01-01');
+    expect(String(chartCall?.[0])).toContain('to=2999-12-31');
+
+    expect(screen.getByTestId('reinz-range-2y').getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('reinz-range-5y+'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('market-trends-chart').textContent).toBe('2020-06,2024-06,2025-01,2026-01');
+    });
+    expect(screen.getByTestId('reinz-range-5y+').getAttribute('aria-pressed')).toBe('true');
   });
 });
