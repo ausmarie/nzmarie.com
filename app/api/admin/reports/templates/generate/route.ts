@@ -6,6 +6,7 @@ import { generateChartImageUrl, generateMetricChartImageUrl, type ChartPeriodTyp
 import { getMonthlyData } from '@/lib/market-data-aggregator';
 import { computeMarketPulse, computeQuarterlyMarketPulse, formatMillions, monthLabel, quarterLabel, shiftMonth, MONTH_NAMES, type MarketPulseResult } from '@/lib/market-pulse';
 import { reportDocumentPeriodKey } from '@/lib/report-period';
+import { ensureLeadIntroduction } from '@/lib/lead-introduction-server';
 import { extractDaysToSellDescription, filterOutDaysToSellFromIntro, updateIntroMonthYear } from './intro-utils';
 
 interface TrendRow {
@@ -628,6 +629,14 @@ export async function POST(request: Request) {
        VALUES ($1, 'report', $2, $3, $4, $5, $6) RETURNING id`,
       [userId, suburb_id, storedQuarter, title, JSON.stringify(content), lead_id ?? null]
     );
+
+    if (isLeadReport) {
+      try {
+        await ensureLeadIntroduction(lead_id, userId);
+      } catch (error) {
+        console.error('Failed to create lead introduction:', error);
+      }
+    }
 
     return NextResponse.json({ success: true, id: result.rows[0].id });
   } catch (error) {

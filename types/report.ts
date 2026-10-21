@@ -1,4 +1,4 @@
-export type DocType = 'report' | 'letter' | 'suburb_intro' | 'general';
+export type DocType = 'report' | 'letter' | 'suburb_intro' | 'lead_intro' | 'general';
 export type DocStatus = 'draft' | 'finalised' | 'archived';
 
 export interface ReportSuburb {

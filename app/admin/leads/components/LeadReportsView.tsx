@@ -24,6 +24,7 @@ interface LeadReportMeta {
   id: string;
   title: string;
   status: string;
+  doc_type: string;
   quarter: string | null;
   updated_at: string;
 }
@@ -73,6 +74,7 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
           id: d.id,
           title: d.title,
           status: d.status,
+          doc_type: d.doc_type,
           quarter: d.quarter,
           updated_at: d.updated_at,
         }));
@@ -93,6 +95,11 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
     let cancelled = false;
     const loadLeads = async () => {
       try {
+        await fetch('/api/admin/reports/lead-introductions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }).catch(() => null);
         const res = await fetch('/api/admin/leads/list', { cache: 'no-store' });
         const data = await res.json();
         if (cancelled) return;
@@ -243,6 +250,12 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
   const handleDelete = useCallback(async () => {
     const target = pendingDelete;
     if (!target) return;
+    const targetMeta = (selectedLeadId ? reportsByLead[selectedLeadId] || [] : []).find((r) => r.id === target.id);
+    if (targetMeta?.doc_type === 'lead_intro') {
+      setPendingDelete(null);
+      setToast('Introduction cannot be deleted.');
+      return;
+    }
     setDeleting(true);
     try {
       const res = await fetch(`/api/admin/reports/documents/${target.id}`, { method: 'DELETE' });
@@ -274,6 +287,7 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
         .filter(Boolean)
         .join(' · ')
     : '';
+  const activeIsIntro = activeDoc?.doc_type === 'lead_intro';
 
   return (
     <>
@@ -460,6 +474,7 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
                           ) : (
                             children.map((report) => {
                               const isActiveDoc = report.id === activeDocId;
+                              const isIntro = report.doc_type === 'lead_intro';
                               return (
                                 <div
                                   key={report.id}
@@ -477,32 +492,45 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
                                   onMouseLeave={(e) => { e.currentTarget.style.background = isActiveDoc ? '#dbeafe' : 'transparent'; }}
                                   data-testid="report-list-item"
                                 >
-                                  <span aria-hidden="true">📄</span>
+                                  <span aria-hidden="true">{isIntro ? 'ℹ️' : '📄'}</span>
                                   <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
                                     {report.title}
                                   </span>
-                                  {report.quarter && (
+                                  {isIntro ? (
+                                    <span
+                                      style={{
+                                        fontSize: '0.55rem', fontWeight: 700, color: '#1e40af',
+                                        background: '#dbeafe', borderRadius: 4, padding: '1px 5px',
+                                        flexShrink: 0, letterSpacing: '0.03em',
+                                      }}
+                                      data-testid="report-info-badge"
+                                    >
+                                      Info
+                                    </span>
+                                  ) : report.quarter && (
                                     <span style={{ fontSize: '0.6rem', color: '#aaa', flexShrink: 0 }} data-testid="report-period">
                                       {report.quarter}
                                     </span>
                                   )}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPendingDelete({ id: report.id, title: report.title });
-                                    }}
-                                    title="Delete report"
-                                    aria-label="Delete report"
-                                    className="lead-report-row-del"
-                                    style={{
-                                      border: 'none', background: 'transparent', cursor: 'pointer',
-                                      padding: '0 2px', fontSize: '0.8rem', color: '#9ca3af',
-                                      flexShrink: 0, lineHeight: 1,
-                                    }}
-                                    data-testid="report-delete-btn"
-                                  >
-                                    🗑️
-                                  </button>
+                                  {!isIntro && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setPendingDelete({ id: report.id, title: report.title });
+                                      }}
+                                      title="Delete report"
+                                      aria-label="Delete report"
+                                      className="lead-report-row-del"
+                                      style={{
+                                        border: 'none', background: 'transparent', cursor: 'pointer',
+                                        padding: '0 2px', fontSize: '0.8rem', color: '#9ca3af',
+                                        flexShrink: 0, lineHeight: 1,
+                                      }}
+                                      data-testid="report-delete-btn"
+                                    >
+                                      🗑️
+                                    </button>
+                                  )}
                                 </div>
                               );
                             })
@@ -612,11 +640,14 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
                 Export PDF
               </button>
               <button
-                onClick={() => activeDocId && setPendingDelete({ id: activeDocId, title })}
+                onClick={() => activeDocId && !activeIsIntro && setPendingDelete({ id: activeDocId, title })}
+                disabled={activeIsIntro}
+                title={activeIsIntro ? 'Introduction cannot be deleted' : undefined}
                 style={{
                   padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
-                  border: '1px solid #fecaca', background: '#fef2f2', cursor: 'pointer',
-                  color: '#dc2626', fontWeight: 500,
+                  border: '1px solid #fecaca', background: '#fef2f2',
+                  cursor: activeIsIntro ? 'not-allowed' : 'pointer',
+                  color: '#dc2626', fontWeight: 500, opacity: activeIsIntro ? 0.4 : 1,
                 }}
                 data-testid="delete-btn"
               >

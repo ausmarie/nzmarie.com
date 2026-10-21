@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createInlineContentSpec, createBlockSpec } from '@blocknote/core';
 import { filterSuggestionItems } from '@blocknote/core/extensions';
 import { SuggestionMenuController, getDefaultReactSlashMenuItems, useCreateBlockNote } from '@blocknote/react';
@@ -11,6 +11,12 @@ import { useAutoSave } from '../hooks/useAutoSave';
 import { useImageUpload } from '../hooks/useImageUpload';
 import { useReportStore } from '../stores/report-store';
 import { buildMarketPulseHTML, statDirection } from '@/lib/market-pulse';
+import {
+  buildComparableSummaryHTML,
+  COMPARABLE_SUMMARY_DEFAULTS,
+  type ComparableSummaryProps,
+} from '@/lib/comparable-cards';
+import { getClipboardImageFiles } from '@/lib/clipboard-images';
 import type { ReportEditorContent } from '@/types/report';
 
 function createDeltaSVG(height: string, strokeColor: string): SVGElement {
@@ -249,12 +255,94 @@ const quarterlyDataBlock = createBlockSpec(
   }
 );
 
-const marketPulseEdits = new Map<string, { flush: () => void; token: object }>();
+interface EditableBlockEntry {
+  flush: () => void;
+  token: object;
+}
 
-function flushMarketPulseEdits(): void {
-  for (const entry of Array.from(marketPulseEdits.values())) {
+const editableBlockEdits = new Map<string, EditableBlockEntry>();
+
+function flushEditableBlockEdits(): void {
+  for (const entry of Array.from(editableBlockEdits.values())) {
     entry.flush();
   }
+}
+
+function wireEditableBlock(
+  container: HTMLElement,
+  block: any,
+  editor: any,
+  blockId: string,
+  registry: Map<string, EditableBlockEntry>,
+  onInput?: (prop: string) => void
+): object {
+  const p = block.props;
+  const focusOrigins = new Map<string, string>();
+
+  const flush = () => {
+    const changes: Record<string, string> = {};
+    container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
+      const prop = el.dataset.prop;
+      if (!prop) return;
+      const value = (el.textContent ?? '').trim();
+      if (value !== String(p[prop] ?? '')) changes[prop] = value;
+    });
+    if (Object.keys(changes).length === 0) return;
+    if (!editor || typeof editor.updateBlock !== 'function') return;
+    const current = typeof editor.getBlock === 'function' ? editor.getBlock(blockId) : null;
+    const base = (current?.props ?? p) as Record<string, unknown>;
+    editor.updateBlock(blockId, { props: { ...base, ...changes } });
+  };
+
+  const token = {};
+  registry.set(blockId, { flush, token });
+
+  container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
+    const prop = el.dataset.prop as string;
+
+    el.addEventListener('mousedown', (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => e.stopPropagation());
+    el.addEventListener('beforeinput', (e) => e.stopPropagation());
+    el.addEventListener('drop', (e) => e.preventDefault());
+    el.addEventListener('paste', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      if (text) document.execCommand('insertText', false, text);
+    });
+    el.addEventListener('focus', () => {
+      focusOrigins.set(prop, el.textContent ?? '');
+      el.style.boxShadow = '0 0 0 1px #93c5fd';
+    });
+    el.addEventListener('input', () => onInput?.(prop));
+    el.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      const isSave = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's';
+      if (isSave) return;
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        el.blur();
+        return;
+      }
+      if (e.key === 'Escape') {
+        el.textContent = focusOrigins.get(prop) ?? String(p[prop] ?? '');
+        onInput?.(prop);
+        el.blur();
+      }
+    });
+    el.addEventListener('blur', () => {
+      el.style.boxShadow = '';
+    });
+  });
+
+  container.addEventListener('focusout', (e: FocusEvent) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && container.contains(next)) return;
+    flush();
+  });
+
+  return token;
 }
 
 const marketPulseBlock = createBlockSpec(
@@ -289,8 +377,6 @@ const marketPulseBlock = createBlockSpec(
         'font-family:inherit;flex-grow:1;flex-shrink:1;flex-basis:0;width:100%;min-width:0;box-sizing:border-box;';
       container.innerHTML = buildMarketPulseHTML(p);
 
-      const focusOrigins = new Map<string, string>();
-
       const readValue = (prop: string): string => {
         const el = container.querySelector<HTMLElement>(`[data-prop="${prop}"]`);
         return (el?.textContent ?? '').trim();
@@ -310,75 +396,59 @@ const marketPulseBlock = createBlockSpec(
         }
       };
 
-      const flush = () => {
-        const changes: Record<string, string> = {};
-        container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
-          const prop = el.dataset.prop;
-          if (!prop) return;
-          const value = (el.textContent ?? '').trim();
-          if (value !== String(p[prop] ?? '')) changes[prop] = value;
-        });
-        if (Object.keys(changes).length === 0) return;
-        if (!editor || typeof editor.updateBlock !== 'function') return;
-        const current = typeof editor.getBlock === 'function' ? editor.getBlock(blockId) : null;
-        const base = (current?.props ?? p) as Record<string, unknown>;
-        editor.updateBlock(blockId, { props: { ...base, ...changes } });
-      };
-
-      const token = {};
-      marketPulseEdits.set(blockId, { flush, token });
-
-      container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
-        const prop = el.dataset.prop as string;
-
-        el.addEventListener('mousedown', (e) => e.stopPropagation());
-        el.addEventListener('click', (e) => e.stopPropagation());
-        el.addEventListener('beforeinput', (e) => e.stopPropagation());
-        el.addEventListener('drop', (e) => e.preventDefault());
-        el.addEventListener('paste', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const text = e.clipboardData?.getData('text/plain') ?? '';
-          if (text) document.execCommand('insertText', false, text);
-        });
-        el.addEventListener('focus', () => {
-          focusOrigins.set(prop, el.textContent ?? '');
-          el.style.boxShadow = '0 0 0 1px #93c5fd';
-        });
-        el.addEventListener('input', () => updateArrow(prop));
-        el.addEventListener('keydown', (e: KeyboardEvent) => {
-          if (e.isComposing) return;
-          const isSave = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's';
-          if (isSave) return;
-          e.stopPropagation();
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            el.blur();
-            return;
-          }
-          if (e.key === 'Escape') {
-            el.textContent = focusOrigins.get(prop) ?? String(p[prop] ?? '');
-            updateArrow(prop);
-            el.blur();
-          }
-        });
-        el.addEventListener('blur', () => {
-          el.style.boxShadow = '';
-        });
-      });
-
-      container.addEventListener('focusout', (e: FocusEvent) => {
-        const next = e.relatedTarget as Node | null;
-        if (next && container.contains(next)) return;
-        flush();
-      });
+      const token = wireEditableBlock(container, block, editor, blockId, editableBlockEdits, updateArrow);
 
       return {
         dom: container,
         ignoreMutation: () => true,
         destroy: () => {
-          const existing = marketPulseEdits.get(blockId);
-          if (existing && existing.token === token) marketPulseEdits.delete(blockId);
+          const existing = editableBlockEdits.get(blockId);
+          if (existing && existing.token === token) editableBlockEdits.delete(blockId);
+        },
+      };
+    },
+  }
+);
+
+const comparableSummaryBlock = createBlockSpec(
+  {
+    type: 'comparableSummary' as const,
+    content: 'none',
+    propSchema: {
+      saleTitle: { default: COMPARABLE_SUMMARY_DEFAULTS.saleTitle },
+      saleBadge: { default: COMPARABLE_SUMMARY_DEFAULTS.saleBadge },
+      saleMedian: { default: COMPARABLE_SUMMARY_DEFAULTS.saleMedian },
+      saleMedianLabel: { default: COMPARABLE_SUMMARY_DEFAULTS.saleMedianLabel },
+      saleRangeLabel: { default: COMPARABLE_SUMMARY_DEFAULTS.saleRangeLabel },
+      saleRange: { default: COMPARABLE_SUMMARY_DEFAULTS.saleRange },
+      saleMeanLabel: { default: COMPARABLE_SUMMARY_DEFAULTS.saleMeanLabel },
+      saleMean: { default: COMPARABLE_SUMMARY_DEFAULTS.saleMean },
+      cvTitle: { default: COMPARABLE_SUMMARY_DEFAULTS.cvTitle },
+      cvBadge: { default: COMPARABLE_SUMMARY_DEFAULTS.cvBadge },
+      cvMedian: { default: COMPARABLE_SUMMARY_DEFAULTS.cvMedian },
+      cvMedianLabel: { default: COMPARABLE_SUMMARY_DEFAULTS.cvMedianLabel },
+      cvRangeLabel: { default: COMPARABLE_SUMMARY_DEFAULTS.cvRangeLabel },
+      cvRange: { default: COMPARABLE_SUMMARY_DEFAULTS.cvRange },
+      cvMeanLabel: { default: COMPARABLE_SUMMARY_DEFAULTS.cvMeanLabel },
+      cvMean: { default: COMPARABLE_SUMMARY_DEFAULTS.cvMean },
+    },
+  },
+  {
+    render: (block: any, editor: any) => {
+      const blockId = block.id as string;
+      const container = document.createElement('div');
+      container.style.cssText =
+        'font-family:inherit;flex-grow:1;flex-shrink:1;flex-basis:0;width:100%;min-width:0;box-sizing:border-box;';
+      container.innerHTML = buildComparableSummaryHTML(block.props as ComparableSummaryProps);
+
+      const token = wireEditableBlock(container, block, editor, blockId, editableBlockEdits);
+
+      return {
+        dom: container,
+        ignoreMutation: () => true,
+        destroy: () => {
+          const existing = editableBlockEdits.get(blockId);
+          if (existing && existing.token === token) editableBlockEdits.delete(blockId);
         },
       };
     },
@@ -386,7 +456,12 @@ const marketPulseBlock = createBlockSpec(
 );
 
 const schema = BlockNoteSchema.create({
-  blockSpecs: { ...defaultBlockSpecs, quarterlyData: quarterlyDataBlock(), marketPulse: marketPulseBlock() } as any,
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    quarterlyData: quarterlyDataBlock(),
+    marketPulse: marketPulseBlock(),
+    comparableSummary: comparableSummaryBlock(),
+  } as any,
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
     delta: deltaInlineContent,
@@ -405,6 +480,27 @@ const insertDeltaItem = (editor: any) => ({
   aliases: ['delta', 'icon', 'brand', 'logo'],
   group: 'Custom Blocks',
   subtext: 'Insert a premium custom SVG brand mark.',
+});
+
+const insertComparableSummaryItem = (editor: any) => ({
+  title: 'Comparable Summary',
+  onItemClick: () => {
+    let referenceBlockId: string | undefined;
+    try {
+      referenceBlockId = editor.getTextCursorPosition().block.id;
+    } catch {
+      referenceBlockId = editor.document[editor.document.length - 1]?.id;
+    }
+    if (!referenceBlockId) return;
+    editor.insertBlocks(
+      [{ type: 'comparableSummary', props: { ...COMPARABLE_SUMMARY_DEFAULTS } }],
+      referenceBlockId,
+      'after'
+    );
+  },
+  aliases: ['comparable', 'sale', 'valuation', 'cv', 'cards'],
+  group: 'Custom Blocks',
+  subtext: 'Insert editable comparable sale and council valuation cards.',
 });
 
 interface ReportEditorProps {
@@ -465,6 +561,8 @@ function migrateContent(content: ReportEditorContent | null): ReportEditorConten
 export default function ReportEditor({ docId, initialContent, onContentChange, className, getContentRef }: ReportEditorProps) {
   const { isSaving, lastSaved, setIsSaving, setLastSaved, updateDocument } = useReportStore();
   const { handleImageFile } = useImageUpload();
+  const [pendingImageUploads, setPendingImageUploads] = useState(0);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const migrated = migrateContent(initialContent);
 
@@ -476,6 +574,55 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
       return handleImageFile(file, docId);
     },
   });
+
+  const uploadAndInsertImages = useCallback(async (files: File[]) => {
+    setPendingImageUploads((count) => count + 1);
+    setImageError(null);
+
+    try {
+      const urls = await Promise.all(files.map((file) => handleImageFile(file, docId)));
+      if (urls.length === 0) return;
+
+      let referenceBlockId: string | undefined;
+      try {
+        referenceBlockId = editor.getTextCursorPosition().block.id;
+      } catch {
+        referenceBlockId = editor.document[editor.document.length - 1]?.id;
+      }
+
+      if (!referenceBlockId) {
+        referenceBlockId = editor.document[0]?.id;
+      }
+
+      if (referenceBlockId) {
+        editor.insertBlocks(
+          urls.map((url) => ({ type: 'image', props: { url } })) as any,
+          referenceBlockId,
+          'after'
+        );
+        editor.focus();
+      }
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : 'Failed to upload image');
+    } finally {
+      setPendingImageUploads((count) => Math.max(0, count - 1));
+    }
+  }, [docId, editor, handleImageFile]);
+
+  const handlePasteCapture = useCallback((event: ClipboardEvent<HTMLDivElement>) => {
+    const files = getClipboardImageFiles(event.clipboardData);
+    if (files.length === 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    void uploadAndInsertImages(files);
+  }, [uploadAndInsertImages]);
+
+  useEffect(() => {
+    if (!imageError) return;
+    const timer = setTimeout(() => setImageError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [imageError]);
 
   // Sanitize editor.document to remove functions and DOM nodes and convert circular refs to null so structure remains
   const sanitize = useCallback((value: unknown, _seen = new WeakSet()): unknown => {
@@ -538,7 +685,7 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
   }, [setLastSaved, updateDocument, onContentChange]);
 
   const saveContent = useCallback(async () => {
-    flushMarketPulseEdits();
+    flushEditableBlockEdits();
     const blocks = editor.document;
     const safeBlocks = sanitize(blocks) as ReportEditorContent | null;
 
@@ -576,7 +723,7 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
   useEffect(() => {
     if (getContentRef) {
       getContentRef.current = () => {
-        flushMarketPulseEdits();
+        flushEditableBlockEdits();
         return sanitize(editor.document) as ReportEditorContent | null;
       };
     }
@@ -601,8 +748,14 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
     }
   }, [editor]);
 
+  const isUploadingImage = pendingImageUploads > 0;
+
   return (
-    <div className={'report-editor-container' + (className ? ' ' + className : '')} style={{ position: 'relative', maxWidth: '900px', margin: '0 auto' }}>
+    <div
+      className={'report-editor-container' + (className ? ' ' + className : '')}
+      style={{ position: 'relative', maxWidth: '900px', margin: '0 auto' }}
+      onPasteCapture={handlePasteCapture}
+    >
       <div className="reports-editor-status" style={{
         position: 'sticky', top: 0, zIndex: 10,
         display: 'flex', alignItems: 'center', gap: '8px',
@@ -612,10 +765,13 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
           <span style={{
             width: 6, height: 6, borderRadius: '50%',
-            background: isSaving ? '#f59e0b' : '#22c55e',
+            background: isUploadingImage ? '#3b82f6' : isSaving ? '#f59e0b' : '#22c55e',
           }} />
-          {isSaving ? 'Saving...' : lastSaved ? `Saved at ${lastSaved}` : 'Ready'}
+          {isUploadingImage ? 'Uploading image...' : isSaving ? 'Saving...' : lastSaved ? `Saved at ${lastSaved}` : 'Ready'}
         </span>
+        {imageError && (
+          <span style={{ marginLeft: 'auto', color: '#dc2626' }}>{imageError}</span>
+        )}
       </div>
       <div style={{ background: 'white' }}>
         <BlockNoteView editor={editor} theme="light" onChange={handleChange} slashMenu={false}>
@@ -626,6 +782,7 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
                 [
                   ...getDefaultReactSlashMenuItems(editor),
                   insertDeltaItem(editor),
+                  insertComparableSummaryItem(editor),
                 ],
                 query
               )

@@ -4,6 +4,7 @@ import { auth } from '@/lib/auth';
 import { query as marieQuery } from '@/lib/db';
 import { getMonthlyData } from '@/lib/market-data-aggregator';
 import { generateChartImageUrl, generateMetricChartImageUrl } from '@/lib/report-charts';
+import { ensureLeadIntroduction } from '@/lib/lead-introduction-server';
 
 vi.mock('@/lib/auth', () => ({
   auth: vi.fn(),
@@ -24,6 +25,10 @@ vi.mock('@/lib/market-data-aggregator', () => ({
 vi.mock('@/lib/report-charts', () => ({
   generateChartImageUrl: vi.fn(),
   generateMetricChartImageUrl: vi.fn(),
+}));
+
+vi.mock('@/lib/lead-introduction-server', () => ({
+  ensureLeadIntroduction: vi.fn().mockResolvedValue('intro-1'),
 }));
 
 function mockDbForSuburb(suburbName: string, suburbId: string, introContent: unknown[] | null = null) {
@@ -554,6 +559,7 @@ describe('report generate API — period_type flow', () => {
     const params = getInsertedParams();
     expect(params[2]).toBe('2026-06');
     expect(params[5]).toBe('lead-9');
+    expect(ensureLeadIntroduction).toHaveBeenCalledWith('lead-9', 'admin-1');
 
     const content = params[4] as string;
     expect(content.split('https://r2.example.com/metric.svg')).toHaveLength(4);

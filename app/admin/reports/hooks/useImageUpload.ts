@@ -11,9 +11,14 @@ export function useImageUpload() {
       body: formData,
     });
 
-    const result = await res.json();
-    if (!result.success) {
-      throw new Error(result.error || 'Upload failed');
+    let result: { success?: boolean; error?: string; url?: string };
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Upload failed (${res.status})`);
+    }
+    if (!res.ok || !result.success || !result.url) {
+      throw new Error(result.error || `Upload failed (${res.status})`);
     }
     return result.url;
   }, []);

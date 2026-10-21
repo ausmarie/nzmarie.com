@@ -27,13 +27,14 @@ type MockDoc = {
   id: string;
   title: string;
   status: string;
+  doc_type: string;
   quarter: string | null;
   updated_at: string;
 };
 
 const mockDocs: MockDoc[] = [
-  { id: 'doc-1', title: 'Property Report — 249 Sunset Road', status: 'draft', quarter: null, updated_at: '2026-10-01T00:00:00.000Z' },
-  { id: 'doc-2', title: 'CMA — 249 Sunset Road', status: 'draft', quarter: null, updated_at: '2026-10-02T00:00:00.000Z' },
+  { id: 'doc-1', title: 'Property Report — 249 Sunset Road', status: 'draft', doc_type: 'general', quarter: null, updated_at: '2026-10-01T00:00:00.000Z' },
+  { id: 'doc-2', title: 'CMA — 249 Sunset Road', status: 'draft', doc_type: 'general', quarter: null, updated_at: '2026-10-02T00:00:00.000Z' },
 ];
 
 const mockDocDetail = {
@@ -51,6 +52,13 @@ const mockDoc2Detail = {
   id: 'doc-2',
   title: 'CMA — 249 Sunset Road',
   content: [{ type: 'paragraph', content: [{ type: 'text', text: 'CMA content', styles: {} }] }],
+};
+
+const mockIntroDetail = {
+  ...mockDocDetail,
+  id: 'doc-intro',
+  title: '249 Sunset Road Introduction',
+  doc_type: 'lead_intro',
 };
 
 const mockSuburbs = [
@@ -72,6 +80,9 @@ function installFetchMock() {
 
     if (url.includes('/api/admin/leads/list')) {
       return json({ success: true, leads: mockLeads });
+    }
+    if (method === 'POST' && url.includes('/api/admin/reports/lead-introductions')) {
+      return json({ success: true, created: 0 });
     }
     if (url.includes('/api/admin/reports/suburbs')) {
       return json({ success: true, suburbs: mockSuburbs });
@@ -96,6 +107,9 @@ function installFetchMock() {
     }
     if (method === 'GET' && url.includes('/api/admin/reports/documents/') && fetchState.docGate) {
       await fetchState.docGate;
+    }
+    if (url.includes('/api/admin/reports/documents/doc-intro')) {
+      return json({ success: true, document: mockIntroDetail });
     }
     if (url.includes('/api/admin/reports/documents/doc-2')) {
       return json({ success: true, document: mockDoc2Detail });
@@ -432,10 +446,81 @@ describe('LeadReportsView', () => {
     expect(children[1].textContent).toContain('CMA — 249 Sunset Road');
   });
 
+  it('shows the Introduction with an Info badge and blocks deletion', async () => {
+    fetchState.docs = [
+      { id: 'doc-intro', title: '249 Sunset Road Introduction', status: 'draft', doc_type: 'lead_intro', quarter: null, updated_at: '2026-10-01T00:00:00.000Z' },
+      ...mockDocs,
+    ];
+
+    render(<LeadReportsView onSwitchToLeads={vi.fn()} initialLeadId="lead-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-report-editor').textContent).toBe('doc-intro');
+    });
+
+    const rows = screen.getAllByTestId('report-list-item');
+    const introRow = rows.find((row) => row.textContent?.includes('249 Sunset Road Introduction'));
+    expect(introRow).toBeTruthy();
+    expect(within(introRow!).getByTestId('report-info-badge').textContent).toBe('Info');
+    expect(within(introRow!).queryByTestId('report-delete-btn')).toBeNull();
+
+    const deleteButton = screen.getByTestId('delete-btn') as HTMLButtonElement;
+    expect(deleteButton.disabled).toBe(true);
+    expect(deleteButton.title).toBe('Introduction cannot be deleted');
+
+    fireEvent.click(deleteButton);
+    expect(screen.queryByText('Confirm Delete')).toBeNull();
+  });
+
+  it('still deletes a normal report while the Introduction is open', async () => {
+    fetchState.docs = [
+      { id: 'doc-intro', title: '249 Sunset Road Introduction', status: 'draft', doc_type: 'lead_intro', quarter: null, updated_at: '2026-10-01T00:00:00.000Z' },
+      ...mockDocs,
+    ];
+
+    render(<LeadReportsView onSwitchToLeads={vi.fn()} initialLeadId="lead-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-report-editor').textContent).toBe('doc-intro');
+    });
+
+    const cmaRow = screen.getAllByTestId('report-list-item').find((row) => row.textContent?.includes('CMA — 249 Sunset Road'));
+    expect(cmaRow).toBeTruthy();
+    fireEvent.click(within(cmaRow!).getByTestId('report-delete-btn'));
+    fireEvent.click(screen.getByText('Confirm Delete'));
+
+    await waitFor(() => {
+      const deleteCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c: unknown[]) =>
+          String(c[0]).includes('/api/admin/reports/documents/doc-2') &&
+          (((c[1] as RequestInit | undefined)?.method) || 'GET') === 'DELETE'
+      );
+      expect(deleteCall).toBeTruthy();
+    });
+
+    expect(screen.queryByText('CMA — 249 Sunset Road')).toBeNull();
+    expect(screen.getByTestId('mock-report-editor').textContent).toBe('doc-intro');
+  });
+
+  it('requests lead introduction backfill when the reports view loads', async () => {
+    render(<LeadReportsView onSwitchToLeads={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('lead-reports-sidebar')).toBeTruthy();
+    });
+
+    const backfillCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) =>
+        String(c[0]).includes('/api/admin/reports/lead-introductions') &&
+        (((c[1] as RequestInit | undefined)?.method) || 'GET') === 'POST'
+    );
+    expect(backfillCall).toBeTruthy();
+  });
+
   it('shows report names with quarterly and monthly periods instead of the draft status in the sidebar', async () => {
     fetchState.docs = [
-      { id: 'doc-q', title: 'Q3 2026 2/65 Target Road', status: 'draft', quarter: '2026-Q3', updated_at: '2026-10-01T00:00:00.000Z' },
-      { id: 'doc-m', title: '09 2026 2/65 Target Road', status: 'draft', quarter: '2026-09', updated_at: '2026-10-02T00:00:00.000Z' },
+      { id: 'doc-q', title: 'Q3 2026 2/65 Target Road', status: 'draft', doc_type: 'report', quarter: '2026-Q3', updated_at: '2026-10-01T00:00:00.000Z' },
+      { id: 'doc-m', title: '09 2026 2/65 Target Road', status: 'draft', doc_type: 'report', quarter: '2026-09', updated_at: '2026-10-02T00:00:00.000Z' },
     ];
 
     render(<LeadReportsView onSwitchToLeads={vi.fn()} initialLeadId="lead-1" />);

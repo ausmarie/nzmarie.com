@@ -221,6 +221,13 @@ export async function DELETE(request: Request) {
   }
 
   try {
+    const existing = await marieQuery<{ doc_type: string }>(
+      `SELECT doc_type FROM report_documents WHERE id = $1`,
+      [id]
+    );
+    if (existing.rows[0]?.doc_type === 'lead_intro') {
+      return NextResponse.json({ success: false, error: 'Introduction cannot be deleted' }, { status: 403 });
+    }
     await marieQuery(`DELETE FROM report_documents WHERE id = $1`, [id]);
     return NextResponse.json({ success: true });
   } catch (error) {
