@@ -19,64 +19,12 @@ function campaignKeyForSuburb(campaignKey: string, suburb: string): string {
   return trimmed;
 }
 
-function extractQuarterKey(campaignKey: string): string | null {
+function extractQuarterInfo(campaignKey: string): { quarter: string; year: number } | null {
   const match = campaignKey.match(/^(\d{4})[_-]([Qq][1-4])/);
-  if (match) {
-    return `${match[1]}-${match[2].toUpperCase()}`;
-  }
-  return null;
-}
-
-async function upsertQuarterStatus(
-  propertyId: string,
-  suburbReportId: string | null,
-  suburb: string | null,
-  campaignKey: string
-) {
-  const quarterKey = extractQuarterKey(campaignKey);
-  if (!quarterKey || !suburb) return;
-
-  const [yearStr, quarter] = quarterKey.split('-');
-  const year = parseInt(yearStr, 10);
-  if (!year) return;
-
-  let reportId = suburbReportId;
-  if (!reportId && suburb) {
-    const reportResult = await marieDB.query(
-      `SELECT id FROM suburb_reports WHERE suburb = $1 AND quarter = $2 AND year = $3 AND status = 'active' LIMIT 1`,
-      [suburb, quarter, year]
-    );
-    if (reportResult.rows.length > 0) {
-      reportId = reportResult.rows[0].id;
-    }
-  }
-
-  if (!reportId) return;
-
-  await marieDB.query(
-    `INSERT INTO outreach_property_quarter_status 
-     (outreach_property_id, suburb_report_id, suburb, quarter, year, status, sent_count, first_sent_at, last_sent_at, campaign_keys)
-     VALUES ($1, $2, $3, $4, $5, 'sent', 1, NOW(), NOW(), ARRAY[$6])
-     ON CONFLICT (outreach_property_id, suburb_report_id) DO UPDATE SET
-       status = CASE 
-         WHEN outreach_property_quarter_status.sent_count = 0 THEN 'sent'
-         ELSE outreach_property_quarter_status.status
-       END,
-       sent_count = outreach_property_quarter_status.sent_count + 1,
-       last_sent_at = NOW(),
-       campaign_keys = array_append(outreach_property_quarter_status.campaign_keys, $6),
-       updated_at = NOW()
-     WHERE outreach_property_quarter_status.outreach_property_id = $1
-       AND outreach_property_quarter_status.suburb_report_id = $2`,
-    [
-      propertyId,
-      reportId,
-      suburb,
-      quarter,
-      year,
-      campaignKey,
-    ]
-  );
+  if (!match) return null;
+  const year = parseInt(match[1], 10);
+  if (!year) return null;
+  return { quarter: match[2].toUpperCase(), year };
 }
 
 export async function POST(request: Request) {
@@ -124,53 +72,134 @@ export async function POST(request: Request) {
     }
 
     const sendUser = session.user.email;
-    const insertedLogs = [];
-    const affectedSuburbs = new Set<string>();
+    const properties = propertiesResult.rows as Array<{ id: string; suburb: string | null }>;
+    const propertyIds = properties.map((property) => property.id);
+    const campaignKeys = properties.map((property) =>
+      campaignKeyForSuburb(campaign_key, property.suburb || '')
+    );
+    const suburbs = properties.map((property) => property.suburb);
+    const affectedSuburbs = new Set(suburbs.filter((suburb): suburb is string => Boolean(suburb)));
 
-    for (const prop of propertiesResult.rows) {
-      if (prop.suburb) {
-        affectedSuburbs.add(prop.suburb);
+    const logResult = await marieDB.query(
+      `INSERT INTO outreach_send_logs (
+        outreach_property_id,
+        suburb_report_id,
+        report_title,
+        campaign_key,
+        suburb,
+        sent_at,
+        sent_by,
+        notes
+      )
+      SELECT
+        t.outreach_property_id,
+        $2::uuid,
+        $3,
+        t.campaign_key,
+        t.suburb,
+        NOW(),
+        $4,
+        $5
+      FROM unnest($1::uuid[], $6::text[], $7::text[])
+        AS t(outreach_property_id, campaign_key, suburb)
+      RETURNING *`,
+      [
+        propertyIds,
+        suburb_report_id || null,
+        report_title,
+        sendUser,
+        notes || null,
+        campaignKeys,
+        suburbs,
+      ]
+    );
+    const insertedLogs = logResult.rows;
+
+    await marieDB.query(
+      `UPDATE outreach_properties AS op
+       SET status = CASE WHEN op.status = 'pending' THEN 'sent' ELSE op.status END,
+           total_send_count = COALESCE(op.total_send_count, 0) + 1,
+           last_sent_at = NOW(),
+           last_campaign = t.campaign_key,
+           sent_at = NOW(),
+           sent_by = $2
+       FROM unnest($1::uuid[], $3::text[]) AS t(id, campaign_key)
+       WHERE op.id = t.id`,
+      [propertyIds, sendUser, campaignKeys]
+    );
+
+    const quarterInfo = extractQuarterInfo(campaign_key);
+    if (quarterInfo) {
+      let reportBySuburb = new Map<string, string>();
+      if (!suburb_report_id) {
+        const reportSuburbs = [...new Set(affectedSuburbs)];
+        if (reportSuburbs.length > 0) {
+          const reportResult = await marieDB.query(
+            `SELECT id, suburb
+             FROM suburb_reports
+             WHERE status = 'active' AND quarter = $1 AND year = $2 AND suburb = ANY($3::text[])`,
+            [quarterInfo.quarter, quarterInfo.year, reportSuburbs]
+          );
+          reportBySuburb = new Map(
+            (reportResult.rows as Array<{ id: string; suburb: string }>).map((report) => [
+              report.suburb,
+              report.id,
+            ])
+          );
+        }
       }
-      const normalizedKey = campaignKeyForSuburb(campaign_key, prop.suburb);
-      const logRes = await marieDB.query(
-        `INSERT INTO outreach_send_logs (
-          outreach_property_id,
-          suburb_report_id,
-          report_title,
-          campaign_key,
-          suburb,
-          sent_at,
-          sent_by,
-          notes
-        ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
-        RETURNING *`,
-        [
-          prop.id,
-          suburb_report_id || null,
-          report_title,
-          normalizedKey,
-          prop.suburb,
-          sendUser,
-          notes || null,
-        ]
-      );
 
-      await marieDB.query(
-        `UPDATE outreach_properties
-         SET status = CASE WHEN status = 'pending' THEN 'sent' ELSE status END,
-             total_send_count = COALESCE(total_send_count, 0) + 1,
+      const quarterRows = properties
+        .map((property, index) => ({
+          id: property.id,
+          reportId: suburb_report_id || (property.suburb ? reportBySuburb.get(property.suburb) : undefined),
+          suburb: property.suburb,
+          campaignKey: campaignKeys[index],
+        }))
+        .filter(
+          (row): row is { id: string; reportId: string; suburb: string; campaignKey: string } =>
+            Boolean(row.reportId && row.suburb)
+        );
+
+      if (quarterRows.length > 0) {
+        await marieDB.query(
+          `INSERT INTO outreach_property_quarter_status
+            (outreach_property_id, suburb_report_id, suburb, quarter, year, status, sent_count, first_sent_at, last_sent_at, campaign_keys)
+           SELECT
+             t.outreach_property_id,
+             t.suburb_report_id,
+             t.suburb,
+             $3,
+             $4,
+             'sent',
+             1,
+             NOW(),
+             NOW(),
+             ARRAY[t.campaign_key]
+           FROM unnest($1::uuid[], $2::uuid[], $5::text[], $6::text[])
+             AS t(outreach_property_id, suburb_report_id, suburb, campaign_key)
+           ON CONFLICT (outreach_property_id, suburb_report_id) DO UPDATE SET
+             status = CASE
+               WHEN outreach_property_quarter_status.sent_count = 0 THEN 'sent'
+               ELSE outreach_property_quarter_status.status
+             END,
+             sent_count = outreach_property_quarter_status.sent_count + 1,
              last_sent_at = NOW(),
-             last_campaign = $1,
-             sent_at = NOW(),
-             sent_by = $2
-         WHERE id = $3`,
-        [normalizedKey, sendUser, prop.id]
-      );
-
-      // Upsert quarter-aware status
-      await upsertQuarterStatus(prop.id, suburb_report_id || null, prop.suburb, normalizedKey);
-
-      insertedLogs.push(logRes.rows[0]);
+             campaign_keys = array_append(
+               COALESCE(outreach_property_quarter_status.campaign_keys, ARRAY[]::text[]),
+               EXCLUDED.campaign_keys[1]
+             ),
+             updated_at = NOW()`,
+          [
+            quarterRows.map((row) => row.id),
+            quarterRows.map((row) => row.reportId),
+            quarterInfo.quarter,
+            quarterInfo.year,
+            quarterRows.map((row) => row.suburb),
+            quarterRows.map((row) => row.campaignKey),
+          ]
+        );
+      }
     }
 
     // Invalidate street-clusters cache for all affected suburbs

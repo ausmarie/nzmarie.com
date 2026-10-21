@@ -33,6 +33,9 @@ interface SendReportModalProps {
   selectedIds: string[];
   suburb: string;
   onSuccess: () => void;
+  onOptimisticSend?: (ids: string[]) => () => void;
+  onConfirmed?: () => void;
+  onFailure?: (message: string) => void;
 }
 
 // Groups individual PDF documents into a single quarterly report set
@@ -68,6 +71,9 @@ export default function SendReportModal({
   selectedIds,
   suburb,
   onSuccess,
+  onOptimisticSend,
+  onConfirmed,
+  onFailure,
 }: SendReportModalProps) {
   const [reports, setReports] = useState<PdfReport[]>([]);
   const [selectedSetKey, setSelectedSetKey] = useState<string>('');
@@ -143,6 +149,10 @@ export default function SendReportModal({
     setLoading(true);
     setError('');
 
+    const rollback = onOptimisticSend?.(selectedIds);
+    onSuccess();
+    onClose();
+
     try {
       const res = await fetch('/api/admin/outreach/send', {
         method: 'POST',
@@ -160,11 +170,12 @@ export default function SendReportModal({
         const data = await res.json();
         throw new Error(data.error || 'Failed to record send log');
       }
-
-      onSuccess();
-      onClose();
+      onConfirmed?.();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      const message = err instanceof Error ? err.message : 'An error occurred';
+      rollback?.();
+      onFailure?.(message);
+      setError(message);
     } finally {
       setLoading(false);
     }

@@ -10,6 +10,7 @@ import AddressAutocomplete from '@/components/property/AddressAutocomplete';
 import { isAdmin } from '@/lib/permissions';
 import { getFixedImageUrl } from '@/lib/google-maps';
 import SendReportModal from './components/SendReportModal';
+import { reorderStreetClustersForStart } from '@/lib/street-cluster-reorder';
 import DispatchHistoryDrawer from './components/DispatchHistoryDrawer';
 import SentDateFilter from './components/SentDateFilter';
 import TodayRunSection, { type TodayRunData } from './components/TodayRunSection';
@@ -267,17 +268,15 @@ export default function OutreachPage() {
   const [availableReports, setAvailableReports] = useState<Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string; label: string }>>([]);
 
   // Today's Run: shared street-clusters data (fetched when Pending + Unsent).
-  const [todayRunBudget, setTodayRunBudget] = useState<number>(() => {
-    if (typeof window === 'undefined') return 30;
-    const stored = window.localStorage.getItem('today_run_budget_v2');
-    const n = stored ? parseInt(stored, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : 30;
-  });
   const [todayRunData, setTodayRunData] = useState<TodayRunData | null>(null);
   const [todayRunLoading, setTodayRunLoading] = useState(false);
   const [todayRunError, setTodayRunError] = useState<string | null>(null);
   const [todayRunRefreshKey, setTodayRunRefreshKey] = useState(0);
   const [todayRunStartStreet, setTodayRunStartStreet] = useState<string>('');
+  const todayRunStartStreetRef = useRef(todayRunStartStreet);
+  useEffect(() => {
+    todayRunStartStreetRef.current = todayRunStartStreet;
+  }, [todayRunStartStreet]);
   // Tracks the (suburb + quarter) the current Today's Run street set belongs to.
   // When either changes, the previously auto-selected run streets must be cleared
   // so the list fetch for the new suburb/quarter can't be filtered by the old
@@ -285,9 +284,22 @@ export default function OutreachPage() {
   // 0 of 0 properties" while the new street-clusters data is loading).
   const todayRunSuburbQuarterRef = useRef<string>('');
 
-  useEffect(() => {
-    window.localStorage.setItem('today_run_budget_v2', String(todayRunBudget));
-  }, [todayRunBudget]);
+  const effectiveTodayRunData = useMemo(() => {
+    if (!todayRunData) return null;
+    return reorderStreetClustersForStart(
+      { ...todayRunData, manualOrder: false },
+      todayRunStartStreet
+    ) as TodayRunData;
+  }, [todayRunData, todayRunStartStreet]);
+
+  const todayRunBatchStreets = useMemo(() => {
+    if (!effectiveTodayRunData?.runs[0]) return [];
+    return effectiveTodayRunData.runs[0].groups.flatMap((group) =>
+      group.streets.map((street) => street.street)
+    );
+  }, [effectiveTodayRunData]);
+
+  const todayRunBatchSize = 30;
 
   // Debounce filter changes: only trigger fetch after 300ms of filter stability
   const [debouncedFilterKey, setDebouncedFilterKey] = useState(0);
@@ -522,17 +534,52 @@ export default function OutreachPage() {
   };
 
   const handleSaveEdit = async () => {
-    if (!editingProperty?.joined_property_id) {
+    const currentProperty = editingProperty;
+    if (!currentProperty?.joined_property_id) {
       showNotification('error', 'No linked property record to edit');
       return;
     }
+    const payload: Record<string, string | number | boolean | null> = {};
+    for (const [key, value] of Object.entries(editFormData)) {
+      payload[key] = value === '' || value === undefined ? null : value;
+    }
+
+    const updatedAddress = (payload.address as string) ?? currentProperty.property_address;
+    const updateItem = (item: OutreachProperty): OutreachProperty => {
+      if (item.id !== currentProperty.id) return item;
+      return {
+        ...item,
+        property_address: updatedAddress,
+        suburb: (payload.suburb as string) ?? item.suburb,
+        city: (payload.city as string) ?? item.city,
+        region: (payload.region as string) ?? item.region,
+        bedrooms: payload.bedrooms !== undefined && payload.bedrooms !== null ? Number(payload.bedrooms) : item.bedrooms,
+        bathrooms: payload.bathrooms !== undefined && payload.bathrooms !== null ? Number(payload.bathrooms) : item.bathrooms,
+        car_spaces: payload.car_spaces !== undefined && payload.car_spaces !== null ? Number(payload.car_spaces) : item.car_spaces,
+        build_year: payload.year_built !== undefined && payload.year_built !== null ? Number(payload.year_built) : item.build_year,
+        floor_area: (payload.floor_size as string) ?? item.floor_area,
+        land_area: (payload.land_area as string | number | null) ?? item.land_area,
+        last_sold_price: payload.last_sold_price !== undefined && payload.last_sold_price !== null ? Number(payload.last_sold_price) : item.last_sold_price,
+        last_sold_date: (payload.last_sold_date as string) ?? item.last_sold_date,
+        capital_value: payload.capital_value !== undefined && payload.capital_value !== null ? Number(payload.capital_value) : item.capital_value,
+        image_url: (payload.cover_image_url as string) ?? item.image_url,
+        description: (payload.description as string) ?? item.description,
+        property_history: (payload.property_history as string) ?? item.property_history,
+      };
+    };
+
+    const previousItems = items;
+    const previousClassicItems = classicItems;
+    cacheRef.current.clear();
+    setItems((prev) => prev.map(updateItem));
+    setClassicItems((prev) => prev.map(updateItem));
+    setEditingProperty(null);
     setSaving(true);
+    showNotification('success', 'Property updated successfully');
+    window.scrollTo(0, 0);
+
     try {
-      const payload: Record<string, string | number | boolean | null> = {};
-      for (const [key, value] of Object.entries(editFormData)) {
-        payload[key] = value === '' || value === undefined ? null : value;
-      }
-      const response = await fetch(`/api/admin/properties/${editingProperty.joined_property_id}`, {
+      const response = await fetch(`/api/admin/properties/${currentProperty.joined_property_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -540,54 +587,22 @@ export default function OutreachPage() {
       const result = await response.json();
       if (!result.success) throw new Error(result.error || 'Failed to update property');
 
-      // 同步更新 outreach_properties（确保 MV 和 list view 显示最新地址）
       const outreachPayload: Record<string, string | null> = {};
       if (payload.address !== undefined) outreachPayload.property_address = payload.address as string | null;
       if (payload.suburb !== undefined) outreachPayload.suburb = payload.suburb as string | null;
       if (payload.city !== undefined) outreachPayload.city = payload.city as string | null;
       if (payload.region !== undefined) outreachPayload.region = payload.region as string | null;
       if (Object.keys(outreachPayload).length > 0) {
-        fetch(`/api/admin/outreach/${editingProperty.id}`, {
+        fetch(`/api/admin/outreach/${currentProperty.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(outreachPayload),
         }).catch(() => { });
       }
-
-      // 更新本地列表数据（infinite + classic 两种模式都处理）
-      const updatedAddress = (payload.address as string) ?? editingProperty.property_address;
-      const updateItem = (item: OutreachProperty): OutreachProperty => {
-        if (item.id !== editingProperty.id) return item;
-        return {
-          ...item,
-          property_address: updatedAddress,
-          suburb: (payload.suburb as string) ?? item.suburb,
-          city: (payload.city as string) ?? item.city,
-          region: (payload.region as string) ?? item.region,
-          bedrooms: payload.bedrooms !== undefined && payload.bedrooms !== null ? Number(payload.bedrooms) : item.bedrooms,
-          bathrooms: payload.bathrooms !== undefined && payload.bathrooms !== null ? Number(payload.bathrooms) : item.bathrooms,
-          car_spaces: payload.car_spaces !== undefined && payload.car_spaces !== null ? Number(payload.car_spaces) : item.car_spaces,
-          build_year: payload.year_built !== undefined && payload.year_built !== null ? Number(payload.year_built) : item.build_year,
-          floor_area: (payload.floor_size as string) ?? item.floor_area,
-          land_area: (payload.land_area as string | number | null) ?? item.land_area,
-          last_sold_price: payload.last_sold_price !== undefined && payload.last_sold_price !== null ? Number(payload.last_sold_price) : item.last_sold_price,
-          last_sold_date: (payload.last_sold_date as string) ?? item.last_sold_date,
-          capital_value: payload.capital_value !== undefined && payload.capital_value !== null ? Number(payload.capital_value) : item.capital_value,
-          image_url: (payload.cover_image_url as string) ?? item.image_url,
-          description: (payload.description as string) ?? item.description,
-          property_history: (payload.property_history as string) ?? item.property_history,
-        };
-      };
-
-      // 清除缓存，防止旧数据覆盖
-      cacheRef.current.clear();
-      setItems((prev) => prev.map(updateItem));
-      setClassicItems((prev) => prev.map(updateItem));
-
-      showNotification('success', 'Property updated successfully');
-      setEditingProperty(null);
-      window.scrollTo(0, 0);
     } catch (err) {
+      setItems(previousItems);
+      setClassicItems(previousClassicItems);
+      setEditingProperty(currentProperty);
       showNotification('error', err instanceof Error ? err.message : 'Failed to update property');
     } finally {
       setSaving(false);
@@ -789,8 +804,18 @@ export default function OutreachPage() {
     };
   }, [activeTab, suburbFilter, streetFilter, runStreetFilter, campaignFilter, debouncedSearch, sortOrder, propertyFilter, marketStatus, junkFilter, lastSoldPreset, reportSuburbFilter, sentStatusFilter, sortMode, sentDateFilter, likedStreetModeApplied, likedStartStreet, pageSize, activeQuarter]);
 
+  const waitingForTodayRun =
+    activeTab === 'pending' &&
+    sentStatusFilter === 'unsent' &&
+    !todayRunData &&
+    !todayRunError;
+
   const fetchItems = useCallback(async () => {
     if (isClassic) return;
+    if (waitingForTodayRun) {
+      setLoading(false);
+      return;
+    }
     const key1 = buildCacheKey(1);
     const cached1 = cacheRef.current.get(key1);
     if (cached1) {
@@ -840,7 +865,7 @@ export default function OutreachPage() {
     } finally {
       setLoading(false);
     }
-  }, [fetchPageData, isClassic, buildCacheKey]);
+  }, [fetchPageData, isClassic, buildCacheKey, waitingForTodayRun]);
 
   // Keep fetchItemsRef pointing to the latest fetchItems so effects that
   // intentionally omit it from deps (auth, debounce-key) always call the
@@ -865,7 +890,7 @@ export default function OutreachPage() {
   }, [debouncedFilterKey, status]);
 
   useEffect(() => {
-    if (!isClassic || status !== 'authenticated') return;
+    if (!isClassic || status !== 'authenticated' || waitingForTodayRun) return;
     const key = buildCacheKey(currentPage);
     const cached = cacheRef.current.get(key);
     if (cached) {
@@ -898,7 +923,7 @@ export default function OutreachPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [isClassic, currentPage, debouncedFilterKey, status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isClassic, currentPage, debouncedFilterKey, status, waitingForTodayRun]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1188,23 +1213,14 @@ export default function OutreachPage() {
     return s || '';
   }, [displayItems]);
 
-  // Fetch street clusters when Pending + Unsent + a suburb is known.
-  const todayRunSuburb = reportSuburbFilter || firstPendingSuburb;
+  const activeQuarterReportSuburb = useMemo(() => {
+    if (!activeQuarter) return '';
+    return availableReports
+      .filter((report) => report.label === activeQuarter && report.suburb !== 'North Shore')
+      .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0]?.suburb || '';
+  }, [activeQuarter, availableReports]);
 
-  const handleTodayRunOrderApplied = useCallback(() => {
-    setTodayRunRefreshKey((k) => k + 1);
-  }, []);
-
-  const handleResetManualOrder = useCallback(async (suburb: string) => {
-    try {
-      await fetch(`/api/admin/outreach/street-order?suburb=${encodeURIComponent(suburb)}`, {
-        method: 'DELETE',
-      });
-    } catch {
-      // non-fatal; the refresh below re-renders Today's Run
-    }
-    setTodayRunRefreshKey((k) => k + 1);
-  }, []);
+  const todayRunSuburb = reportSuburbFilter || activeQuarterReportSuburb || suburbFilter || firstPendingSuburb;
 
   // Merged effect: restore start street from localStorage and fetch street-clusters
   // together in a single effect. This avoids a React setState-batching race where
@@ -1239,11 +1255,11 @@ export default function OutreachPage() {
     }
 
     const effectiveStartStreet =
-      todayRunStartStreet ||
+      todayRunStartStreetRef.current ||
       window.localStorage.getItem(`today_run_start_street:${todayRunSuburb}`) ||
       '';
 
-    if (effectiveStartStreet !== todayRunStartStreet) {
+    if (effectiveStartStreet !== todayRunStartStreetRef.current) {
       setTodayRunStartStreet(effectiveStartStreet);
     }
 
@@ -1253,14 +1269,11 @@ export default function OutreachPage() {
     const params = new URLSearchParams({
       suburb: todayRunSuburb,
       radius: '500',
-      budget: String(todayRunBudget),
+      budget: String(todayRunBatchSize),
       status: 'pending',
       sent_status: 'unsent',
-      address_coords: 'true',
+      address_coords: viewMode === 'map' ? 'true' : 'false',
     });
-    if (effectiveStartStreet) {
-      params.set('start_street', effectiveStartStreet);
-    }
     if (activeQuarter) {
       params.set('report_quarter', activeQuarter);
     }
@@ -1288,7 +1301,40 @@ export default function OutreachPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, sentStatusFilter, todayRunSuburb, todayRunBudget, todayRunStartStreet, todayRunRefreshKey, activeQuarter]);
+  }, [activeTab, sentStatusFilter, todayRunSuburb, todayRunRefreshKey, activeQuarter, viewMode]);
+
+  const todayRunBatchKey = todayRunBatchStreets.join('|');
+  useEffect(() => {
+    if (activeTab !== 'pending' || sentStatusFilter !== 'unsent') return;
+    if (!todayRunBatchKey) {
+      if (todayRunData) {
+        setRunStreetFilter((prev) => (prev.length > 0 ? [] : prev));
+      }
+      return;
+    }
+    setRunStreetFilter((prev) =>
+      prev.join('|') === todayRunBatchKey ? prev : todayRunBatchStreets
+    );
+    if (!reportSuburbFilter && todayRunSuburb) {
+      setReportSuburbFilter(todayRunSuburb);
+    }
+  }, [
+    activeTab,
+    sentStatusFilter,
+    todayRunBatchKey,
+    todayRunBatchStreets,
+    todayRunData,
+    reportSuburbFilter,
+    todayRunSuburb,
+  ]);
+
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    if (activeTab !== 'pending' || sentStatusFilter !== 'unsent') return;
+    if (todayRunData && todayRunBatchKey) return;
+    if (!todayRunData && !todayRunError) return;
+    fetchItemsRef.current?.();
+  }, [status, activeTab, sentStatusFilter, todayRunData, todayRunError, todayRunBatchKey]);
 
   const groupedBySuburb = useMemo(() => {
     const sourceItems = filteredLikedItems ?? displayItems;
@@ -1312,8 +1358,8 @@ export default function OutreachPage() {
     // Cluster order map: street name -> sort index, from the street-clusters
     // API for the active suburb. Streets not in the cluster list sort last.
     const clusterOrder = new Map<string, number>();
-    if (todayRunData && todayRunData.suburb) {
-      todayRunData.groups.forEach((g) => {
+    if (effectiveTodayRunData && effectiveTodayRunData.suburb) {
+      effectiveTodayRunData.groups.forEach((g) => {
         g.streets.forEach((s) => {
           if (!clusterOrder.has(s.street)) {
             clusterOrder.set(s.street, clusterOrder.size);
@@ -1362,15 +1408,15 @@ export default function OutreachPage() {
         };
       })
       .sort((a, b) => a.suburb.localeCompare(b.suburb, undefined, { sensitivity: 'base' }));
-  }, [currentContentKey, todayRunData, filteredLikedItems]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentContentKey, effectiveTodayRunData, filteredLikedItems]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Card view mirrors the list view's ordering: streets follow the Today's Run
   // cluster order (from street-clusters), then house number within a street.
   const cardOrderedItems = useMemo(() => {
     const items = [...(filteredLikedItems ?? displayItems)];
     const clusterOrder = new Map<string, number>();
-    if (todayRunData && todayRunData.suburb) {
-      todayRunData.groups.forEach((g) => {
+    if (effectiveTodayRunData && effectiveTodayRunData.suburb) {
+      effectiveTodayRunData.groups.forEach((g) => {
         g.streets.forEach((s) => {
           if (!clusterOrder.has(s.street)) {
             clusterOrder.set(s.street, clusterOrder.size);
@@ -1408,7 +1454,7 @@ export default function OutreachPage() {
         : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     return items;
-  }, [displayItems, filteredLikedItems, todayRunData, sortOrder]);
+  }, [displayItems, filteredLikedItems, effectiveTodayRunData, sortOrder]);
 
   // Restore classic items from the shared per-page cache when switching to
   // classic mode. This avoids a loading flash when the data was already
@@ -1537,26 +1583,15 @@ export default function OutreachPage() {
 
         {activeTab === 'pending' && sentStatusFilter === 'unsent' && (
           <TodayRunSection
-            isMobile={isMobile}
             status={sentStatusFilter}
-            data={todayRunData}
+            data={effectiveTodayRunData}
             loading={todayRunLoading}
             error={todayRunError}
-            budget={todayRunBudget}
-            onBudgetChange={setTodayRunBudget}
-            onSelectRun={(suburb, streets) => {
-              setReportSuburbFilter(suburb);
-              setRunStreetFilter(streets);
-              setStreetFilter('');
-            }}
             onSelectStreet={(suburb, street) => {
               setReportSuburbFilter(suburb);
               setRunStreetFilter([]);
               setStreetFilter(street);
             }}
-            reportQuarter={activeQuarter || undefined}
-            onOrderApplied={handleTodayRunOrderApplied}
-            onResetManualOrder={handleResetManualOrder}
             startStreet={todayRunStartStreet}
             onStartStreetChange={(suburb, street) => {
               window.localStorage.setItem(`today_run_start_street:${suburb}`, street);
@@ -3409,7 +3444,7 @@ export default function OutreachPage() {
           {!isMobile && (
             <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, background: '#fff', overflow: 'hidden', minWidth: 0 }}>
               <OutreachMapSidebar
-                data={todayRunData}
+                data={effectiveTodayRunData}
                 loading={todayRunLoading}
                 error={todayRunError}
                 activeRunId={activeMapRunId}
@@ -3442,7 +3477,7 @@ export default function OutreachPage() {
           {isMobile && (
             <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 60 }}>
               <OutreachMapSidebar
-                data={todayRunData}
+                data={effectiveTodayRunData}
                 loading={todayRunLoading}
                 error={todayRunError}
                 activeRunId={activeMapRunId}
@@ -3474,7 +3509,7 @@ export default function OutreachPage() {
 
           <div style={{ height: 600, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
             <DynamicMapView
-              suburb={reportSuburbFilter || todayRunData?.suburb || firstPendingSuburb}
+              suburb={reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb}
               activeRunId={activeMapRunId}
               selectedStreet={activeMapStreet}
               sentStatus="all"
@@ -4094,12 +4129,24 @@ export default function OutreachPage() {
           showNotification('success', 'Report dispatch logged successfully');
           clearSelected();
           cacheRef.current.clear();
-          if (isClassic) {
-            setCurrentPage(currentPage);
-          } else {
-            fetchItems();
-          }
           window.scrollTo(0, 0);
+        }}
+        onConfirmed={() => {
+          setTodayRunRefreshKey((k) => k + 1);
+        }}
+        onOptimisticSend={(ids) => {
+          const idSet = new Set(ids);
+          const previousItems = items;
+          const previousClassicItems = classicItems;
+          setItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+          setClassicItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+          return () => {
+            setItems(previousItems);
+            setClassicItems(previousClassicItems);
+          };
+        }}
+        onFailure={(message) => {
+          showNotification('error', `Dispatch failed, changes reverted: ${message}`);
         }}
       />
 
@@ -4278,6 +4325,25 @@ export function ReportFilterSection({
     }
   }, [activeQuarter, allQuarters, setActiveQuarter]);
 
+  useEffect(() => {
+    if (!activeQuarter || reportSuburbFilter) return;
+    const fallback = availableReports
+      .filter((report) => report.label === activeQuarter && report.suburb !== 'North Shore')
+      .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0];
+    if (fallback) {
+      setSuburbFilter(fallback.suburb);
+      setReportSuburbFilter(fallback.suburb);
+      setLastSoldPreset('all');
+    }
+  }, [
+    activeQuarter,
+    availableReports,
+    reportSuburbFilter,
+    setSuburbFilter,
+    setReportSuburbFilter,
+    setLastSoldPreset,
+  ]);
+
   const orderedSuburbs = useMemo(() => {
     const latestBySuburb = new Map<string, string>();
     for (const r of availableReports) {
@@ -4349,6 +4415,14 @@ export function ReportFilterSection({
                       setLastSoldPreset('all');
                     } else {
                       setDefaultReport(null);
+                      const fallback = availableReports
+                        .filter((report) => report.label === label && report.suburb !== 'North Shore')
+                        .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0];
+                      if (fallback) {
+                        setSuburbFilter(fallback.suburb);
+                        setReportSuburbFilter(fallback.suburb);
+                        setLastSoldPreset('all');
+                      }
                     }
                   }
                 } catch { /* ignore */ }
@@ -4430,7 +4504,7 @@ export function ReportFilterSection({
               </button>
             )}
             {reportSuburbFilter && (
-              <button onClick={() => { setReportSuburbFilter('');  onClearRunFilter(); }}
+              <button onClick={() => { setActiveQuarter(''); setReportSuburbFilter('');  onClearRunFilter(); }}
                 style={{ padding: '7px 14px', backgroundColor: '#fef2f2', color: '#dc2626', border: '2px solid #fecaca', borderRadius: '10px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: '500' }}
               >✕ Clear</button>
             )}

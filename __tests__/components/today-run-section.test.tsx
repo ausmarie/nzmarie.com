@@ -39,14 +39,10 @@ const data: TodayRunData = {
 
 function baseProps(overrides: Record<string, unknown> = {}) {
   return {
-    isMobile: false,
     status: 'unsent' as const,
     data,
     loading: false,
     error: null,
-    budget: 20,
-    onBudgetChange: vi.fn(),
-    onSelectRun: vi.fn(),
     onSelectStreet: vi.fn(),
     ...overrides,
   };
@@ -62,28 +58,23 @@ describe('TodayRunSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('shows the English header and run summary with Addresses label', () => {
+  it('shows the route header and nearby street summary', () => {
     render(<TodayRunSection {...baseProps()} />);
-    expect(screen.getByText("🚀 Today's Run")).toBeTruthy();
-    expect(screen.getByText(/14 addresses planned · 4 runs/)).toBeTruthy();
-    expect(screen.getByText('Addresses')).toBeTruthy();
-    expect(screen.getByRole('spinbutton', { name: 'Addresses per run' })).toBeTruthy();
+    expect(screen.getByText("🚀 Today's Route")).toBeTruthy();
+    expect(screen.getByText(/6 addresses · 3 streets/)).toBeTruthy();
+    expect(screen.getByText('Nearby streets in walking order')).toBeTruthy();
+    expect(screen.queryByText(/Run 1/)).toBeNull();
+    expect(screen.queryByText('Manual Run')).toBeNull();
+    expect(screen.queryByRole('spinbutton')).toBeNull();
   });
 
-  it('shows only Run 1 and Run 2 by default, with a More runs button', () => {
+  it('shows only the first route batch as ordered street chips', () => {
     render(<TodayRunSection {...baseProps()} />);
-    expect(screen.getByText('Run 1 (Recommended · Start here)')).toBeTruthy();
-    expect(screen.getByText('Run 2')).toBeTruthy();
-    expect(screen.queryByText('Run 3')).toBeNull();
-    expect(screen.getByRole('button', { name: 'More runs (2)' })).toBeTruthy();
-  });
-
-  it('shows all runs after clicking More runs', () => {
-    render(<TodayRunSection {...baseProps()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'More runs (2)' }));
-    expect(screen.getByText('Run 3')).toBeTruthy();
-    expect(screen.getByText('Run 4')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Show fewer runs' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Street 1-0 (2)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Street 1-1 (2)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Street 1-2 (2)' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Street 2-/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /More runs/ })).toBeNull();
   });
 
   it('shows loading state', () => {
@@ -96,38 +87,15 @@ describe('TodayRunSection', () => {
     expect(screen.getByText('oops')).toBeTruthy();
   });
 
-  it('shows empty message when no runs', () => {
+  it('shows empty message when no route streets', () => {
     render(<TodayRunSection {...baseProps({ data: { ...data, runs: [] } })} />);
     expect(screen.getByText('No pending addresses in this suburb.')).toBeTruthy();
   });
 
-  it('expanding a run shows only street names with address counts (no address list)', () => {
-    render(<TodayRunSection {...baseProps()} />);
-
-    // Addresses are not shown before expansion.
-    expect(screen.queryByText('1 Street 1-0')).toBeNull();
-    fireEvent.click(screen.getAllByRole('button', { name: 'View streets ▼' })[0]);
-
-    // Street names + counts are visible.
-    expect(screen.getByRole('button', { name: /Street 1-0/ })).toBeTruthy();
-    expect(screen.getAllByText('2 addresses')).toHaveLength(3);
-    // Full addresses are NOT listed.
-    expect(screen.queryByText('1 Street 1-0')).toBeNull();
-  });
-
-  it('clicking a run card calls onSelectRun with all its streets', () => {
-    const onSelectRun = vi.fn();
-    render(<TodayRunSection {...baseProps({ onSelectRun })} />);
-
-    fireEvent.click(screen.getByText('Run 1 (Recommended · Start here)'));
-    expect(onSelectRun).toHaveBeenCalledWith('Torbay', ['Street 1-0', 'Street 1-1', 'Street 1-2']);
-  });
-
-  it('calls onSelectStreet when a street name is clicked in expanded view', () => {
+  it('calls onSelectStreet when a nearby street is clicked', () => {
     const onSelectStreet = vi.fn();
     render(<TodayRunSection {...baseProps({ onSelectStreet })} />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'View streets ▼' })[0]);
-    fireEvent.click(screen.getByRole('button', { name: /Street 1-1/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Street 1-1 (2)' }));
     expect(onSelectStreet).toHaveBeenCalledWith('Torbay', 'Street 1-1');
   });
 
@@ -138,16 +106,6 @@ describe('TodayRunSection', () => {
       />
     );
     expect(screen.getByText(/1 street without location data/)).toBeTruthy();
-  });
-
-  it('updates addresses from the input', () => {
-    const onBudgetChange = vi.fn();
-    render(<TodayRunSection {...baseProps({ onBudgetChange })} />);
-
-    const input = screen.getByRole('spinbutton', { name: 'Addresses per run' });
-    fireEvent.change(input, { target: { value: '30' } });
-    fireEvent.blur(input);
-    expect(onBudgetChange).toHaveBeenCalledWith(30);
   });
 
   it('renders a start-street dropdown when allStreets are available', () => {
@@ -192,7 +150,7 @@ describe('TodayRunSection', () => {
     expect(onStartStreetChange).toHaveBeenCalledWith('Torbay', 'Beta Street');
   });
 
-  it('disables the start-street dropdown when a manual order is applied', () => {
+  it('keeps the start-street dropdown enabled when a legacy manual order exists', () => {
     render(
       <TodayRunSection
         {...baseProps({
@@ -210,7 +168,6 @@ describe('TodayRunSection', () => {
       />
     );
     const select = screen.getByLabelText('Start street') as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
-    expect(screen.getAllByText(/Manual order applied/).length).toBeGreaterThan(0);
+    expect(select.disabled).toBe(false);
   });
 });

@@ -53,10 +53,10 @@ export async function PATCH(
   }
 
   values.push(id);
-  const sql = `UPDATE properties SET ${updates.join(', ')} WHERE id = $${idx}`;
+  const sql = `UPDATE properties SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`;
 
   try {
-    await marieQuery(sql, values);
+    const updated = await marieQuery(sql, values);
 
     // Refresh MV if no_junk_mail was updated so outreach queries see the latest value
     if (body.no_junk_mail !== undefined) {
@@ -67,14 +67,13 @@ export async function PATCH(
       }
     }
 
-    const updated = await marieQuery(
-      `SELECT * FROM properties WHERE id = $1`,
-      [id]
-    );
     const row = updated.rows[0] as Record<string, unknown> | undefined;
     const suburbForCache = typeof row?.suburb === 'string' ? row.suburb : null;
+    const addressFieldsChanged = ['address', 'suburb', 'city', 'region'].some(
+      (field) => body[field] !== undefined
+    );
 
-    if (suburbForCache) {
+    if (suburbForCache && addressFieldsChanged) {
       invalidateStreetClustersForSuburb(suburbForCache).catch(() => { });
     }
 

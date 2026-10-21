@@ -110,4 +110,83 @@ describe('SendReportModal', () => {
     expect(body.report_title).toBe('Torbay 2026-Q2 Market Report');
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('closes optimistically and confirms after the send succeeds', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ reports: torbayDocs }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+    const rollback = vi.fn();
+    const onOptimisticSend = vi.fn(() => rollback);
+    const onSuccess = vi.fn();
+    const onClose = vi.fn();
+    const onConfirmed = vi.fn();
+    const onFailure = vi.fn();
+
+    renderModal({
+      selectedIds: ['p1', 'p2'],
+      onOptimisticSend,
+      onSuccess,
+      onClose,
+      onConfirmed,
+      onFailure,
+    });
+
+    await screen.findByDisplayValue('2026_Q2_Torbay');
+    fireEvent.submit(
+      screen.getByRole('button', { name: /Confirm Dispatch Log/i }).closest('form')!
+    );
+
+    expect(onOptimisticSend).toHaveBeenCalledWith(['p1', 'p2']);
+    expect(onSuccess).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(onConfirmed).toHaveBeenCalled();
+    });
+    expect(rollback).not.toHaveBeenCalled();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the optimistic update when the send fails', async () => {
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ reports: torbayDocs }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: 'Send failed' }),
+      });
+
+    const rollback = vi.fn();
+    const onOptimisticSend = vi.fn(() => rollback);
+    const onConfirmed = vi.fn();
+    const onFailure = vi.fn();
+
+    renderModal({
+      selectedIds: ['p1'],
+      onOptimisticSend,
+      onConfirmed,
+      onFailure,
+    });
+
+    await screen.findByDisplayValue('2026_Q2_Torbay');
+    fireEvent.submit(
+      screen.getByRole('button', { name: /Confirm Dispatch Log/i }).closest('form')!
+    );
+
+    await waitFor(() => {
+      expect(onFailure).toHaveBeenCalledWith('Send failed');
+    });
+    expect(rollback).toHaveBeenCalledTimes(1);
+    expect(onConfirmed).not.toHaveBeenCalled();
+    expect(await screen.findByText('Send failed')).toBeTruthy();
+  });
 });
