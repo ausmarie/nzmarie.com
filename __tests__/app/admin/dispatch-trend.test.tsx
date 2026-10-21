@@ -26,6 +26,7 @@ const mockTrend: DispatchTrend = {
     { bucket: '2026-08-01', sent: 5, junk: 1 },
   ],
   quarterly: [{ bucket: '2026-07-01', sent: 15, junk: 3 }],
+  yearly: [{ bucket: '2026-01-01', sent: 15, junk: 3 }],
   seriesBySuburb: {
     daily: {
       Torbay: [
@@ -47,6 +48,10 @@ const mockTrend: DispatchTrend = {
     },
     quarterly: {
       Torbay: [{ bucket: '2026-07-01', sent: 15, junk: 3 }],
+      Albany: [],
+    },
+    yearly: {
+      Torbay: [{ bucket: '2026-01-01', sent: 15, junk: 3 }],
       Albany: [],
     },
   },
@@ -75,6 +80,7 @@ const mockTrend: DispatchTrend = {
 describe('DispatchTrendSection', () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.resetAllMocks();
   });
 
@@ -357,6 +363,67 @@ describe('DispatchTrendSection', () => {
     expect(rows[2].textContent).toContain('Oteha');
     expect(rows[4].textContent).toContain('Oteha');
     expect(rows[5].textContent).toContain('Torbay');
+  });
+
+  it('makes the volume chart horizontally scrollable when there are many buckets', () => {
+    const daily = Array.from({ length: 30 }, (_, i) => ({
+      bucket: `2026-07-${String(i + 1).padStart(2, '0')}`,
+      sent: i,
+      junk: 0,
+    }));
+    const monthly = Array.from({ length: 10 }, (_, i) => ({
+      bucket: `2026-${String((i % 12) + 1).padStart(2, '0')}-01`,
+      sent: i,
+      junk: 0,
+    }));
+    const trend: DispatchTrend = {
+      ...mockTrend,
+      daily,
+      monthly,
+    };
+
+    render(<DispatchTrendSection trend={trend} />);
+
+    const scroller = screen.getByTestId('dispatch-chart-scroll');
+    expect(scroller.className).toContain('overflow-x-auto');
+    expect(scroller.getAttribute('role')).toBe('region');
+    expect(screen.getByTestId('dispatch-chart-canvas').style.minWidth).toBe('1320px');
+    expect(screen.getByTestId('dispatch-chart-canvas').style.maxWidth).toBe('6000px');
+    expect(screen.getByText('Swipe horizontally to see more dates.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Monthly' }));
+
+    expect(screen.getByTestId('dispatch-chart-canvas').style.minWidth).toBe('720px');
+    expect(screen.getByTestId('dispatch-chart-canvas').style.maxWidth).toBe('2000px');
+  });
+
+  it('shows yearly totals when the yearly granularity is selected', () => {
+    render(<DispatchTrendSection trend={mockTrend} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Yearly' }));
+
+    expect(screen.getByText('Sent: 15')).toBeTruthy();
+    expect(screen.getByText('Junk: 3')).toBeTruthy();
+  });
+
+  it('opens the chart at the latest data and returns there after switching granularity', () => {
+    const scrollWidthSpy = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(1200);
+    const clientWidthSpy = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400);
+
+    render(<DispatchTrendSection trend={mockTrend} />);
+
+    const before = screen.getByTestId('dispatch-chart-scroll');
+    expect(before.scrollLeft).toBe(800);
+
+    before.scrollLeft = 100;
+    fireEvent.click(screen.getByRole('button', { name: 'Weekly' }));
+
+    const after = screen.getByTestId('dispatch-chart-scroll');
+    expect(after).not.toBe(before);
+    expect(after.scrollLeft).toBe(800);
+
+    scrollWidthSpy.mockRestore();
+    clientWidthSpy.mockRestore();
   });
 
   it('renders report links for each quarter report', () => {

@@ -234,7 +234,7 @@ export async function GET(request: Request) {
   try {
     await ensureCampaignTablesExist();
 
-    const cacheKey = `dashboard:stats:${suburb || 'all'}:${quarterKey || 'all'}`;
+    const cacheKey = `dashboard:stats:v3:${suburb || 'all'}:${quarterKey || 'all'}`;
 
     const result = await getCachedOrFetch(
       cacheKey,
@@ -424,41 +424,44 @@ export async function GET(request: Request) {
                 date_trunc('week', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
                 date_trunc('month', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
                 date_trunc('quarter', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
+                date_trunc('year', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
                 sl.outreach_property_id
               FROM outreach_send_logs sl
               WHERE sl.sent_at IS NOT NULL
             ),
-            dispatched_ids_cte AS MATERIALIZED (
-              SELECT DISTINCT outreach_property_id AS id
-              FROM outreach_send_logs
+            junk_props_base AS MATERIALIZED (
+              SELECT
+                op.suburb,
+                COALESCE(
+                  (SELECT sr.year::text || '_' || sr.quarter || '_' || sr.suburb
+                   FROM suburb_reports sr
+                   WHERE sr.suburb = op.suburb
+                     AND sr.status = 'active'
+                     AND sr.year IS NOT NULL
+                     AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
+                     AND sr.uploaded_at <= COALESCE(p.no_junk_mail_updated_at, op.created_at AT TIME ZONE 'Pacific/Auckland')
+                   ORDER BY sr.uploaded_at DESC
+                   LIMIT 1),
+                  op.last_campaign,
+                  op.campaign
+                ) AS campaign_key,
+                COALESCE(p.no_junk_mail_updated_at, op.created_at AT TIME ZONE 'Pacific/Auckland') AS junk_at,
+                p.id AS property_id
+              FROM outreach_properties op
+              JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
+              WHERE p.no_junk_mail = TRUE
             ),
             junk_props_buckets AS MATERIALIZED (
               SELECT
-                op.suburb,
-                op.campaign AS campaign_key,
-                date_trunc('day', (CASE WHEN p.no_junk_mail = TRUE AND p.no_junk_mail_updated_at IS NOT NULL
-                                        THEN p.no_junk_mail_updated_at
-                                        ELSE op.created_at
-                                   END) AT TIME ZONE 'Pacific/Auckland') AS day_bucket,
-                date_trunc('week', (CASE WHEN p.no_junk_mail = TRUE AND p.no_junk_mail_updated_at IS NOT NULL
-                                         THEN p.no_junk_mail_updated_at
-                                         ELSE op.created_at
-                                    END) AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
-                date_trunc('month', (CASE WHEN p.no_junk_mail = TRUE AND p.no_junk_mail_updated_at IS NOT NULL
-                                          THEN p.no_junk_mail_updated_at
-                                          ELSE op.created_at
-                                     END) AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
-                date_trunc('quarter', (CASE WHEN p.no_junk_mail = TRUE AND p.no_junk_mail_updated_at IS NOT NULL
-                                            THEN p.no_junk_mail_updated_at
-                                            ELSE op.created_at
-                                       END) AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
-                op.id AS property_id
-              FROM outreach_properties op
-              JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
-              LEFT JOIN dispatched_ids_cte d ON d.id = op.id
-              WHERE p.no_junk_mail = TRUE
-                AND LOWER(op.status) = 'pending'
-                AND d.id IS NULL
+                suburb,
+                campaign_key,
+                date_trunc('day', junk_at AT TIME ZONE 'Pacific/Auckland') AS day_bucket,
+                date_trunc('week', junk_at AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
+                date_trunc('month', junk_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
+                date_trunc('quarter', junk_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
+                date_trunc('year', junk_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
+                property_id
+              FROM junk_props_base
             ),
             quarterly_suburb_sent_cte AS (
               SELECT
@@ -509,8 +512,8 @@ export async function GET(request: Request) {
                   THEN sr.year::int * 4 + (substring(sr.quarter from 'Q([1-4])')::int - 1)
                 END AS q_index,
                 CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
-                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-](Q[1-4])')
-                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
+                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-]Q([1-4])')
+                WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
                   THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
                   WHEN sr.quarter ~ '^Q[1-4]$'
                   THEN sr.year::text || '-Q' || substring(sr.quarter from 'Q([1-4])')
@@ -563,6 +566,12 @@ export async function GET(request: Request) {
               FROM dispatch_report_periods rq
               JOIN dispatch_send_logs prevq
                 ON prevq.suburb = rq.suburb AND prevq.q_index = rq.q_index - 1
+              WHERE rq.period_type = 'quarter'
+              UNION
+              SELECT rq.suburb, rq.period_key, cur.pid
+              FROM dispatch_report_periods rq
+              JOIN dispatch_send_logs cur
+                ON cur.suburb = rq.suburb AND cur.q_index = rq.q_index
               WHERE rq.period_type = 'quarter'
               UNION
               SELECT rq.suburb, rq.period_key, op.id
@@ -665,10 +674,12 @@ export async function GET(request: Request) {
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(week_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, week_bucket ORDER BY week_bucket) s) as sent_weekly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(month_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, month_bucket ORDER BY month_bucket) s) as sent_monthly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(quarter_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, quarter_bucket ORDER BY quarter_bucket) s) as sent_quarterly,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(year_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, year_bucket ORDER BY year_bucket) s) as sent_yearly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(day_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, day_bucket ORDER BY day_bucket) s) as junk_daily,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(week_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, week_bucket ORDER BY week_bucket) s) as junk_weekly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(month_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, month_bucket ORDER BY month_bucket) s) as junk_monthly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(quarter_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, quarter_bucket ORDER BY quarter_bucket) s) as junk_quarterly,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(year_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, year_bucket ORDER BY year_bucket) s) as junk_yearly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
               SELECT d.suburb, d.campaign_key, d.sent_count, COALESCE(d.junk_count, 0) AS junk_count,
                      GREATEST(0, d.total_count - d.sent_count - COALESCE(d.junk_count, 0)) AS unsent_count,
@@ -794,6 +805,7 @@ export async function GET(request: Request) {
         const builtWeekly = buildTrend(filterRows(toTrendRows(row.sent_weekly)), filterRows(toTrendRows(row.junk_weekly)));
         const builtMonthly = buildTrend(filterRows(toTrendRows(row.sent_monthly)), filterRows(toTrendRows(row.junk_monthly)));
         const builtQuarterly = buildTrend(filterRows(toTrendRows(row.sent_quarterly)), filterRows(toTrendRows(row.junk_quarterly)));
+        const builtYearly = buildTrend(filterRows(toTrendRows(row.sent_yearly)), filterRows(toTrendRows(row.junk_yearly)));
 
         const dispatchMap = new Map<string, {
           suburb: string;
@@ -940,11 +952,13 @@ export async function GET(request: Request) {
             weekly: builtWeekly.all,
             monthly: builtMonthly.all,
             quarterly: builtQuarterly.all,
+            yearly: builtYearly.all,
             seriesBySuburb: {
               daily: builtDaily.bySuburb,
               weekly: builtWeekly.bySuburb,
               monthly: builtMonthly.bySuburb,
               quarterly: builtQuarterly.bySuburb,
+              yearly: builtYearly.bySuburb,
             },
             bySuburb: dispatchBySuburb,
           },

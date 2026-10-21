@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   BarChart,
   Bar,
@@ -13,8 +13,9 @@ import {
 } from 'recharts';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import { periodSortValue } from '@/lib/report-period';
+import { dispatchChartMaxWidth, dispatchChartMinWidth } from '@/lib/dispatch-chart';
 
-export type TrendGranularity = 'daily' | 'weekly' | 'monthly' | 'quarterly';
+export type TrendGranularity = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
 
 export interface TrendBucket {
   bucket: string;
@@ -39,17 +40,19 @@ export interface DispatchTrend {
   weekly: TrendBucket[];
   monthly: TrendBucket[];
   quarterly: TrendBucket[];
+  yearly: TrendBucket[];
   seriesBySuburb: Record<TrendGranularity, Record<string, TrendBucket[]>>;
   bySuburb: SuburbDispatch[];
 }
 
-const GRANULARITIES: TrendGranularity[] = ['daily', 'weekly', 'monthly', 'quarterly'];
+const GRANULARITIES: TrendGranularity[] = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'];
 
 const GRANULARITY_LABELS: Record<TrendGranularity, string> = {
   daily: 'Daily',
   weekly: 'Weekly',
   monthly: 'Monthly',
   quarterly: 'Quarterly',
+  yearly: 'Yearly',
 };
 
 function formatBucketLabel(bucket: string, granularity: TrendGranularity): string {
@@ -62,6 +65,9 @@ function formatBucketLabel(bucket: string, granularity: TrendGranularity): strin
   }
   if (granularity === 'monthly') {
     return d.toLocaleDateString('en-NZ', { month: 'short', year: '2-digit' });
+  }
+  if (granularity === 'yearly') {
+    return String(d.getFullYear());
   }
   const quarter = Math.floor(d.getMonth() / 3) + 1;
   return `Q${quarter} ${String(d.getFullYear()).slice(2)}`;
@@ -89,17 +95,21 @@ function DispatchVolumeChart({
   onClearSuburb: () => void;
 }) {
   const [granularity, setGranularity] = useState<TrendGranularity>('daily');
-  const series = selectedSuburb
-    ? trend.seriesBySuburb[granularity]?.[selectedSuburb] ?? []
-    : trend[granularity];
+  const scrollToLatest = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    node.scrollLeft = Math.max(0, node.scrollWidth - node.clientWidth);
+  }, []);
+  const series = (selectedSuburb
+    ? trend.seriesBySuburb?.[granularity]?.[selectedSuburb]
+    : trend[granularity]) ?? [];
   const sentTotal = series.reduce((sum, b) => sum + b.sent, 0);
   const junkTotal = series.reduce((sum, b) => sum + b.junk, 0);
   const activeSuburbs = trend.bySuburb.filter((b) => b.sent_count > 0 || b.junk_count > 0).length;
 
   return (
-    <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <div>
+    <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 sm:p-6">
+      <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h3 className="text-lg font-semibold text-slate-900">Dispatch Volume</h3>
           <div className="flex flex-wrap items-center gap-2 mt-2">
             {selectedSuburb ? (
@@ -128,13 +138,13 @@ function DispatchVolumeChart({
             )}
           </div>
         </div>
-        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50">
+        <div className="grid w-full grid-cols-5 rounded-lg border border-slate-200 p-0.5 bg-slate-50 sm:inline-flex sm:w-auto">
           {GRANULARITIES.map((g) => (
             <button
               key={g}
               type="button"
               onClick={() => setGranularity(g)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+              className={`px-0.5 py-1.5 text-[11px] font-semibold whitespace-nowrap rounded-md transition-colors sm:px-3 sm:text-xs ${
                 granularity === g
                   ? 'bg-indigo-600 text-white shadow'
                   : 'text-slate-600 hover:bg-white'
@@ -149,39 +159,69 @@ function DispatchVolumeChart({
       {series.length === 0 ? (
         <p className="text-sm text-slate-400 py-12 text-center">No dispatch data.</p>
       ) : (
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-            <XAxis
-              dataKey="bucket"
-              tick={{ fontSize: 11 }}
-              tickFormatter={(v: string) => formatBucketLabel(v, granularity)}
-            />
-            <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-            <Tooltip
-              labelFormatter={(v: unknown) => formatBucketLabel(String(v ?? ''), granularity)}
-              formatter={(value: unknown, name: unknown) => [
-                String(value ?? 0),
-                name === 'sent' ? 'Sent' : 'Junk Mail',
-              ]}
-            />
-            <Legend
-              formatter={(value: string) => (
-                <span
-                  style={{
-                    color: value === 'sent' ? '#7C3AED' : '#CA8A04',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                  }}
-                >
-                  {value === 'sent' ? 'Sent' : 'Junk Mail'}
-                </span>
-              )}
-            />
-            <Bar dataKey="sent" name="sent" fill="#7C3AED" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="junk" name="junk" fill="#EAB308" radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+        <>
+          <div
+            key={`${granularity}-${selectedSuburb ?? 'all'}`}
+            ref={scrollToLatest}
+            className="overflow-x-auto overscroll-x-contain pb-2"
+            data-testid="dispatch-chart-scroll"
+            role="region"
+            aria-label="Dispatch volume chart. Scroll horizontally to see all dates."
+            tabIndex={0}
+          >
+            <div
+              data-testid="dispatch-chart-canvas"
+              style={{
+                width: '100%',
+                minWidth: dispatchChartMinWidth(series.length, granularity),
+                maxWidth: dispatchChartMaxWidth(series.length),
+                margin: '0 auto',
+              }}
+            >
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={series} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis
+                    dataKey="bucket"
+                    tick={{ fontSize: 11 }}
+                    interval={0}
+                    tickMargin={6}
+                    height={40}
+                    tickFormatter={(v: string) => formatBucketLabel(v, granularity)}
+                  />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip
+                    labelFormatter={(v: unknown) => formatBucketLabel(String(v ?? ''), granularity)}
+                    formatter={(value: unknown, name: unknown) => [
+                      String(value ?? 0),
+                      name === 'sent' ? 'Sent' : 'Junk Mail',
+                    ]}
+                  />
+                  <Legend
+                    formatter={(value: string) => (
+                      <span
+                        style={{
+                          color: value === 'sent' ? '#7C3AED' : '#CA8A04',
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                        }}
+                      >
+                        {value === 'sent' ? 'Sent' : 'Junk Mail'}
+                      </span>
+                    )}
+                  />
+                  <Bar dataKey="sent" name="sent" fill="#7C3AED" radius={[3, 3, 0, 0]} maxBarSize={64} />
+                  <Bar dataKey="junk" name="junk" fill="#EAB308" radius={[3, 3, 0, 0]} maxBarSize={64} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          {series.length > 4 && (
+            <p className="mt-1 text-[11px] text-slate-400 sm:hidden">
+              Swipe horizontally to see more dates.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockQuery = vi.hoisted(() => vi.fn());
+const mockInvalidateDashboardStatsCache = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/db', () => ({
   query: mockQuery,
+}));
+
+vi.mock('@/lib/redis', () => ({
+  invalidateDashboardStatsCache: mockInvalidateDashboardStatsCache,
+  invalidateStreetClustersForSuburb: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({
@@ -20,6 +26,8 @@ import { auth } from '@/lib/auth';
 describe('PATCH /api/admin/properties/[id] — MV refresh on no_junk_mail', () => {
   beforeEach(() => {
     mockQuery.mockReset();
+    mockInvalidateDashboardStatsCache.mockReset();
+    mockInvalidateDashboardStatsCache.mockResolvedValue(undefined);
     process.env.USE_OUTREACH_MV = 'true';
     vi.mocked(auth).mockResolvedValue({
       user: { email: 'admin@example.com' },
@@ -46,6 +54,7 @@ describe('PATCH /api/admin/properties/[id] — MV refresh on no_junk_mail', () =
     expect(mockQuery).toHaveBeenCalledWith(
       'REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched'
     );
+    expect(mockInvalidateDashboardStatsCache).toHaveBeenCalledTimes(1);
   });
 
   it('does not trigger MV REFRESH when no_junk_mail is not in body', async () => {
@@ -67,6 +76,7 @@ describe('PATCH /api/admin/properties/[id] — MV refresh on no_junk_mail', () =
       c => c[0] === 'REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched'
     );
     expect(refreshCalls).toHaveLength(0);
+    expect(mockInvalidateDashboardStatsCache).not.toHaveBeenCalled();
   });
 
   it('does not trigger MV REFRESH when MV is disabled', async () => {

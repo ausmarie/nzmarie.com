@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { query as marieQuery } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
-import { invalidateStreetClustersForSuburb } from '@/lib/redis';
+import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
 
 export async function PATCH(
   request: Request,
@@ -59,9 +59,12 @@ export async function PATCH(
     await marieQuery(sql, values);
 
     // Refresh MV if no_junk_mail was updated so outreach queries see the latest value
-    if (body.no_junk_mail !== undefined && process.env.USE_OUTREACH_MV === 'true') {
-      marieQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched')
-        .catch(err => console.error('MV refresh failed (non-critical):', err));
+    if (body.no_junk_mail !== undefined) {
+      await invalidateDashboardStatsCache();
+      if (process.env.USE_OUTREACH_MV === 'true') {
+        marieQuery('REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched')
+          .catch(err => console.error('MV refresh failed (non-critical):', err));
+      }
     }
 
     const updated = await marieQuery(

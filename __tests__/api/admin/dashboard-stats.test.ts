@@ -471,6 +471,12 @@ describe('GET /api/admin/dashboard/stats', () => {
       junk_quarterly: [
         { suburb: 'Torbay', bucket: '2026-07-01', junk: '2' },
       ],
+      sent_yearly: [
+        { suburb: 'Torbay', bucket: '2026-01-01', sent: '15' },
+      ],
+      junk_yearly: [
+        { suburb: 'Torbay', bucket: '2026-01-01', junk: '2' },
+      ],
       sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
       dispatch_by_suburb: [
         { suburb: 'Torbay', sent_count: '15', junk_count: '2', total_count: '20', first_sent_at: '2026-07-02T01:00:00.000Z', last_sent_at: '2026-08-10T01:00:00.000Z' },
@@ -490,6 +496,12 @@ describe('GET /api/admin/dashboard/stats', () => {
     ]);
     expect(body.stats.dispatchTrend.quarterly).toEqual([
       { bucket: '2026-07-01', sent: 15, junk: 2 },
+    ]);
+    expect(body.stats.dispatchTrend.yearly).toEqual([
+      { bucket: '2026-01-01', sent: 15, junk: 2 },
+    ]);
+    expect(body.stats.dispatchTrend.seriesBySuburb.yearly['Torbay-Q2-2026']).toEqual([
+      { bucket: '2026-01-01', sent: 15, junk: 2 },
     ]);
     expect(body.stats.dispatchTrend.daily).toEqual([]);
     expect(body.stats.dispatchTrend.seriesBySuburb.monthly['Torbay-Q2-2026']).toEqual([
@@ -643,8 +655,8 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(body.stats.dispatchTrend).toEqual({
-      daily: [], weekly: [], monthly: [], quarterly: [],
-      seriesBySuburb: { daily: {}, weekly: {}, monthly: {}, quarterly: {} },
+      daily: [], weekly: [], monthly: [], quarterly: [], yearly: [],
+      seriesBySuburb: { daily: {}, weekly: {}, monthly: {}, quarterly: {}, yearly: {} },
       bySuburb: [],
     });
   });
@@ -693,6 +705,14 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(allSql).toContain('substring(sl.campaign_key');
     expect(allSql).toContain('COUNT(DISTINCT op.id)');
     expect(allSql).toContain('[0-9]{4}');
+    expect(allSql).toContain('[_-]Q([1-4])');
+    expect(allSql).toContain('cur.q_index = rq.q_index');
+    expect(allSql).toContain('junk_props_base');
+    expect(allSql).toContain('no_junk_mail_updated_at');
+    expect(allSql).toContain('sr.uploaded_at <= COALESCE(p.no_junk_mail_updated_at');
+    expect(allSql).toContain("op.created_at AT TIME ZONE 'Pacific/Auckland'");
+    expect(allSql).not.toContain('dispatched_ids_cte');
+    expect(allSql).not.toContain("AND LOWER(op.status) = 'pending'");
     expect(allSql).not.toContain('^d{4}');
     expect(body.stats.sentSummary.total_sent).toBe(217);
     expect(body.stats.sentSummary.quarterly).toEqual([
