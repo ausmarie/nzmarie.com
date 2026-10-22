@@ -275,9 +275,132 @@ function wireEditableBlock(
   blockId: string,
   registry: Map<string, EditableBlockEntry>,
   onInput?: (prop: string) => void
-): object {
+): { cleanup: () => void } {
   const p = block.props;
   const focusOrigins = new Map<string, string>();
+  let cardSelectionActive = false;
+  const previousOutline = container.style.outline;
+  const previousOutlineOffset = container.style.outlineOffset;
+  const previousBorderRadius = container.style.borderRadius;
+
+  const onCardKeyDown = (e: KeyboardEvent) => {
+    if (!cardSelectionActive) return;
+    const key = e.key.toLowerCase();
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      clearCardSelection();
+      return;
+    }
+    const editingShortcut = mod && ['a', 'v', 'x', 'z', 'y'].includes(key);
+    const destructiveKey = ['Backspace', 'Delete', 'Enter'].includes(e.key);
+    const plainTextKey = !mod && !e.altKey && e.key.length === 1;
+    if (!editingShortcut && !destructiveKey && !plainTextKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onCardBeforeInput = (e: Event) => {
+    if (!cardSelectionActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onCardCopy = (e: globalThis.ClipboardEvent) => {
+    if (!cardSelectionActive || !e.clipboardData) return;
+    const text = (container.innerText || container.textContent || '').trim();
+    const clone = container.cloneNode(true) as HTMLElement;
+    clone.style.outline = '';
+    clone.style.outlineOffset = '';
+    clone.style.borderRadius = '';
+    clone.querySelectorAll<HTMLElement>('[contenteditable]').forEach((el) => {
+      el.removeAttribute('contenteditable');
+      el.removeAttribute('spellcheck');
+    });
+    clone.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
+      el.removeAttribute('data-prop');
+      el.style.boxShadow = '';
+    });
+    clone.querySelectorAll<HTMLElement>('[data-arrow]').forEach((el) => el.removeAttribute('data-arrow'));
+    clone.querySelectorAll<HTMLElement>('[data-value-col]').forEach((el) => el.removeAttribute('data-value-col'));
+
+    const currentProps = (editor.getBlock?.(blockId)?.props ?? p) as Record<string, unknown>;
+    const internal = document.createElement('div');
+    internal.className = 'bn-block-content';
+    internal.setAttribute('data-content-type', String(block.type ?? ''));
+    Object.entries(currentProps).forEach(([prop, value]) => {
+      if (value === undefined || value === null) return;
+      const dataProp = prop.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+      internal.setAttribute(`data-${dataProp}`, String(value));
+    });
+
+    e.clipboardData.setData('blocknote/html', internal.outerHTML);
+    e.clipboardData.setData('text/html', clone.outerHTML);
+    e.clipboardData.setData('text/plain', text);
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onCardCut = (e: globalThis.ClipboardEvent) => {
+    if (!cardSelectionActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onCardPaste = (e: globalThis.ClipboardEvent) => {
+    if (!cardSelectionActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const onCardDocMouseDown = (e: MouseEvent) => {
+    if (!cardSelectionActive) return;
+    if (e.target && container.contains(e.target as Node)) return;
+    clearCardSelection();
+  };
+
+  const clearCardSelection = () => {
+    if (!cardSelectionActive) return;
+    cardSelectionActive = false;
+    document.removeEventListener('keydown', onCardKeyDown, true);
+    document.removeEventListener('beforeinput', onCardBeforeInput, true);
+    document.removeEventListener('copy', onCardCopy, true);
+    document.removeEventListener('cut', onCardCut, true);
+    document.removeEventListener('paste', onCardPaste, true);
+    document.removeEventListener('mousedown', onCardDocMouseDown, true);
+    window.removeEventListener('beforeprint', clearCardSelection);
+    container.style.outline = previousOutline;
+    container.style.outlineOffset = previousOutlineOffset;
+    container.style.borderRadius = previousBorderRadius;
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      if (container.contains(range.commonAncestorContainer)) selection.removeAllRanges();
+    }
+  };
+
+  const selectCard = () => {
+    const active = document.activeElement as HTMLElement | null;
+    if (active && container.contains(active) && active.matches('[data-prop]')) active.blur();
+    clearCardSelection();
+    cardSelectionActive = true;
+    document.addEventListener('keydown', onCardKeyDown, true);
+    document.addEventListener('beforeinput', onCardBeforeInput, true);
+    document.addEventListener('copy', onCardCopy, true);
+    document.addEventListener('cut', onCardCut, true);
+    document.addEventListener('paste', onCardPaste, true);
+    document.addEventListener('mousedown', onCardDocMouseDown, true);
+    window.addEventListener('beforeprint', clearCardSelection);
+    container.style.outline = '2px solid #3b82f6';
+    container.style.outlineOffset = '3px';
+    container.style.borderRadius = '12px';
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
 
   const flush = (force = false) => {
     const changes: Record<string, string> = {};
@@ -295,7 +418,7 @@ function wireEditableBlock(
     editor.updateBlock(blockId, { props: { ...base, ...changes } });
   };
 
-  const token = {};
+  const token = { cleanup: () => clearCardSelection() };
   registry.set(blockId, { flush, token });
 
   container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
@@ -310,6 +433,7 @@ function wireEditableBlock(
     };
 
     el.addEventListener('mousedown', (e) => {
+      clearCardSelection();
       e.stopPropagation();
       if (isPlaceholderValue(el.textContent ?? '')) {
         e.preventDefault();
@@ -365,29 +489,7 @@ function wireEditableBlock(
     if (target?.closest('[data-prop]')) return;
     e.preventDefault();
     e.stopPropagation();
-    const active = document.activeElement as HTMLElement | null;
-    if (active && container.contains(active) && active.matches('[data-prop]')) return;
-    const fields = Array.from(container.querySelectorAll<HTMLElement>('[data-prop]'));
-    if (fields.length === 0) return;
-    let nearest = fields[0];
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    fields.forEach((el) => {
-      const rect = el.getBoundingClientRect();
-      const distance = Math.hypot(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
-      if (distance < nearestDistance) {
-        nearest = el;
-        nearestDistance = distance;
-      }
-    });
-    nearest.focus();
-    if (!isPlaceholderValue(nearest.textContent ?? '')) {
-      const range = document.createRange();
-      range.selectNodeContents(nearest);
-      range.collapse(false);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-    }
+    selectCard();
   });
 
   container.addEventListener('click', (e: MouseEvent) => {
@@ -463,6 +565,7 @@ const marketPulseBlock = createBlockSpec(
         dom: container,
         ignoreMutation: () => true,
         destroy: () => {
+          token.cleanup();
           const existing = editableBlockEdits.get(blockId);
           if (existing && existing.token === token) editableBlockEdits.delete(blockId);
         },
@@ -508,6 +611,7 @@ const comparableSummaryBlock = createBlockSpec(
         dom: container,
         ignoreMutation: () => true,
         destroy: () => {
+          token.cleanup();
           const existing = editableBlockEdits.get(blockId);
           if (existing && existing.token === token) editableBlockEdits.delete(blockId);
         },

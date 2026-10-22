@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   handleImageFile: vi.fn(),
   blockSpecs: [] as Array<{
     spec: { type: string; propSchema: Record<string, { default: string }> };
-    implementation: { render: (block: any, editor: any) => { dom: HTMLElement } };
+    implementation: { render: (block: any, editor: any) => { dom: HTMLElement; destroy?: () => void } };
   }>,
 }));
 
@@ -113,7 +113,7 @@ describe('ReportEditor image paste', () => {
     expect(mocks.editor.insertBlocks).not.toHaveBeenCalled();
   });
 
-  it('focuses an editable field instead of selecting a custom block on background mousedown', () => {
+  it('selects the whole card on background mousedown without focusing a field', () => {
     const captured = mocks.blockSpecs.find(({ spec }) => spec.type === 'marketPulse');
     expect(captured).toBeTruthy();
     if (!captured) return;
@@ -121,6 +121,8 @@ describe('ReportEditor image paste', () => {
     const props = Object.fromEntries(
       Object.entries(captured.spec.propSchema).map(([key, value]) => [key, value.default])
     );
+    props.medianPrice = '1.19M';
+    props.medianLabel = 'Median Sale Price';
     const node = captured.implementation.render({ id: 'pulse-1', props }, mocks.editor);
 
     try {
@@ -134,8 +136,49 @@ describe('ReportEditor image paste', () => {
       node.dom.dispatchEvent(event);
 
       expect(event.defaultPrevented).toBe(true);
-      expect(focus).toHaveBeenCalled();
+      expect(focus).not.toHaveBeenCalled();
+      const selection = window.getSelection();
+      expect(selection?.rangeCount).toBe(1);
+      expect(selection?.getRangeAt(0).commonAncestorContainer).toBe(node.dom);
     } finally {
+      node.destroy?.();
+      node.dom.remove();
+    }
+  });
+
+  it('copies the card with a BlockNote block payload', () => {
+    const captured = mocks.blockSpecs.find(({ spec }) => spec.type === 'marketPulse');
+    expect(captured).toBeTruthy();
+    if (!captured) return;
+
+    const props = Object.fromEntries(
+      Object.entries(captured.spec.propSchema).map(([key, value]) => [key, value.default])
+    );
+    props.medianPrice = '1.19M';
+    props.medianLabel = 'Median Sale Price';
+    const node = captured.implementation.render({ id: 'pulse-1', type: 'marketPulse', props }, mocks.editor);
+    const setData = vi.fn();
+
+    try {
+      document.body.appendChild(node.dom);
+      node.dom.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+
+      const event = new Event('copy', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { setData } });
+      document.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      const internal = setData.mock.calls.find(([type]) => type === 'blocknote/html')?.[1];
+      expect(internal).toBeTruthy();
+
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = internal;
+      const blockContent = wrapper.firstElementChild;
+      expect(blockContent?.getAttribute('data-content-type')).toBe('marketPulse');
+      expect(blockContent?.getAttribute('data-median-price')).toBe('1.19M');
+      expect(blockContent?.getAttribute('data-median-label')).toBe('Median Sale Price');
+    } finally {
+      node.destroy?.();
       node.dom.remove();
     }
   });

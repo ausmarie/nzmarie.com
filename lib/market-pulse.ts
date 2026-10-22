@@ -248,7 +248,7 @@ export function buildMarketPulseHTML(props: MarketPulseProps): string {
     return `
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px 24px;flex:1;min-width:0;box-shadow:0 1px 3px rgba(0,0,0,.06);">
           <span style="font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:.05em;display:block;margin-bottom:8px;text-align:center;">${edit(labelProp)}</span>
-          <span style="font-size:26px;font-weight:800;color:#0f172a;display:block;text-align:center;">${edit(valueProp)}</span>
+          <span style="font-size:22px;font-weight:800;color:#0f172a;display:block;text-align:center;">${edit(valueProp)}</span>
           ${noteHtml}
         </div>`;
   };
