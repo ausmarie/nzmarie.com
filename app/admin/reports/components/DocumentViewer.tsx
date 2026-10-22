@@ -14,8 +14,10 @@ import type { ReportDocument, ReportEditorContent } from '@/types/report';
 
 export default function DocumentViewer({ docId, onNavigate }: { docId: string; onNavigate?: (id: string | null) => void }) {
   const router = useRouter();
-  const { setSelectedDocId, isSaving, updateDocument, documents, bumpRefreshKey } = useReportStore();
-  const storeDoc = documents.find(d => d.id === docId) || null;
+  const setSelectedDocId = useReportStore((state) => state.setSelectedDocId);
+  const isSaving = useReportStore((state) => state.isSaving);
+  const updateDocument = useReportStore((state) => state.updateDocument);
+  const bumpRefreshKey = useReportStore((state) => state.bumpRefreshKey);
   const [doc, setDoc] = useState<ReportDocument | null>(null);
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(true);
@@ -80,7 +82,7 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
   const handleSaveNow = useCallback(async () => {
     if (!doc) return;
     try {
-      const contentToSave = getContentRef.current?.() ?? storeDoc?.content ?? doc.content ?? null;
+      const contentToSave = getContentRef.current?.() ?? doc.content ?? null;
       console.log('[Save] Manual start — docId:', docId, 'title:', title, 'content:', contentToSave ? 'present' : 'null');
 
       const waitForAutosave = async () => {
@@ -109,7 +111,7 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
     } catch (err) {
       console.error('Failed to save document', err);
     }
-  }, [docId, title, doc, storeDoc, updateDocument]);
+  }, [docId, title, doc, updateDocument]);
 
   useCtrlS(handleSaveNow);
 

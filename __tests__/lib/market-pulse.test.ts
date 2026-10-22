@@ -9,6 +9,7 @@ import {
   formatPct,
   formatDaysDiff,
   statDirection,
+  isPlaceholderValue,
   computeMarketPulse,
   computeQuarterlyMarketPulse,
   quarterLabel,
@@ -170,6 +171,20 @@ describe('statDirection', () => {
     expect(statDirection('\u2014')).toBe('none');
     expect(statDirection('')).toBe('none');
     expect(statDirection('10%')).toBe('none');
+  });
+});
+
+describe('isPlaceholderValue', () => {
+  it('treats the em dash and empty values as placeholders', () => {
+    expect(isPlaceholderValue('\u2014')).toBe(true);
+    expect(isPlaceholderValue('')).toBe(true);
+    expect(isPlaceholderValue('   ')).toBe(true);
+  });
+
+  it('keeps real percentage and signed values editable as-is', () => {
+    expect(isPlaceholderValue('-37.5%')).toBe(false);
+    expect(isPlaceholderValue('+12.5%')).toBe(false);
+    expect(isPlaceholderValue('0')).toBe(false);
   });
 });
 

@@ -57,6 +57,11 @@ export function statDirection(value: string): 'up' | 'down' | 'none' {
   return 'none';
 }
 
+export function isPlaceholderValue(value: string): boolean {
+  const text = (value || '').trim();
+  return text === '' || text === '\u2014';
+}
+
 export interface MarketPulseProps {
   medianPrice: string;
   salesCount: string;

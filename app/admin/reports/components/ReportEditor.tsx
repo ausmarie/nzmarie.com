@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createInlineContentSpec, createBlockSpec } from '@blocknote/core';
 import { filterSuggestionItems } from '@blocknote/core/extensions';
 import { SuggestionMenuController, getDefaultReactSlashMenuItems, useCreateBlockNote } from '@blocknote/react';
@@ -10,7 +10,7 @@ import '@blocknote/mantine/style.css';
 import { useAutoSave } from '../hooks/useAutoSave';
 import { useImageUpload } from '../hooks/useImageUpload';
 import { useReportStore } from '../stores/report-store';
-import { buildMarketPulseHTML, statDirection } from '@/lib/market-pulse';
+import { buildMarketPulseHTML, isPlaceholderValue, statDirection } from '@/lib/market-pulse';
 import {
   buildComparableSummaryHTML,
   COMPARABLE_SUMMARY_DEFAULTS,
@@ -256,15 +256,15 @@ const quarterlyDataBlock = createBlockSpec(
 );
 
 interface EditableBlockEntry {
-  flush: () => void;
+  flush: (force?: boolean) => void;
   token: object;
 }
 
 const editableBlockEdits = new Map<string, EditableBlockEntry>();
 
-function flushEditableBlockEdits(): void {
+function flushEditableBlockEdits(force = false): void {
   for (const entry of Array.from(editableBlockEdits.values())) {
-    entry.flush();
+    entry.flush(force);
   }
 }
 
@@ -279,9 +279,10 @@ function wireEditableBlock(
   const p = block.props;
   const focusOrigins = new Map<string, string>();
 
-  const flush = () => {
+  const flush = (force = false) => {
     const changes: Record<string, string> = {};
     container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
+      if (!force && (el === document.activeElement || el.contains(document.activeElement))) return;
       const prop = el.dataset.prop;
       if (!prop) return;
       const value = (el.textContent ?? '').trim();
@@ -300,7 +301,22 @@ function wireEditableBlock(
   container.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
     const prop = el.dataset.prop as string;
 
-    el.addEventListener('mousedown', (e) => e.stopPropagation());
+    const selectAll = () => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    };
+
+    el.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (isPlaceholderValue(el.textContent ?? '')) {
+        e.preventDefault();
+        el.focus();
+        selectAll();
+      }
+    });
     el.addEventListener('click', (e) => e.stopPropagation());
     el.addEventListener('beforeinput', (e) => e.stopPropagation());
     el.addEventListener('drop', (e) => e.preventDefault());
@@ -313,12 +329,20 @@ function wireEditableBlock(
     el.addEventListener('focus', () => {
       focusOrigins.set(prop, el.textContent ?? '');
       el.style.boxShadow = '0 0 0 1px #93c5fd';
+      if (isPlaceholderValue(el.textContent ?? '')) selectAll();
     });
     el.addEventListener('input', () => onInput?.(prop));
     el.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.isComposing) return;
       const isSave = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's';
       if (isSave) return;
+      const isSelectAll = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a';
+      if (isSelectAll) {
+        e.preventDefault();
+        e.stopPropagation();
+        selectAll();
+        return;
+      }
       e.stopPropagation();
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -336,10 +360,47 @@ function wireEditableBlock(
     });
   });
 
+  container.addEventListener('mousedown', (e: MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-prop]')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const active = document.activeElement as HTMLElement | null;
+    if (active && container.contains(active) && active.matches('[data-prop]')) return;
+    const fields = Array.from(container.querySelectorAll<HTMLElement>('[data-prop]'));
+    if (fields.length === 0) return;
+    let nearest = fields[0];
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    fields.forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      const distance = Math.hypot(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
+      if (distance < nearestDistance) {
+        nearest = el;
+        nearestDistance = distance;
+      }
+    });
+    nearest.focus();
+    if (!isPlaceholderValue(nearest.textContent ?? '')) {
+      const range = document.createRange();
+      range.selectNodeContents(nearest);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+  });
+
+  container.addEventListener('click', (e: MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest('[data-prop]')) return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
   container.addEventListener('focusout', (e: FocusEvent) => {
     const next = e.relatedTarget as Node | null;
     if (next && container.contains(next)) return;
-    flush();
+    flush(true);
   });
 
   return token;
@@ -558,8 +619,41 @@ function migrateContent(content: ReportEditorContent | null): ReportEditorConten
   return content;
 }
 
-export default function ReportEditor({ docId, initialContent, onContentChange, className, getContentRef }: ReportEditorProps) {
-  const { isSaving, lastSaved, setIsSaving, setLastSaved, updateDocument } = useReportStore();
+function ReportEditorStatus({
+  isUploadingImage,
+  imageError,
+}: {
+  isUploadingImage: boolean;
+  imageError: string | null;
+}) {
+  const isSaving = useReportStore((state) => state.isSaving);
+  const lastSaved = useReportStore((state) => state.lastSaved);
+
+  return (
+    <div className="reports-editor-status" style={{
+      position: 'sticky', top: 0, zIndex: 10,
+      display: 'flex', alignItems: 'center', gap: '8px',
+      padding: '8px 12px', fontSize: '0.8rem', color: '#999',
+      background: 'white', borderBottom: '1px solid #eee',
+    }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: isUploadingImage ? '#3b82f6' : isSaving ? '#f59e0b' : '#22c55e',
+        }} />
+        {isUploadingImage ? 'Uploading image...' : isSaving ? 'Saving...' : lastSaved ? `Saved at ${lastSaved}` : 'Ready'}
+      </span>
+      {imageError && (
+        <span style={{ marginLeft: 'auto', color: '#dc2626' }}>{imageError}</span>
+      )}
+    </div>
+  );
+}
+
+const ReportEditor = memo(function ReportEditor({ docId, initialContent, onContentChange, className, getContentRef }: ReportEditorProps) {
+  const setIsSaving = useReportStore((state) => state.setIsSaving);
+  const setLastSaved = useReportStore((state) => state.setLastSaved);
+  const updateDocument = useReportStore((state) => state.updateDocument);
   const { handleImageFile } = useImageUpload();
   const [pendingImageUploads, setPendingImageUploads] = useState(0);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -723,7 +817,7 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
   useEffect(() => {
     if (getContentRef) {
       getContentRef.current = () => {
-        flushEditableBlockEdits();
+        flushEditableBlockEdits(true);
         return sanitize(editor.document) as ReportEditorContent | null;
       };
     }
@@ -756,23 +850,7 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
       style={{ position: 'relative', maxWidth: '900px', margin: '0 auto' }}
       onPasteCapture={handlePasteCapture}
     >
-      <div className="reports-editor-status" style={{
-        position: 'sticky', top: 0, zIndex: 10,
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '8px 12px', fontSize: '0.8rem', color: '#999',
-        background: 'white', borderBottom: '1px solid #eee',
-      }}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: isUploadingImage ? '#3b82f6' : isSaving ? '#f59e0b' : '#22c55e',
-          }} />
-          {isUploadingImage ? 'Uploading image...' : isSaving ? 'Saving...' : lastSaved ? `Saved at ${lastSaved}` : 'Ready'}
-        </span>
-        {imageError && (
-          <span style={{ marginLeft: 'auto', color: '#dc2626' }}>{imageError}</span>
-        )}
-      </div>
+      <ReportEditorStatus isUploadingImage={isUploadingImage} imageError={imageError} />
       <div style={{ background: 'white' }}>
         <BlockNoteView editor={editor} theme="light" onChange={handleChange} slashMenu={false}>
           <SuggestionMenuController
@@ -792,4 +870,6 @@ export default function ReportEditor({ docId, initialContent, onContentChange, c
       </div>
     </div>
   );
-}
+});
+
+export default ReportEditor;

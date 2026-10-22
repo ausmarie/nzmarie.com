@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
     focus: vi.fn(),
   },
   handleImageFile: vi.fn(),
+  blockSpecs: [] as Array<{
+    spec: { type: string; propSchema: Record<string, { default: string }> };
+    implementation: { render: (block: any, editor: any) => { dom: HTMLElement } };
+  }>,
 }));
 
 vi.mock('@blocknote/core', () => ({
@@ -16,7 +20,10 @@ vi.mock('@blocknote/core', () => ({
   defaultBlockSpecs: {},
   defaultInlineContentSpecs: {},
   createInlineContentSpec: vi.fn(() => ({})),
-  createBlockSpec: vi.fn(() => () => ({})),
+  createBlockSpec: vi.fn((spec, implementation) => {
+    mocks.blockSpecs.push({ spec, implementation });
+    return () => ({});
+  }),
 }));
 
 vi.mock('@blocknote/core/extensions', () => ({
@@ -104,5 +111,32 @@ describe('ReportEditor image paste', () => {
 
     expect(await findByText('Image too large. Max 5MB')).toBeTruthy();
     expect(mocks.editor.insertBlocks).not.toHaveBeenCalled();
+  });
+
+  it('focuses an editable field instead of selecting a custom block on background mousedown', () => {
+    const captured = mocks.blockSpecs.find(({ spec }) => spec.type === 'marketPulse');
+    expect(captured).toBeTruthy();
+    if (!captured) return;
+
+    const props = Object.fromEntries(
+      Object.entries(captured.spec.propSchema).map(([key, value]) => [key, value.default])
+    );
+    const node = captured.implementation.render({ id: 'pulse-1', props }, mocks.editor);
+
+    try {
+      document.body.appendChild(node.dom);
+      const firstField = node.dom.querySelector<HTMLElement>('[data-prop]');
+      expect(firstField).toBeTruthy();
+      if (!firstField) return;
+      const focus = vi.spyOn(firstField, 'focus');
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+
+      node.dom.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(focus).toHaveBeenCalled();
+    } finally {
+      node.dom.remove();
+    }
   });
 });

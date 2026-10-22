@@ -67,10 +67,16 @@ export default function TodayRunSection({
   const routeStreets = data?.runs[0]?.groups.flatMap((group) => group.streets)
     ?? data?.groups[0]?.streets
     ?? [];
-  const routeAddressCount = routeStreets.reduce(
-    (sum, street) => sum + street.pendingCount,
-    0
-  );
+  const allStreetCounts =
+    data?.allStreets ??
+    (data?.groups ?? []).flatMap((group) =>
+      group.streets.map((street) => ({
+        street: street.street,
+        count: street.pendingCount,
+      }))
+    );
+  const totalAddressCount = allStreetCounts.reduce((sum, street) => sum + street.count, 0);
+  const totalStreetCount = allStreetCounts.length;
   const hasStreets = routeStreets.length > 0;
 
   return (
@@ -96,10 +102,10 @@ export default function TodayRunSection({
         }}
       >
         <span style={{ fontWeight: '600', fontSize: '0.95rem' }}>🚀 Today&apos;s Route</span>
-        {data && hasStreets && (
+        {data && totalStreetCount > 0 && (
           <span style={{ fontSize: '0.78rem', opacity: 0.9 }}>
-            {routeAddressCount} addresses · {routeStreets.length}{' '}
-            {routeStreets.length === 1 ? 'street' : 'streets'}
+            {totalAddressCount} {totalAddressCount === 1 ? 'address' : 'addresses'} ·{' '}
+            {totalStreetCount} {totalStreetCount === 1 ? 'street' : 'streets'}
           </span>
         )}
       </div>

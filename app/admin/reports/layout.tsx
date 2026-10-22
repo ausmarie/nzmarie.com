@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useReportStore } from './stores/report-store';
 import ReportSidebar from './components/ReportSidebar';
+import { canonicalizeReportUrl } from '@/lib/report-url';
 
 function toSlug(name: string): string {
   return name.toLowerCase().replace(/\s+/g, '-');
@@ -52,7 +53,6 @@ const ABOUT_MARIE_CONTENT = [
 export default function ReportsLayout({ children }: { children: React.ReactNode }) {
   const { setDocuments, setSuburbs, slugMap, idToSlug, setSlugMap, sidebarCollapsed, setSidebarCollapsed, refreshKey, setOverviewSuburbs } = useReportStore();
   const pathname = usePathname();
-  const router = useRouter();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -136,19 +136,9 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
     fetchData();
   }, [setDocuments, setSuburbs, setSlugMap, setOverviewSuburbs, refreshKey]);
 
-  // Canonicalize UUID URLs → human-readable slugs (only when slugMap has the mapping)
   useEffect(() => {
-    const match = pathname.match(/^\/admin\/reports\/(.+)$/);
-    if (match) {
-      const slug = match[1];
-      if (/^[a-f0-9-]{36}$/.test(slug) && idToSlug[slug]) {
-        const targetSlug = idToSlug[slug];
-        if (slugMap[targetSlug] === slug) {
-          router.replace(`/admin/reports/${targetSlug}`, { scroll: false });
-        }
-      }
-    }
-  }, [pathname, idToSlug, slugMap, router]);
+    canonicalizeReportUrl(pathname, idToSlug, slugMap);
+  }, [pathname, idToSlug, slugMap]);
 
   return (
     <>

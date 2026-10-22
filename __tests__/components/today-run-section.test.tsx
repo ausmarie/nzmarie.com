@@ -30,11 +30,16 @@ function makeRun(runId: number, streetCount: number, perStreet = 2): TodayRunDat
   };
 }
 
+const runs = [makeRun(1, 3), makeRun(2, 2), makeRun(3, 1), makeRun(4, 1)];
+
 const data: TodayRunData = {
   suburb: 'Torbay',
   groups: [],
-  runs: [makeRun(1, 3), makeRun(2, 2), makeRun(3, 1), makeRun(4, 1)],
+  runs,
   unclusteredStreets: [],
+  allStreets: runs
+    .flatMap((run) => run.groups.flatMap((group) => group.streets))
+    .map((street) => ({ street: street.street, count: street.pendingCount })),
 };
 
 function baseProps(overrides: Record<string, unknown> = {}) {
@@ -61,7 +66,7 @@ describe('TodayRunSection', () => {
   it('shows the route header and nearby street summary', () => {
     render(<TodayRunSection {...baseProps()} />);
     expect(screen.getByText("🚀 Today's Route")).toBeTruthy();
-    expect(screen.getByText(/6 addresses · 3 streets/)).toBeTruthy();
+    expect(screen.getByText(/14 addresses · 7 streets/)).toBeTruthy();
     expect(screen.getByText('Nearby streets in walking order')).toBeTruthy();
     expect(screen.queryByText(/Run 1/)).toBeNull();
     expect(screen.queryByText('Manual Run')).toBeNull();
@@ -77,6 +82,30 @@ describe('TodayRunSection', () => {
     expect(screen.queryByRole('button', { name: /More runs/ })).toBeNull();
   });
 
+  it('falls back to all top-level groups when allStreets is unavailable', () => {
+    const groups = runs.flatMap((run) => run.groups);
+    render(<TodayRunSection {...baseProps({ data: { ...data, allStreets: undefined, groups } })} />);
+    expect(screen.getByText(/14 addresses · 7 streets/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Street 1-0 (2)' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Street 2-/ })).toBeNull();
+  });
+
+  it('uses singular labels for a single unsent address and street', () => {
+    const singleRun = makeRun(1, 1, 1);
+    render(
+      <TodayRunSection
+        {...baseProps({
+          data: {
+            ...data,
+            runs: [singleRun],
+            allStreets: [{ street: 'Street 1-0', count: 1 }],
+          },
+        })}
+      />
+    );
+    expect(screen.getByText(/1 address · 1 street/)).toBeTruthy();
+  });
+
   it('shows loading state', () => {
     render(<TodayRunSection {...baseProps({ data: null, loading: true })} />);
     expect(screen.getByText('Loading…')).toBeTruthy();
@@ -88,7 +117,7 @@ describe('TodayRunSection', () => {
   });
 
   it('shows empty message when no route streets', () => {
-    render(<TodayRunSection {...baseProps({ data: { ...data, runs: [] } })} />);
+    render(<TodayRunSection {...baseProps({ data: { ...data, runs: [], allStreets: [] } })} />);
     expect(screen.getByText('No pending addresses in this suburb.')).toBeTruthy();
   });
 
