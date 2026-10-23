@@ -215,7 +215,7 @@ describe('computeMarketPulse', () => {
     expect(result.props.comparePrice).toBe('-8.0%');
     expect(result.props.compareSales).toBe('+50.0%');
     expect(result.props.compareDays).toBe('-5');
-    expect(result.props.card2Note).toBe('Boutique market absorption');
+    expect(result.props.card2Note).toBe('North Shore Sold: 262');
   });
 
   it('falls back to district data with North Shore labels when the suburb row is missing', () => {
@@ -387,6 +387,20 @@ describe('computeQuarterlyMarketPulse', () => {
     expect(result.props.salesLabel).toBe('Local Properties Sold');
     expect(result.props.districtLine).toBe('North Shore Avg: 52 Days');
     expect(result.props.priceNote).toBe('North Shore Price: $1.15M');
+    expect(result.props.card2Note).toBe('North Shore Sold: 780');
+  });
+
+  it('uses North Shore quarterly sold label for quarter pulse', () => {
+    const monthly = [
+      point('2026-07', detail(1000000, 3, 40), detail(1100000, 250, 55)),
+      point('2026-08', detail(1000000, 3, 40), detail(1100000, 250, 55)),
+      point('2026-09', detail(1000000, 3, 40), detail(1100000, 250, 55)),
+    ];
+
+    const result = computeQuarterlyMarketPulse(monthly, 'Torbay', '2026-Q3');
+
+    expect(result.hasData).toBe(true);
+    expect(result.props.card2Note).toBe('North Shore Sold: 750');
   });
 
   it('labels the previous quarter with the year when it crosses a year boundary', () => {
@@ -442,7 +456,7 @@ describe('buildMarketPulseHTML', () => {
     medianLabel: 'Median Sale Price',
     salesLabel: 'Local Properties Sold',
     daysLabel: 'Local Avg Days to Sell',
-    card2Note: 'Boutique market absorption',
+    card2Note: 'North Shore Sold: 262',
     districtLine: 'North Shore Avg: 53 Days',
     priceNote: 'North Shore Price: $1.17M',
     compareLabel: 'Compared to Previous Month (August)',
@@ -529,7 +543,7 @@ describe('buildMarketPulseHTML', () => {
     const withoutPriceNote = buildMarketPulseHTML({ ...baseProps, priceNote: '' });
     expect(withNotes).toContain('North Shore Price: $1.17M');
     expect(withoutPriceNote).not.toContain('North Shore Price');
-    expect(withoutPriceNote).toContain('Boutique market absorption');
+    expect(withoutPriceNote).toContain('North Shore Sold: 262');
   });
 
   it('omits the district days note when it is empty', () => {

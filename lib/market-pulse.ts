@@ -137,7 +137,7 @@ function buildPulse(
     medianLabel: 'Median Sale Price',
     salesLabel: usedDistrict ? 'North Shore Properties Sold' : 'Local Properties Sold',
     daysLabel: usedDistrict ? 'North Shore Avg Days to Sell' : 'Local Avg Days to Sell',
-    card2Note: 'Boutique market absorption',
+    card2Note: districtAnchor?.sales != null ? `North Shore Sold: ${districtAnchor.sales}` : '\u2014',
     districtLine:
       showDistrictNotes && districtAnchor?.days != null ? `North Shore Avg: ${districtAnchor.days} Days` : '',
     priceNote:
@@ -243,11 +243,11 @@ export function buildMarketPulseHTML(props: MarketPulseProps): string {
   ): string => {
     const note = String(props[noteProp] ?? '');
     const noteHtml = note
-      ? `<span style="font-size:11px;color:#64748b;display:block;margin-top:6px;line-height:1.4;text-align:center;">${edit(noteProp)}</span>`
+      ? `<span style="font-size:12px;color:#64748b;display:block;margin-top:6px;line-height:1.4;text-align:center;">${edit(noteProp)}</span>`
       : '';
     return `
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px 24px;flex:1;min-width:0;box-shadow:0 1px 3px rgba(0,0,0,.06);">
-          <span style="font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:.05em;display:block;margin-bottom:8px;text-align:center;">${edit(labelProp)}</span>
+          <span style="font-size:12px;font-weight:600;color:#94a3b8;letter-spacing:.05em;display:block;margin-bottom:8px;text-align:center;">${edit(labelProp)}</span>
           <span style="font-size:22px;font-weight:800;color:#0f172a;display:block;text-align:center;">${edit(valueProp)}</span>
           ${noteHtml}
         </div>`;
@@ -273,7 +273,7 @@ export function buildMarketPulseHTML(props: MarketPulseProps): string {
           : '#0f172a';
     return `
         <div style="text-align:center;flex:1;min-width:0;">
-          <div style="font-size:11px;font-weight:600;color:#94a3b8;margin-bottom:4px;">${edit(labelProp)}</div>
+          <div style="font-size:12px;font-weight:600;color:#94a3b8;margin-bottom:4px;">${edit(labelProp)}</div>
           <div data-value-col="${valueProp}" style="font-size:14px;font-weight:700;color:${color};">
             <span data-arrow="${valueProp}" style="margin-right:4px;">${arrow}</span>${edit(valueProp)}
           </div>
@@ -288,7 +288,7 @@ export function buildMarketPulseHTML(props: MarketPulseProps): string {
         ${kpiCard('daysLabel', 'daysToSell', 'districtLine')}
       </div>
       <div style="background:rgba(226,242,254,0.7);border:1px solid #cbd5e1;border-radius:12px;padding:16px 24px;">
-        <div style="font-size:11px;font-weight:700;color:#1e40af;margin-bottom:12px;">${edit('compareLabel')}</div>
+        <div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:12px;">${edit('compareLabel')}</div>
         <div style="display:flex;gap:8px;">
           ${statCol('statPriceLabel', 'comparePrice')}
           ${statCol('statSalesLabel', 'compareSales')}
