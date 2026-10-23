@@ -171,10 +171,11 @@ describe('DispatchTrendSection', () => {
     expect(screen.getByText('Pending')).toBeTruthy();
     expect(screen.getByText('Unsent')).toBeTruthy();
     expect(screen.getByText('20')).toBeTruthy();
-    expect(screen.getByText('15')).toBeTruthy();
-    expect(screen.getByText('2')).toBeTruthy();
     expect(screen.getByText('1')).toBeTruthy();
-    expect(screen.getAllByText('0')).toHaveLength(2);
+    expect(screen.getByText('15 (75%)')).toBeTruthy();
+    expect(screen.getByText('2 (10%)')).toBeTruthy();
+    expect(screen.getByText('3 (15%)')).toBeTruthy();
+    expect(screen.getAllByText('0 (0%)')).toHaveLength(2);
   });
 
   it('shows Junk column header with count and percentage', () => {
@@ -186,7 +187,7 @@ describe('DispatchTrendSection', () => {
   it('shows unsent count in red and junk segment in yellow', () => {
     render(<DispatchTrendSection trend={mockTrend} />);
 
-    const unsentCell = screen.getByText('2');
+    const unsentCell = screen.getByText('2 (10%)');
     expect(unsentCell.className).toContain('text-red-600');
 
     const junk = document.querySelector('[title="Junk 3"]');
@@ -231,7 +232,7 @@ describe('DispatchTrendSection', () => {
     render(<DispatchTrendSection trend={mockTrend} />);
 
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
-    expect(headers).toEqual(['Suburb', 'Report', 'First Sent', 'Last Sent', 'Sent', 'Junk', 'Unsent', 'Pending', 'Progress']);
+    expect(headers).toEqual(['Suburb', 'Sent', 'Unsent', 'Junk', 'First Sent', 'Last Sent', 'Pending', 'Report', 'Progress']);
   });
 
   it('sorts the timeline with the most recently sent suburb first', () => {
@@ -309,7 +310,7 @@ describe('DispatchTrendSection', () => {
     expect(rows[2].textContent).toContain('Torbay');
     expect(rows[2].textContent).not.toContain('Torbay-Q2-2026');
     expect(rows[2].textContent).toContain('358');
-    expect(rows[2].textContent).toContain('115(24%)');
+    expect(rows[2].textContent).toContain('115 (24%)');
   });
 
   it('groups suburbs under quarter headers with plain suburb names', () => {
@@ -477,7 +478,5 @@ describe('DispatchTrendSection', () => {
     fireEvent.click(links[0]);
     expect(screen.queryByText(/×/)).toBeNull();
     expect(screen.getByText('All reports')).toBeTruthy();
-
-    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 });

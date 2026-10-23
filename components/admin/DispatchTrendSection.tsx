@@ -85,6 +85,23 @@ function formatReportName(name: string): string {
   return name.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase());
 }
 
+export function formatDispatchCount(count: number, total: number): string {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  return `${count} (${pct}%)`;
+}
+
+const DISPATCH_TIMELINE_COLUMNS = [
+  { label: 'Suburb', className: 'text-left' },
+  { label: 'Sent', className: 'text-right' },
+  { label: 'Unsent', className: 'text-right' },
+  { label: 'Junk', className: 'text-right' },
+  { label: 'First Sent', className: 'text-left' },
+  { label: 'Last Sent', className: 'text-left' },
+  { label: 'Pending', className: 'text-right' },
+  { label: 'Report', className: 'text-left' },
+  { label: 'Progress', className: 'w-2/5' },
+] as const;
+
 function DispatchVolumeChart({
   trend,
   selectedSuburb,
@@ -304,15 +321,14 @@ function SuburbDispatchTimeline({
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left px-3 py-2.5 text-xs font-medium text-slate-500">Suburb</th>
-              <th className="text-left px-3 py-2.5 text-xs font-medium text-slate-500">Report</th>
-              <th className="text-left px-3 py-2.5 text-xs font-medium text-slate-500">First Sent</th>
-              <th className="text-left px-3 py-2.5 text-xs font-medium text-slate-500">Last Sent</th>
-              <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500">Sent</th>
-              <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500">Junk</th>
-              <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500">Unsent</th>
-              <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500">Pending</th>
-              <th className="px-3 py-2.5 text-xs font-medium text-slate-500 w-2/5">Progress</th>
+              {DISPATCH_TIMELINE_COLUMNS.map((column) => (
+                <th
+                  key={column.label}
+                  className={`${column.className} px-3 py-2.5 text-xs font-medium text-slate-500`}
+                >
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -355,6 +371,18 @@ function SuburbDispatchTimeline({
                         <td className="px-3 py-2.5">
                           <span className="font-medium text-slate-900">{stripQuarterSuffix(s.suburb)}</span>
                         </td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-purple-700">
+                          {formatDispatchCount(s.sent_count, s.total_count)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-red-600">
+                          {formatDispatchCount(unsentCount, s.total_count)}
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-amber-600">
+                          {formatDispatchCount(s.junk_count, s.total_count)}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.first_sent_at) : '-'}</td>
+                        <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.last_sent_at) : '-'}</td>
+                        <td className="px-3 py-2.5 text-right font-semibold text-slate-900">{s.total_count}</td>
                         <td className="px-3 py-2.5">
                           {s.report_url ? (
                             <a
@@ -367,19 +395,9 @@ function SuburbDispatchTimeline({
                               View Report
                             </a>
                           ) : (
-                            <span className="text-xs text-slate-300">—</span>
+                            <span className="text-xs text-slate-300">-</span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.first_sent_at) : '—'}</td>
-                        <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.last_sent_at) : '—'}</td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-purple-700">{s.sent_count}</td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-amber-600">
-                          {s.junk_count > 0
-                            ? `${s.junk_count}(${s.total_count > 0 ? Math.round((s.junk_count / s.total_count) * 100) : 0}%)`
-                            : '0'}
-                        </td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-red-600">{unsentCount}</td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-slate-900">{s.total_count}</td>
                         <td className="px-3 py-2.5">
                           {s.total_count > 0 ? (
                             <div className="flex items-center gap-2">

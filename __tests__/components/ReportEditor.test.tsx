@@ -156,6 +156,7 @@ describe('ReportEditor image paste', () => {
     );
     props.medianPrice = '1.19M';
     props.medianLabel = 'Median Sale Price';
+    props.card2Note = 'Boutique market absorption';
     const node = captured.implementation.render({ id: 'pulse-1', type: 'marketPulse', props }, mocks.editor);
     const setData = vi.fn();
 
@@ -177,6 +178,7 @@ describe('ReportEditor image paste', () => {
       expect(blockContent?.getAttribute('data-content-type')).toBe('marketPulse');
       expect(blockContent?.getAttribute('data-median-price')).toBe('1.19M');
       expect(blockContent?.getAttribute('data-median-label')).toBe('Median Sale Price');
+      expect(blockContent?.getAttribute('data-card2note')).toBe('Boutique market absorption');
     } finally {
       node.destroy?.();
       node.dom.remove();
