@@ -57,7 +57,35 @@ export async function GET(request: Request) {
         op.status as outreach_status,
         op.sent_at,
         op.last_sent_at,
-        op.total_send_count
+        op.total_send_count,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'id', ld.id,
+            'lead_id', ld.lead_id,
+            'doc_type', ld.doc_type,
+            'file_name', ld.file_name,
+            'file_url', ld.file_url,
+            'file_size', ld.file_size,
+            'mime_type', ld.mime_type,
+            'uploaded_by', ld.uploaded_by,
+            'created_at', ld.created_at
+          ) ORDER BY ld.created_at DESC)
+          FROM lead_documents ld
+          WHERE ld.lead_id = l.id
+        ), '[]'::json) AS documents,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'id', le.id,
+            'lead_id', le.lead_id,
+            'event_type', le.event_type,
+            'title', le.title,
+            'description', le.description,
+            'created_by', le.created_by,
+            'created_at', le.created_at
+          ) ORDER BY le.created_at DESC)
+          FROM lead_events le
+          WHERE le.lead_id = l.id
+        ), '[]'::json) AS events
       FROM leads l
       LEFT JOIN properties p ON REPLACE(l.property_id::text, '-', '') = p.id
       LEFT JOIN real_estate re ON TRIM(LOWER(SPLIT_PART(re.address, ',', 1))) = TRIM(LOWER(p.address)) AND TRIM(LOWER(re.suburb)) = TRIM(LOWER(p.suburb))

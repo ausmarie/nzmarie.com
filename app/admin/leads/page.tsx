@@ -6,10 +6,11 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { isAdmin } from '@/lib/permissions';
 import { getFixedImageUrl } from '@/lib/google-maps';
-import { FaBed, FaBath, FaCar, FaRulerCombined, FaMapMarkerAlt } from 'react-icons/fa';
+import { FaBed, FaBath, FaCar, FaFilePdf, FaRulerCombined, FaMapMarkerAlt } from 'react-icons/fa';
 import { LeadEditModal } from '@/components/admin/LeadEditModal';
 import { PropertyEditModal } from '@/components/admin/PropertyEditModal';
 import { PropertyHistoryView } from '@/components/admin/PropertyHistoryView';
+import LeadPdfSection, { type LeadPdfDocument } from '@/components/admin/LeadPdfSection';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import LeadReportsView from './components/LeadReportsView';
 
@@ -25,6 +26,7 @@ interface Lead {
   owner_phone?: string;
   source: string;
   source_outreach_id?: string;
+  property_id?: string | null;
   status: string;
   priority: string;
   summary?: string;
@@ -68,6 +70,8 @@ interface Lead {
   sent_at?: string | null;
   last_sent_at?: string | null;
   total_send_count?: number | null;
+  documents?: LeadPdfDocument[];
+  events?: LeadEvent[];
 }
 
 interface LeadEvent {
@@ -120,6 +124,74 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   appraisal: '📋',
   status_change: '🔄',
 };
+
+function buildLeadAiData(lead: Lead): string {
+  const documents = Array.isArray(lead.documents) ? lead.documents : [];
+  const events = Array.isArray(lead.events) ? lead.events : [];
+  const lines: Array<string | null | undefined> = [
+    '[AI-DATA-START]',
+    `Lead ID: ${lead.id}`,
+    `Address: ${lead.property_address}`,
+    lead.street ? `Street: ${lead.street}` : null,
+    lead.suburb ? `Suburb: ${lead.suburb}` : null,
+    lead.city ? `City: ${lead.city}` : null,
+    lead.region ? `Region: ${lead.region}` : null,
+    lead.owner_name ? `Owner Name: ${lead.owner_name}` : null,
+    lead.owner_email ? `Owner Email: ${lead.owner_email}` : null,
+    lead.owner_phone ? `Owner Phone: ${lead.owner_phone}` : null,
+    `Source: ${lead.source}`,
+    lead.source_outreach_id ? `Source Outreach ID: ${lead.source_outreach_id}` : null,
+    lead.property_id ? `Property ID: ${lead.property_id}` : null,
+    `Status: ${lead.status}`,
+    `Priority: ${lead.priority}`,
+    lead.summary ? `Summary: ${lead.summary}` : null,
+    lead.notes ? `Notes: ${lead.notes}` : null,
+    lead.next_action ? `Next Action: ${lead.next_action}` : null,
+    lead.next_action_at ? `Next Action At: ${lead.next_action_at}` : null,
+    lead.last_contacted_at ? `Last Contacted At: ${lead.last_contacted_at}` : null,
+    lead.created_at ? `Created At: ${lead.created_at}` : null,
+    lead.updated_at ? `Updated At: ${lead.updated_at}` : null,
+    lead.bedrooms != null ? `Bedrooms: ${lead.bedrooms}` : null,
+    lead.bathrooms != null ? `Bathrooms: ${lead.bathrooms}` : null,
+    lead.garages != null ? `Car Spaces: ${lead.garages}` : null,
+    lead.rv != null ? `Capital Value (RV): ${lead.rv}` : null,
+    lead.last_sold_price != null ? `Last Sold Price: ${lead.last_sold_price}` : null,
+    lead.last_sold_date ? `Last Sold Date: ${lead.last_sold_date}` : null,
+    lead.build_year != null ? `Year Built: ${lead.build_year}` : null,
+    lead.floor_area ? `Floor Area: ${lead.floor_area}` : null,
+    lead.land_area ? `Land Area: ${lead.land_area}` : null,
+    lead.property_url ? `Property URL: ${lead.property_url}` : null,
+    lead.description ? `Description: ${lead.description}` : null,
+    lead.has_rental_history != null ? `Has Rental History: ${lead.has_rental_history ? 'Yes' : 'No'}` : null,
+    lead.is_currently_rented != null ? `Currently Rented: ${lead.is_currently_rented ? 'Yes' : 'No'}` : null,
+    lead.estimated_value_low != null ? `Estimated Value Low: ${lead.estimated_value_low}` : null,
+    lead.estimated_value_high != null ? `Estimated Value High: ${lead.estimated_value_high}` : null,
+    lead.property_history ? `Property History: ${lead.property_history}` : null,
+    lead.realestate_url ? `Realestate URL: ${lead.realestate_url}` : null,
+    lead.on_market_sale ? `For Sale: ${lead.sale_listing_status || 'Yes'}` : null,
+    lead.sale_price ? `Sale Price: ${lead.sale_price}` : null,
+    lead.sale_agent ? `Sale Agent: ${lead.sale_agent}` : null,
+    lead.on_market_rent ? `For Rent: ${lead.rent_listing_status || 'Yes'}` : null,
+    lead.rent_price ? `Rent Price: ${lead.rent_price}` : null,
+    lead.outreach_id ? `Outreach ID: ${lead.outreach_id}` : null,
+    lead.outreach_campaign ? `Outreach Campaign: ${lead.outreach_campaign}` : null,
+    lead.outreach_status ? `Outreach Status: ${lead.outreach_status}` : null,
+    lead.sent_at ? `Outreach Sent At: ${lead.sent_at}` : null,
+    lead.last_sent_at ? `Outreach Last Sent At: ${lead.last_sent_at}` : null,
+    lead.total_send_count != null ? `Outreach Send Count: ${lead.total_send_count}` : null,
+    `Appraisal PDF Count: ${documents.length}`,
+    ...documents.map((document) =>
+      `Appraisal PDF: ${document.file_name} | Uploaded: ${document.created_at} | URL: ${document.file_url}`
+    ),
+    `Timeline Event Count: ${events.length}`,
+    ...events.map((event) =>
+      `Timeline Event: ${event.created_at} | ${event.event_type} | ${event.title}${event.description ? ` | ${event.description}` : ''}${event.created_by ? ` | By ${event.created_by}` : ''}`
+    ),
+    '[AI-DATA-END]',
+  ];
+
+  return lines.filter((line): line is string => Boolean(line)).join('\n');
+}
 
 export default function LeadsPage() {
   const { data: session } = useSession();
@@ -176,6 +248,9 @@ export default function LeadsPage() {
   const [eventModalOpen, setEventModalOpen] = useState(false);
   const [eventForm, setEventForm] = useState({ event_type: 'note', title: '', description: '' });
 
+  const [pdfModalLead, setPdfModalLead] = useState<Lead | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   const [pageView, setPageView] = useState<'leads' | 'reports'>('leads');
@@ -212,6 +287,76 @@ export default function LeadsPage() {
     setNotification({ type, msg });
     setTimeout(() => setNotification(null), 3000);
   }, []);
+
+  const updateLeadRecord = useCallback((leadId: string, update: (lead: Lead) => Lead) => {
+    setLeads(prev => prev.map(lead => lead.id === leadId ? update(lead) : lead));
+    setAllLeads(prev => prev.map(lead => lead.id === leadId ? update(lead) : lead));
+    setSelectedLead(prev => prev?.id === leadId ? update(prev) : prev);
+    setPdfModalLead(prev => prev?.id === leadId ? update(prev) : prev);
+  }, []);
+
+  const openPdfModal = useCallback((lead: Lead) => {
+    setPdfModalLead(lead);
+  }, []);
+
+  const uploadLeadPdfs = useCallback(async (lead: Lead, files: File[]) => {
+    if (files.length === 0) return;
+
+    setPdfBusy(true);
+    const uploaded: LeadPdfDocument[] = [];
+
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch(`/api/admin/leads/${lead.id}/documents`, {
+          method: 'POST',
+          body: formData,
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.error || `Failed to upload ${file.name}`);
+        }
+        uploaded.push(json.data as LeadPdfDocument);
+      }
+
+      updateLeadRecord(lead.id, (current) => ({
+        ...current,
+        documents: [...uploaded, ...(current.documents || [])],
+      }));
+      notify('success', uploaded.length === 1 ? 'Appraisal PDF uploaded' : `${uploaded.length} appraisal PDFs uploaded`);
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : 'Failed to upload appraisal PDF');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [notify, updateLeadRecord]);
+
+  const deleteLeadPdf = useCallback(async (lead: Lead, document: LeadPdfDocument) => {
+    if (!window.confirm(`Delete ${document.file_name}?`)) return;
+
+    setPdfBusy(true);
+    try {
+      const res = await fetch(
+        `/api/admin/leads/${lead.id}/documents?documentId=${encodeURIComponent(document.id)}`,
+        { method: 'DELETE' }
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to delete appraisal PDF');
+      }
+
+      updateLeadRecord(lead.id, (current) => ({
+        ...current,
+        documents: (current.documents || []).filter((item) => item.id !== document.id),
+      }));
+      notify('success', 'Appraisal PDF deleted');
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : 'Failed to delete appraisal PDF');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [notify, updateLeadRecord]);
 
   const fetchLeads = useCallback(async () => {
     setLoading(true);
@@ -418,7 +563,9 @@ export default function LeadsPage() {
     try {
       const res = await fetch(`/api/admin/leads/${lead.id}/events`);
       const json = await res.json();
-      setEvents(json.data || []);
+      const loadedEvents = Array.isArray(json.data) ? json.data : [];
+      setEvents(loadedEvents);
+      updateLeadRecord(lead.id, (current) => ({ ...current, events: loadedEvents }));
     } catch {
       setEvents([]);
     } finally {
@@ -451,8 +598,7 @@ export default function LeadsPage() {
       });
       if (!res.ok) throw new Error('Failed to update');
       const json = await res.json();
-      setSelectedLead(json.data);
-      setLeads(prev => prev.map(l => l.id === json.data.id ? json.data : l));
+      updateLeadRecord(json.data.id, (current) => ({ ...current, ...json.data }));
       setLeadEditOpen(false);
       notify('success', 'Lead updated');
     } catch {
@@ -529,8 +675,7 @@ export default function LeadsPage() {
       });
       if (!res.ok) throw new Error('Failed to update');
       const json = await res.json();
-      setSelectedLead(json.data);
-      setLeads(prev => prev.map(l => l.id === json.data.id ? json.data : l));
+      updateLeadRecord(json.data.id, (current) => ({ ...current, ...json.data }));
       setEditOpen(false);
       notify('success', 'Lead updated');
     } catch {
@@ -548,7 +693,12 @@ export default function LeadsPage() {
       });
       if (!res.ok) throw new Error('Failed to add event');
       const json = await res.json();
-      setEvents(prev => [json.data, ...prev]);
+      const createdEvent = json.data as LeadEvent;
+      setEvents(prev => [createdEvent, ...prev]);
+      updateLeadRecord(selectedLead.id, (current) => ({
+        ...current,
+        events: [createdEvent, ...(current.events || [])],
+      }));
       setEventModalOpen(false);
       setEventForm({ event_type: 'note', title: '', description: '' });
       notify('success', 'Event added');
@@ -1136,7 +1286,7 @@ export default function LeadsPage() {
                         }}>
                           {lead.property_address}
                         </h3>
-                        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                        <div style={{ display: "flex", gap: "8px", flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1159,6 +1309,35 @@ export default function LeadsPage() {
                             onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f5f3ff'; e.currentTarget.style.borderColor = '#c4b5fd'; }}
                           >
                             Lead
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              openPdfModal(lead);
+                            }}
+                            data-testid={`lead-pdf-${lead.id}`}
+                            aria-label={`Manage appraisal PDFs for ${lead.property_address}`}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              padding: '6px 14px',
+                              backgroundColor: '#fff1f2',
+                              color: '#e11d48',
+                              border: '1px solid #fecdd3',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              fontSize: '0.85rem',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.2s',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#ffe4e6'; e.currentTarget.style.borderColor = '#fda4af'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff1f2'; e.currentTarget.style.borderColor = '#fecdd3'; }}
+                          >
+                            <FaFilePdf size={13} />
+                            PDF{(lead.documents?.length || 0) > 0 ? ` ${lead.documents?.length}` : ''}
                           </button>
                           {lead.joined_property_id && (
                             <button
@@ -1437,6 +1616,22 @@ export default function LeadsPage() {
                         </div>
                       </div>
                     </div>
+                    <div
+                      aria-hidden="true"
+                      data-testid={`lead-ai-data-${lead.id}`}
+                      style={{
+                        position: 'absolute',
+                        top: '-9999px',
+                        left: '-9999px',
+                        pointerEvents: 'none',
+                        userSelect: 'none',
+                        fontSize: '1px',
+                        opacity: 0,
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {buildLeadAiData(lead)}
+                    </div>
                   </div>
                 );
               })}
@@ -1617,6 +1812,26 @@ export default function LeadsPage() {
                 </div>
               )}
 
+              {/* Appraisal PDFs */}
+              <div data-testid="lead-pdf-detail">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Appraisal PDFs
+                  </p>
+                  <span className="text-xs text-slate-400">
+                    {(selectedLead.documents?.length || 0) > 0
+                      ? `${selectedLead.documents?.length} file${(selectedLead.documents?.length || 0) === 1 ? '' : 's'}`
+                      : 'No files'}
+                  </span>
+                </div>
+                <LeadPdfSection
+                  documents={selectedLead.documents || []}
+                  uploading={pdfBusy}
+                  onUpload={(files) => uploadLeadPdfs(selectedLead, files)}
+                  onDelete={(document) => deleteLeadPdf(selectedLead, document)}
+                />
+              </div>
+
               {/* Timeline */}
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -1773,9 +1988,44 @@ export default function LeadsPage() {
         </div>
       )}
 
+      {pdfModalLead && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto"
+          onClick={() => setPdfModalLead(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-xl w-full mt-10 mb-10 overflow-hidden border border-slate-100"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="px-6 py-5 bg-slate-900 text-white flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Appraisal PDFs</p>
+                <h3 className="text-base font-semibold truncate">{pdfModalLead.property_address}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfModalLead(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800"
+                aria-label="Close appraisal PDFs"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-6">
+              <LeadPdfSection
+                documents={pdfModalLead.documents || []}
+                uploading={pdfBusy}
+                onUpload={(files) => uploadLeadPdfs(pdfModalLead, files)}
+                onDelete={(document) => deleteLeadPdf(pdfModalLead, document)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <PropertyEditModal
         isOpen={propertyEditOpen}
-        data={propertyEditData}
+        data={propertyEditData as unknown as Record<string, string | number | boolean | null | undefined>}
         onClose={() => setPropertyEditOpen(false)}
         onDataChange={handlePropertyEditDataChange}
         onSave={savePropertyEdit}
@@ -1785,7 +2035,7 @@ export default function LeadsPage() {
       
       <LeadEditModal
         isOpen={leadEditOpen}
-        data={leadEditData}
+        data={leadEditData as unknown as Record<string, string | number | boolean | null | undefined>}
         onClose={() => setLeadEditOpen(false)}
         onDataChange={handleLeadEditDataChange}
         onSave={saveLeadEdit}

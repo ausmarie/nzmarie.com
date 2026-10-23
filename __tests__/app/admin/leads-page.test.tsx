@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import React from 'react';
 import LeadsPage from '../../../app/admin/leads/page';
 
@@ -45,6 +45,40 @@ const mockLeads = [
     updated_at: '2026-10-01T00:00:00.000Z',
     image_url: 'https://example.com/one.jpg',
     property_url: 'https://example.com/listing/249',
+    owner_name: 'Jane Owner',
+    owner_email: 'jane@example.com',
+    owner_phone: '0211234567',
+    summary: 'Considering a sale next year',
+    bedrooms: 4,
+    bathrooms: 2,
+    garages: 2,
+    rv: 1450000,
+    sale_price: '$1,520,000',
+    on_market_sale: true,
+    events: [
+      {
+        id: 'event-1',
+        lead_id: 'lead-1',
+        event_type: 'phone_call',
+        title: 'Discussed appraisal',
+        description: 'Owner wants a market update',
+        created_by: 'admin@example.com',
+        created_at: '2026-10-20T00:00:00.000Z',
+      },
+    ],
+    documents: [
+      {
+        id: 'document-1',
+        lead_id: 'lead-1',
+        doc_type: 'appraisal_pdf',
+        file_name: 'sunset-road-appraisal.pdf',
+        file_url: 'https://reports.nzmarie.com/leads/lead-1/appraisal/sunset-road-appraisal.pdf',
+        file_size: 2048,
+        mime_type: 'application/pdf',
+        uploaded_by: 'admin@example.com',
+        created_at: '2026-10-21T00:00:00.000Z',
+      },
+    ],
   },
   {
     id: 'lead-2',
@@ -124,5 +158,44 @@ describe('LeadsPage refresh behavior', () => {
     expect(linked.getAttribute('target')).toBe('_blank');
 
     expect(screen.queryByRole('link', { name: '11 Honour Avenue' })).toBeNull();
+  });
+
+  it('renders all lead, property, PDF and timeline data in each AI data chamber', async () => {
+    render(<LeadsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('249 Sunset Road')).toBeTruthy();
+    });
+
+    const chamber = screen.getByTestId('lead-ai-data-lead-1');
+    expect(chamber.textContent).toContain('[AI-DATA-START]');
+    expect(chamber.textContent).toContain('Address: 249 Sunset Road');
+    expect(chamber.textContent).toContain('Owner Name: Jane Owner');
+    expect(chamber.textContent).toContain('Summary: Considering a sale next year');
+    expect(chamber.textContent).toContain('Bedrooms: 4');
+    expect(chamber.textContent).toContain('Capital Value (RV): 1450000');
+    expect(chamber.textContent).toContain('For Sale: Yes');
+    expect(chamber.textContent).toContain('Appraisal PDF Count: 1');
+    expect(chamber.textContent).toContain('sunset-road-appraisal.pdf');
+    expect(chamber.textContent).toContain('Timeline Event Count: 1');
+    expect(chamber.textContent).toContain('Discussed appraisal');
+    expect(chamber.textContent).toContain('[AI-DATA-END]');
+  });
+
+  it('opens the appraisal PDF history from a lead card', async () => {
+    render(<LeadsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('249 Sunset Road')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('lead-pdf-lead-1'));
+
+    expect(screen.getByText('Appraisal PDFs')).toBeTruthy();
+    expect(screen.getAllByText('sunset-road-appraisal.pdf').length).toBeGreaterThan(0);
+    expect(screen.getByText('Latest')).toBeTruthy();
+    expect(screen.getByRole('link', { name: /View/i }).getAttribute('href')).toBe(
+      'https://reports.nzmarie.com/leads/lead-1/appraisal/sunset-road-appraisal.pdf'
+    );
   });
 });

@@ -230,6 +230,40 @@ describe('GET /api/admin/leads', () => {
 
     expect(response.status).toBe(500);
   });
+
+  it('includes lead documents and events for the card AI chamber', async () => {
+    const row = {
+      ...mockLeadRow,
+      documents: [
+        {
+          id: 'document-1',
+          lead_id: 'lead-1',
+          file_name: 'appraisal.pdf',
+          file_url: 'https://reports.nzmarie.com/appraisal.pdf',
+        },
+      ],
+      events: [
+        {
+          id: 'event-1',
+          lead_id: 'lead-1',
+          event_type: 'phone_call',
+          title: 'Called owner',
+        },
+      ],
+    };
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ total: '1' }] })
+      .mockResolvedValueOnce({ rows: [row] });
+
+    const request = new Request('http://localhost:3000/api/admin/leads');
+    const response = await GET(request);
+    const body = await response.json();
+
+    expect(body.data[0].documents).toHaveLength(1);
+    expect(body.data[0].events).toHaveLength(1);
+    expect(mockQuery.mock.calls[1][0]).toContain('FROM lead_documents');
+    expect(mockQuery.mock.calls[1][0]).toContain('FROM lead_events');
+  });
 });
 
 describe('POST /api/admin/leads', () => {
