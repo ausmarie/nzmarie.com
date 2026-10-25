@@ -29,19 +29,49 @@ function getCardTitles(): string[] {
 }
 
 describe("PropertyListings", () => {
-  it("renders 4 property cards with 1 Wake Road first (top-left)", () => {
+  it("renders 5 property cards with 2/21 Birdwood Crescent first (top-left)", () => {
     render(<PropertyListings />);
     const titles = getCardTitles();
-    expect(titles).toHaveLength(4);
-    expect(titles[0]).toBe("1 Wake Road, Coatesville, Rodney");
+    expect(titles).toHaveLength(5);
+    expect(titles[0]).toBe("2/21 Birdwood Crescent, Parnell, Auckland");
   });
 
   it("keeps the existing properties in order after the new card", () => {
     render(<PropertyListings />);
     const titles = getCardTitles();
-    expect(titles[1]).toBe("62 Lord Street, STOKES VALLEY, Lower Hutt City");
-    expect(titles[2]).toBe("1b Arawa Road, Hataitai, Wellington");
-    expect(titles[3]).toBe("198 Sievers Grove, Cannons Creek, Porirua");
+    expect(titles[1]).toBe("1 Wake Road, Coatesville, Rodney");
+    expect(titles[2]).toBe("62 Lord Street, STOKES VALLEY, Lower Hutt City");
+    expect(titles[3]).toBe("1b Arawa Road, Hataitai, Wellington");
+    expect(titles[4]).toBe("198 Sievers Grove, Cannons Creek, Porirua");
+  });
+
+  it("shows 10 distinct Birdwood gallery images", () => {
+    render(<PropertyListings />);
+    fireEvent.click(within(getCards()[0]).getByRole("button", { name: /View Details/i }));
+
+    const modal = within(
+      screen.getByRole("heading", {
+        level: 2,
+        name: "2/21 Birdwood Crescent, Parnell, Auckland",
+      }).closest(".rt-Box") as HTMLElement
+    );
+    const thumbnails = Array.from({ length: 10 }, (_, index) =>
+      modal.getByRole("img", { name: `2/21 Birdwood Crescent, Parnell, Auckland ${index + 1}` })
+    );
+    const imagePaths = [
+      "/img/2-21 Birdwood Crescent/3572532814289677914.jpg",
+      "/img/2-21 Birdwood Crescent/15551503651520434293.jpg",
+      "/img/2-21 Birdwood Crescent/16826307826035928740.jpg",
+      "/img/2-21 Birdwood Crescent/17788050255602213793.jpg",
+      "/img/2-21 Birdwood Crescent/6699321839574534448.jpg",
+      "/img/2-21 Birdwood Crescent/676639201456968117.jpg",
+      "/img/2-21 Birdwood Crescent/7295482908688743948.jpg",
+      "/img/2-21 Birdwood Crescent/800049948936793181.jpg",
+      "/img/2-21 Birdwood Crescent/8044476125041428350.jpg",
+      "/img/2-21 Birdwood Crescent/9204007423387956900.jpg",
+    ];
+
+    expect(thumbnails.map((image) => image.getAttribute("src"))).toEqual(imagePaths);
   });
 
   it("shows Sold badge on 1b Arawa Road card", () => {
@@ -52,7 +82,7 @@ describe("PropertyListings", () => {
 
   it("shows Negotiation price, For Sale badge, Lifestyle Section and land area on 1 Wake Road card", () => {
     render(<PropertyListings />);
-    const card = getCards()[0];
+    const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("1 Wake Road"))!;
     expect(within(card).getByText("Negotiation")).toBeTruthy();
     expect(within(card).getAllByText("For Sale").length).toBeGreaterThan(0);
     expect(within(card).getByText("Lifestyle Section")).toBeTruthy();
@@ -61,7 +91,7 @@ describe("PropertyListings", () => {
 
   it("does not render bed/bath/parking/floor counts for the bare section", () => {
     render(<PropertyListings />);
-    const card = getCards()[0];
+    const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("1 Wake Road"))!;
     expect(within(card).queryByText(/Bedrooms/)).toBeNull();
     expect(within(card).queryByText(/Bathrooms/)).toBeNull();
     expect(within(card).queryByText(/Parking/)).toBeNull();
@@ -70,13 +100,16 @@ describe("PropertyListings", () => {
 
   it("shows bed counts on house cards", () => {
     render(<PropertyListings />);
-    const card = getCards()[1];
+    const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("62 Lord Street"))!;
     expect(within(card).getByText(/3 Bedrooms/)).toBeTruthy();
   });
 
   it("opens details modal for 1 Wake Road with YouTube embed and realestate.co.nz link", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const iframe = screen.getByTitle(/1 Wake Road.*video/i) as HTMLIFrameElement;
     expect(iframe.src).toBe("https://www.youtube-nocookie.com/embed/TcFgLRdiLPM");
     const link = screen.getByRole("link", { name: /realestate\.co\.nz/i }) as HTMLAnchorElement;
@@ -89,7 +122,10 @@ describe("PropertyListings", () => {
 
   it("modal for 1 Wake Road omits bed/bath but shows land and Lifestyle Section", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = within(
       screen.getByRole("heading", { level: 2, name: /1 Wake Road, Coatesville, Rodney/i })
         .closest(".rt-Box") as HTMLElement
@@ -101,7 +137,10 @@ describe("PropertyListings", () => {
 
   it("does not show video/listing sections on properties without them", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[1]);
+    const lordStreetBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("62 Lord Street")
+    );
+    fireEvent.click(lordStreetBtn!);
     expect(screen.queryByTitle(/video/i)).toBeNull();
     expect(screen.queryByRole("link", { name: /realestate\.co\.nz/i })).toBeNull();
   });
@@ -119,15 +158,16 @@ describe("PropertyListings zh (/cn)", () => {
     const titles = getZhCards().map(
       (card) => within(card).getAllByRole("heading", { level: 3 })[0].textContent?.trim() ?? ""
     );
-    expect(titles[0]).toBe("1 Wake Road, Coatesville, Rodney");
-    expect(titles[1]).toBe("62 Lord Street, STOKES VALLEY, Lower Hutt City");
-    expect(titles[2]).toBe("1b Arawa Road, Hataitai, Wellington");
-    expect(titles[3]).toBe("198 Sievers Grove, Cannons Creek, Porirua");
+    expect(titles[0]).toBe("2/21 Birdwood Crescent, Parnell, Auckland");
+    expect(titles[1]).toBe("1 Wake Road, Coatesville, Rodney");
+    expect(titles[2]).toBe("62 Lord Street, STOKES VALLEY, Lower Hutt City");
+    expect(titles[3]).toBe("1b Arawa Road, Hataitai, Wellington");
+    expect(titles[4]).toBe("198 Sievers Grove, Cannons Creek, Porirua");
   });
 
   it("translates 1 Wake Road card: Negotiation→价格面议, Lifestyle Section→生活区分契土地, Chinese description", () => {
     render(<PropertyListings lang="zh" />);
-    const card = getZhCards()[0];
+    const card = getZhCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("1 Wake Road"))!;
     expect(within(card).getByText("价格面议")).toBeTruthy();
     expect(within(card).getByText("生活区分契土地")).toBeTruthy();
     expect(within(card).getByText(/Coatesville 生活方式/)).toBeTruthy();
@@ -138,26 +178,29 @@ describe("PropertyListings zh (/cn)", () => {
   it("shows Chinese status labels via translations", () => {
     render(<PropertyListings lang="zh" />);
     const cards = getZhCards();
-    expect(within(cards[0]).getAllByText("待售").length).toBeGreaterThan(0);
-    expect(within(cards[2]).getAllByText("已售").length).toBeGreaterThan(0);
+    expect(within(cards[1]).getAllByText("待售").length).toBeGreaterThan(0);
+    expect(within(cards[0]).getAllByText("已售").length).toBeGreaterThan(0);
   });
 
   it("translates 62 Lord Street card with Chinese description and CV price", () => {
     render(<PropertyListings lang="zh" />);
-    const card = getZhCards()[1];
+    const card = getZhCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("62 Lord Street"))!;
     expect(within(card).getByText(/属于您的一片自然天地/)).toBeTruthy();
     expect(within(card).getByText(/估值/)).toBeTruthy();
   });
 
   it("translates 198 Sievers Grove card as 已撤回", () => {
     render(<PropertyListings lang="zh" />);
-    const card = getZhCards()[3];
+    const card = getZhCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("198 Sievers Grove"))!;
     expect(within(card).getByText("已撤回")).toBeTruthy();
   });
 
   it("opens modal with Chinese details for 1 Wake Road, title stays English, video/link preserved", () => {
     render(<PropertyListings lang="zh" />);
-    fireEvent.click(screen.getAllByRole("button", { name: /查看详情/ })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /查看详情/ }).find((btn, idx) => 
+      getZhCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const heading = screen.getByRole("heading", {
       level: 2,
       name: /1 Wake Road, Coatesville, Rodney/,
@@ -175,14 +218,20 @@ describe("PropertyListings zh (/cn)", () => {
 
   it("translates modal open homes and deadline for 62 Lord Street", () => {
     render(<PropertyListings lang="zh" />);
-    fireEvent.click(screen.getAllByRole("button", { name: /查看详情/ })[1]);
+    const lordStreetBtn = screen.getAllByRole("button", { name: /查看详情/ }).find((btn, idx) => 
+      getZhCards()[idx]?.querySelector("h3")?.textContent?.includes("62 Lord Street")
+    );
+    fireEvent.click(lordStreetBtn!);
     expect(screen.getAllByText(/2025年11月1日 星期六/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/2025年11月12日 星期三/).length).toBeGreaterThan(0);
   });
 
   it("keeps zh-specific labels for video and listing headings in modal", () => {
     render(<PropertyListings lang="zh" />);
-    fireEvent.click(screen.getAllByRole("button", { name: /查看详情/ })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /查看详情/ }).find((btn, idx) => 
+      getZhCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     expect(screen.getByText("视频")).toBeTruthy();
     expect(screen.getByText("外部房源")).toBeTruthy();
     expect(screen.getByRole("link", { name: /realestate\.co\.nz/ })).toBeTruthy();
@@ -198,7 +247,10 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("shows prev/next arrows inside the image on multi-image properties", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = getModalBox();
     expect(within(modal).getByRole("button", { name: "Next image" })).toBeTruthy();
     expect(within(modal).getByRole("button", { name: "Previous image" })).toBeTruthy();
@@ -206,7 +258,10 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("next arrow advances the main image", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = getModalBox();
     const mainImage = within(modal).getByAltText("1 Wake Road, Coatesville, Rodney") as HTMLImageElement;
     expect(mainImage.src).toContain("photo-01.jpg");
@@ -216,7 +271,10 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("concept image is second in the gallery, followed by photo-11", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = getModalBox();
     const mainImage = within(modal).getByAltText("1 Wake Road, Coatesville, Rodney") as HTMLImageElement;
     fireEvent.click(within(modal).getByRole("button", { name: "Next image" }));
@@ -227,7 +285,10 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("previous arrow wraps to the last image from the first", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = getModalBox();
     const mainImage = within(modal).getByAltText("1 Wake Road, Coatesville, Rodney") as HTMLImageElement;
     expect(mainImage.src).toContain("photo-01.jpg");
@@ -237,7 +298,10 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("next arrow wraps from the last image to the first", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = getModalBox();
     const mainImage = within(modal).getByAltText("1 Wake Road, Coatesville, Rodney") as HTMLImageElement;
     for (let i = 0; i < 7; i++) {
@@ -250,7 +314,10 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("arrow clicks do not trigger the image click-to-advance twice", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = getModalBox();
     const mainImage = within(modal).getByAltText("1 Wake Road, Coatesville, Rodney") as HTMLImageElement;
     fireEvent.click(within(modal).getByRole("button", { name: "Next image" }));
@@ -259,14 +326,20 @@ describe("PropertyDetails image gallery arrows", () => {
 
   it("does not show arrows on single-image properties", () => {
     render(<PropertyListings />);
-    fireEvent.click(screen.getAllByRole("button", { name: /View Details/i })[2]);
+    const arawaBtn = screen.getAllByRole("button", { name: /View Details/i }).find((btn, idx) => 
+      getCards()[idx]?.querySelector("h3")?.textContent?.includes("1b Arawa Road")
+    );
+    fireEvent.click(arawaBtn!);
     expect(screen.queryByRole("button", { name: "Next image" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Previous image" })).toBeNull();
   });
 
   it("shows Chinese arrow labels when lang is zh", () => {
     render(<PropertyListings lang="zh" />);
-    fireEvent.click(screen.getAllByRole("button", { name: /查看详情/ })[0]);
+    const wakeRoadBtn = screen.getAllByRole("button", { name: /查看详情/ }).find((btn) =>
+      btn.closest(".rt-Card")?.querySelector("h3")?.textContent?.includes("1 Wake Road")
+    );
+    fireEvent.click(wakeRoadBtn!);
     const modal = within(
       screen
         .getByRole("heading", { level: 2, name: /1 Wake Road, Coatesville, Rodney/ })

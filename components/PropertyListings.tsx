@@ -63,6 +63,63 @@ function localizeProperty(property: Property, lang: Language): Property {
 
 const properties: Property[] = [
   {
+    id: 6,
+    title: "2/21 Birdwood Crescent, Parnell, Auckland",
+    price: "POA",
+    location: "2/21 Birdwood Crescent, Parnell, Auckland",
+    bedrooms: 4,
+    bathrooms: 3,
+    parking: 2,
+    area: "248m²",
+    landArea: "285m²",
+    propertyType: "Townhouse",
+    imageUrl: "/img/2-21 Birdwood Crescent/3572532814289677914.jpg",
+    images: [
+      "/img/2-21 Birdwood Crescent/3572532814289677914.jpg",
+      "/img/2-21 Birdwood Crescent/15551503651520434293.jpg",
+      "/img/2-21 Birdwood Crescent/16826307826035928740.jpg",
+      "/img/2-21 Birdwood Crescent/17788050255602213793.jpg",
+      "/img/2-21 Birdwood Crescent/6699321839574534448.jpg",
+      "/img/2-21 Birdwood Crescent/676639201456968117.jpg",
+      "/img/2-21 Birdwood Crescent/7295482908688743948.jpg",
+      "/img/2-21 Birdwood Crescent/800049948936793181.jpg",
+      "/img/2-21 Birdwood Crescent/8044476125041428350.jpg",
+      "/img/2-21 Birdwood Crescent/9204007423387956900.jpg",
+    ],
+    status: "Sold",
+    description: "Securing Premium Parnell Living",
+    details: `A stunning 248m² executive home featuring 4 bedrooms and 3 bathrooms, perfectly positioned in the heart of Parnell.
+
+The Brief
+Our clients were looking for a spacious, low-maintenance premium family home within the highly sought-after Double Grammar Zone, offering both lifestyle and long-term capital resilience.
+
+The Challenge
+Premium standalone homes in Parnell are tightly held. Finding a property that matches exact luxury specifications while navigating a highly competitive market requires fast action, deep local connections, and strategic negotiation.
+
+Marie's Edge & Outcome
+By leveraging comprehensive market insights and sharp negotiation skills, Marie successfully secured this highly coveted property for the buyers on their terms. We took the stress out of the purchasing process, ensuring our clients confidently acquired their dream Parnell home.
+
+Call to Action: Looking to buy in Auckland's premium suburbs? Let Marie find and secure your next dream home. Book a consultation today.`,
+    openHomes: [],
+    zh: {
+      price: "已售",
+      description: "锁定优质帕内尔生活",
+      details: `一栋令人惊艳的 248m² 高端住宅，拥有 4 间卧室和 3 间浴室，完美坐落于帕内尔核心地带。
+
+简介
+我们的客户正在寻找一处宽敞、低维护的高端家庭住宅，位于备受追捧的双语法学校学区内，兼具生活品质与长期资本抗跌性。
+
+挑战
+帕内尔的高端独栋住宅供应极其稀缺。寻找一处完全符合奢华规格的房产，同时在竞争激烈的市场中脱颖而出，需要快速行动、深厚的本地人脉和精准的谈判策略。
+
+Marie 的优势与成果
+凭借全面的市场洞察和敏锐的谈判技巧，Marie 成功按买方条件拿下这处备受瞩目的房产。我们为客户消除了购房过程中的压力，确保他们自信地拥有了梦想中的帕内尔住宅。
+
+行动号召：想在奥克兰核心区买房？让 Marie 为您寻觅并锁定下一套梦想住宅。立即预约咨询。`,
+      openHomes: [],
+    },
+  },
+  {
     id: 5,
     title: "1 Wake Road, Coatesville, Rodney",
     price: "Negotiation",
