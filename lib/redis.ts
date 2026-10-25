@@ -227,6 +227,58 @@ export async function invalidateStreetClustersForSuburb(suburb: string): Promise
     }
     await redis.del(indexKey);
     await redis.del(`suburb_streets:${s}`);
+    await invalidateOutreachCardsForSuburb(s);
+  } catch {
+  }
+}
+
+const OUTREACH_CARDS_TTL = 30 * 60;
+
+export function outreachCardsKey(suburb: string, queryIdentifier: string): string {
+  const s = suburb ? suburb.toLowerCase().trim() : 'all';
+  return `outreach_cards:${s}:${queryIdentifier}`;
+}
+
+export async function getOutreachCardsFromCache<T>(key: string): Promise<T | null> {
+  if (!redis) return null;
+  try {
+    const cached = await redis.get<T>(key);
+    if (cached !== null) {
+      if (typeof cached === 'string') return JSON.parse(cached) as T;
+      return cached;
+    }
+  } catch {
+  }
+  return null;
+}
+
+export async function setOutreachCardsInCache(
+  suburb: string,
+  key: string,
+  data: unknown,
+  ttlSeconds: number = OUTREACH_CARDS_TTL
+): Promise<void> {
+  if (!redis) return;
+  try {
+    await redis.set(key, JSON.stringify(data), { ex: ttlSeconds });
+    const s = suburb ? suburb.toLowerCase().trim() : 'all';
+    const indexKey = `outreach_cards_keys:${s}`;
+    await redis.sadd(indexKey, key);
+    await redis.expire(indexKey, ttlSeconds * 2);
+  } catch {
+  }
+}
+
+export async function invalidateOutreachCardsForSuburb(suburb: string): Promise<void> {
+  if (!redis || !suburb) return;
+  const s = suburb.toLowerCase().trim();
+  const indexKey = `outreach_cards_keys:${s}`;
+  try {
+    const trackedKeys = await redis.smembers<string[]>(indexKey);
+    if (trackedKeys && trackedKeys.length > 0) {
+      await redis.del(...trackedKeys);
+    }
+    await redis.del(indexKey);
   } catch {
   }
 }

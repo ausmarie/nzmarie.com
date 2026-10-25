@@ -220,7 +220,7 @@ describe('Outreach mobile - card grid keeps full-width columns on narrow screens
 
     await screen.findByText('15 Marine Parade');
 
-    const grid = findCardGrid();
+    const grid = await waitFor(() => findCardGrid());
     expect(grid.style.gridTemplateColumns).toContain('min(340px, 100%)');
     expect(grid.style.gridTemplateColumns).toContain('1fr');
   });
@@ -237,7 +237,7 @@ describe('Outreach mobile - card grid keeps full-width columns on narrow screens
     fireEvent.click(checkbox);
 
     findBulkBar();
-    const grid = findCardGrid();
+    const grid = await waitFor(() => findCardGrid());
     expect(grid.style.gridTemplateColumns).toContain('min(340px, 100%)');
   });
 });

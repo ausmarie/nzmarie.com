@@ -1179,7 +1179,7 @@ describe('Outreach page - Card view run ordering', () => {
       expect(last).toContain('streets=');
     }, { timeout: 3000 });
 
-    const allBtn = (await screen.findAllByRole('button', { name: /^All$/ }))[0];
+    const allBtn = within(unsentBtn.parentElement as HTMLElement).getByRole('button', { name: /^All$/ });
     fireEvent.click(allBtn);
 
     // After switching back to "All", a fresh list fetch must NOT be limited to
@@ -2500,10 +2500,15 @@ describe('Outreach page - Return to Pending actions', () => {
 
     await waitFor(() => {
       expect(screen.getByText('1 Main St')).toBeTruthy();
+      expect(screen.getByText('2 Oak Ave')).toBeTruthy();
+      expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     }, { timeout: 3000 });
 
     const checkboxes = screen.getAllByRole('checkbox');
     checkboxes.forEach((cb) => fireEvent.click(cb));
+    await waitFor(() => {
+      expect(screen.getAllByRole('checkbox').every((cb) => (cb as HTMLInputElement).checked)).toBe(true);
+    }, { timeout: 3000 });
 
     const returnToPendingBtn = screen.getByRole('button', { name: /Return to Pending/i });
     fireEvent.click(returnToPendingBtn);
@@ -2552,4 +2557,214 @@ describe('Outreach page - Return to Pending actions', () => {
     confirmSpy.mockRestore();
   });
 });
+
+
+describe('Outreach page - Today Run street switching', () => {
+  const streets = ['Alpha Street', 'Zeta Street', 'Beta Street'];
+  const streetPayload = (street: string) => ({
+    id: `id-${street}`,
+    property_address: `1 ${street}`,
+    street,
+    suburb: 'Torbay',
+    city: 'Auckland',
+    region: 'Auckland',
+    status: 'PENDING',
+    created_at: '2026-07-01T10:00:00Z',
+  });
+
+  function mockApi() {
+    (global.fetch as any) = vi.fn((url: RequestInfo, init?: RequestInit) => {
+      const s = String(url || '');
+      if (s.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports: [{ suburb: 'Torbay', quarter: 'Q2', year: 2026, id: 'r1' }] }) });
+      }
+      if (s.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (s.includes('/api/admin/outreach/prefetch')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, prefetched: [] }) });
+      }
+      if (s.includes('/api/admin/outreach/street-clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            suburb: 'Torbay',
+            groups: [{ groupId: 1, streets: streets.map((st, i) => ({ street: st, suburb: 'Torbay', lat: -36.6 + i * 0.01, lng: 174.7 + i * 0.01, pendingCount: 1, addresses: [`1 ${st}`] })), totalPending: 3, extentMeters: 500 }],
+            runs: [{ runId: 1, groups: [{ groupId: 1, streets: streets.map((st, i) => ({ street: st, suburb: 'Torbay', lat: -36.6 + i * 0.01, lng: 174.7 + i * 0.01, pendingCount: 1, addresses: [`1 ${st}`] })), totalPending: 3, extentMeters: 500 }], totalPending: 3, streetCount: 3 }],
+            totalPending: 3,
+            unclusteredStreets: [],
+            allStreets: streets.map((st) => ({ street: st, count: 1 })),
+          }),
+        });
+      }
+      if (s.includes('/api/admin/outreach?')) {
+        const parsed = new URL(s, 'http://localhost');
+        const street = parsed.searchParams.get('street');
+        const list = street ? [streetPayload(street)] : streets.map(streetPayload);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, data: list, pagination: { page: 1, limit: 9, total: list.length, totalPages: 1 } }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ success: true, data: [], pagination: { page: 1, limit: 9, total: 0, totalPages: 0 } }) });
+    });
+  }
+
+  beforeEach(() => {
+    mockSession = { data: { user: { email: 'nzlouis.com@gmail.com' } }, status: 'authenticated' };
+    global.fetch = vi.fn();
+    mockApi();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.resetAllMocks();
+    window.localStorage.clear();
+  });
+
+  async function openUnsent() {
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    const unsent = await screen.findByRole('button', { name: 'Unsent' });
+    fireEvent.click(unsent);
+    await screen.findByText('Nearby streets in walking order', {}, { timeout: 5000 });
+    await screen.findByRole('button', { name: 'Alpha Street (1)' }, { timeout: 5000 });
+  }
+
+  it('switches cards to the clicked street for 10 consecutive selections', async () => {
+    await openUnsent();
+    const sequence = ['Alpha Street', 'Zeta Street', 'Beta Street', 'Zeta Street', 'Alpha Street', 'Beta Street', 'Alpha Street', 'Zeta Street', 'Beta Street', 'Zeta Street'];
+
+    for (let i = 0; i < sequence.length; i++) {
+      const street = sequence[i];
+      const startIdx = (global.fetch as any).mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: `${street} (1)` }));
+      await waitFor(() => {
+        const h3s = Array.from(document.querySelectorAll('h3')).map((h) => h.textContent || '');
+        expect(h3s).toContain(`1 ${street}`);
+        expect(h3s.filter((t) => t.includes('Street'))).toHaveLength(1);
+      }, { timeout: 3000 });
+
+      const calls = (global.fetch as any).mock.calls
+        .slice(startIdx)
+        .map((c: unknown[]) => String(c[0]))
+        .filter((u: string) => u.includes('/api/admin/outreach?') && !u.includes('street-clusters'));
+      const streetCalls = calls.filter((u: string) => u.includes(`street=${street.replace(/ /g, '+')}`));
+      expect(streetCalls.length).toBeGreaterThanOrEqual(1);
+      expect(streetCalls.every((u: string) => !u.includes('streets='))).toBe(true);
+
+      // The street buttons must remain available while loading.
+      expect(screen.getByRole('button', { name: `${street} (1)` })).toBeTruthy();
+    }
+  });
+
+  it('switching Start from fetches the selected street cards', async () => {
+    await openUnsent();
+    const select = screen.getByLabelText('Start street') as HTMLSelectElement;
+    const startIdx = (global.fetch as any).mock.calls.length;
+    fireEvent.change(select, { target: { value: 'Beta Street' } });
+
+    await waitFor(() => {
+      const h3s = Array.from(document.querySelectorAll('h3')).map((h) => h.textContent || '');
+      expect(h3s).toContain('1 Beta Street');
+      expect(h3s.filter((t) => t.includes('Street'))).toHaveLength(1);
+    }, { timeout: 3000 });
+
+    const calls = (global.fetch as any).mock.calls
+      .slice(startIdx)
+      .map((c: unknown[]) => String(c[0]))
+      .filter((u: string) => u.includes('/api/admin/outreach?') && !u.includes('street-clusters'));
+    expect(calls.some((u: string) => u.includes('street=Beta+Street'))).toBe(true);
+  });
+
+  it('clicking a nearby street does not change the Start from route grouping', async () => {
+    await openUnsent();
+    const select = screen.getByLabelText('Start street') as HTMLSelectElement;
+    const before = select.value;
+    fireEvent.click(screen.getByRole('button', { name: 'Zeta Street (1)' }));
+    await waitFor(() => {
+      expect(Array.from(document.querySelectorAll('h3')).map((h) => h.textContent)).toContain('1 Zeta Street');
+    }, { timeout: 3000 });
+    expect((screen.getByLabelText('Start street') as HTMLSelectElement).value).toBe(before);
+    expect(screen.getByRole('button', { name: 'Alpha Street (1)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Beta Street (1)' })).toBeTruthy();
+  });
+
+  it('ignores an in-flight run-batch response that resolves after a street click', async () => {
+    let resolveBatch: ((value: unknown) => void) | null = null;
+    let markBatchStarted: (() => void) | null = null;
+    const batchStarted = new Promise<void>((resolve) => { markBatchStarted = resolve; });
+    const batchResponse = new Promise((resolve) => { resolveBatch = resolve; });
+
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const s = String(url || '');
+      if (s.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports: [{ suburb: 'Torbay', quarter: 'Q2', year: 2026, id: 'r1' }] }) });
+      }
+      if (s.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (s.includes('/api/admin/outreach/prefetch')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, prefetched: [] }) });
+      }
+      if (s.includes('/api/admin/outreach/street-clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            suburb: 'Torbay',
+            groups: [{ groupId: 1, streets: streets.map((st, i) => ({ street: st, suburb: 'Torbay', lat: -36.6 + i * 0.01, lng: 174.7 + i * 0.01, pendingCount: 1, addresses: [`1 ${st}`] })), totalPending: 3, extentMeters: 500 }],
+            runs: [{ runId: 1, groups: [{ groupId: 1, streets: streets.map((st, i) => ({ street: st, suburb: 'Torbay', lat: -36.6 + i * 0.01, lng: 174.7 + i * 0.01, pendingCount: 1, addresses: [`1 ${st}`] })), totalPending: 3, extentMeters: 500 }], totalPending: 3, streetCount: 3 }],
+            totalPending: 3,
+            unclusteredStreets: [],
+            allStreets: streets.map((st) => ({ street: st, count: 1 })),
+          }),
+        });
+      }
+      if (s.includes('/api/admin/outreach?')) {
+        if (s.includes('streets=')) {
+          markBatchStarted?.();
+          markBatchStarted = null;
+          return batchResponse;
+        }
+        const parsed = new URL(s, 'http://localhost');
+        const street = parsed.searchParams.get('street');
+        const list = street ? [streetPayload(street)] : streets.map(streetPayload);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, data: list, pagination: { page: 1, limit: 9, total: list.length, totalPages: 1 } }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ success: true, data: [], pagination: { page: 1, limit: 9, total: 0, totalPages: 0 } }) });
+    });
+
+    await openUnsent();
+    await Promise.race([batchStarted, new Promise((r) => setTimeout(r, 3000))]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Beta Street (1)' }));
+    await waitFor(() => {
+      const h3s = Array.from(document.querySelectorAll('h3')).map((h) => h.textContent || '').filter((t) => /^\d/.test(t));
+      expect(h3s).toEqual(['1 Beta Street']);
+    }, { timeout: 3000 });
+
+    await act(async () => {
+      resolveBatch?.({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: streets.map(streetPayload),
+          pagination: { page: 1, limit: 500, total: 3, totalPages: 1 },
+        }),
+      });
+      await batchResponse;
+      await Promise.resolve();
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const h3s = Array.from(document.querySelectorAll('h3')).map((h) => h.textContent || '').filter((t) => /^\d/.test(t));
+    expect(h3s).toEqual(['1 Beta Street']);
+  });
+});
+
 

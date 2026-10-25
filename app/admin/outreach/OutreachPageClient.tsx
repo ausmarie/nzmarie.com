@@ -310,12 +310,15 @@ export default function OutreachPage() {
       isInitialMount.current = false;
       return;
     }
+    if (skipDebounceRef.current) {
+      skipDebounceRef.current = false;
+      return;
+    }
     if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
     filterDebounceRef.current = setTimeout(() => {
-      cacheRef.current.clear();
       setCurrentPage(1);
       setDebouncedFilterKey(k => k + 1);
-    }, 300);
+    }, 50);
     return () => {
       if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current);
     };
@@ -329,6 +332,8 @@ export default function OutreachPage() {
   // "Unsent" so "All" reflects every address (unsent + sent).
   useEffect(() => {
     if (sentStatusFilter === 'unsent') return;
+    streetFocusRef.current = '';
+    streetFocusSuburbRef.current = '';
     setRunStreetFilter([]);
     setStreetFilter('');
   }, [sentStatusFilter]);
@@ -702,6 +707,14 @@ export default function OutreachPage() {
   const loadingMoreRef = useRef(false);
   const lastPropertyElementRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fetchSeqRef = useRef(0);
+  const skipDebounceRef = useRef(false);
+  const streetAbortRef = useRef<AbortController | null>(null);
+  const streetSeqRef = useRef(0);
+  const streetFocusRef = useRef('');
+  const streetFocusSuburbRef = useRef('');
+  const streetInFlightRef = useRef(false);
+  const fetchStreetDataRef = useRef<((suburb: string, street: string) => void) | null>(null);
 
   // Client-side cache: keyed by filter signature + page number so that
   // infinite and classic modes share the same per-page cache. Switching between
@@ -747,8 +760,9 @@ export default function OutreachPage() {
     // set so the Start street selector and street list see EVERY street.
     const effectiveLimit =
       activeTab === 'liked' && likedStreetModeApplied ? 1000
-        : runStreetFilter.length > 0 ? 500
-          : pageSize;
+        : streetFilter ? pageSize
+          : runStreetFilter.length > 0 ? 500
+            : pageSize;
 
     const params = new URLSearchParams({
       status: activeTab,
@@ -762,7 +776,7 @@ export default function OutreachPage() {
     // The planner needs ALL streets for the suburb to populate the dropdown;
     // per-street display is handled client-side via likedSelectedStreet.
     if (streetFilter && !(activeTab === 'liked' && likedStreetModeApplied)) params.set('street', streetFilter);
-    if (runStreetFilter.length > 0) params.set('streets', runStreetFilter.join(','));
+    if (!streetFilter && runStreetFilter.length > 0) params.set('streets', runStreetFilter.join(','));
     if (campaignFilter) params.set('campaign', campaignFilter);
     if (debouncedSearch) params.set('search', debouncedSearch);
     if (propertyFilter === 'house') params.set('standalone_only', 'true');
@@ -812,13 +826,34 @@ export default function OutreachPage() {
 
   const fetchItems = useCallback(async () => {
     if (isClassic) return;
-    if (waitingForTodayRun) {
+    if (streetFocusRef.current) {
+      // A focused street owns the list; re-run the street fetch with the
+      // current filters so generic/auto-batch fetches can never overwrite it.
+      if (!streetInFlightRef.current) {
+        fetchStreetDataRef.current?.(
+          streetFocusSuburbRef.current || reportSuburbFilter || suburbFilter,
+          streetFocusRef.current
+        );
+      }
+      return;
+    }
+    if (waitingForTodayRun && !streetFilter) {
       setLoading(false);
       return;
     }
+    const seq = ++fetchSeqRef.current;
     const key1 = buildCacheKey(1);
     const cached1 = cacheRef.current.get(key1);
     if (cached1) {
+      if (seq !== fetchSeqRef.current) return;
+      // Show the skeleton for at least one frame so Redis-cached responses
+      // still give visible feedback when switching streets/filters.
+      setLoading(true);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (seq !== fetchSeqRef.current) return;
+      // A focused street owns the list — discard any generic result that was
+      // already in flight when the user picked the street.
+      if (streetFocusRef.current) return;
       // Accumulate all cached consecutive pages for infinite scroll
       const allItems = [...cached1.items];
       let page = 2;
@@ -847,6 +882,8 @@ export default function OutreachPage() {
     hasMoreRef.current = true;
     try {
       const result = await fetchPageData(1);
+      if (seq !== fetchSeqRef.current) return;
+      if (streetFocusRef.current) return;
       cacheRef.current.set(key1, {
         items: result.items,
         pagination: result.pagination,
@@ -863,9 +900,9 @@ export default function OutreachPage() {
         console.error('Error fetching outreach:', error);
       }
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
-  }, [fetchPageData, isClassic, buildCacheKey, waitingForTodayRun]);
+  }, [fetchPageData, isClassic, buildCacheKey, waitingForTodayRun, streetFilter, reportSuburbFilter, suburbFilter]);
 
   // Keep fetchItemsRef pointing to the latest fetchItems so effects that
   // intentionally omit it from deps (auth, debounce-key) always call the
@@ -890,7 +927,17 @@ export default function OutreachPage() {
   }, [debouncedFilterKey, status]);
 
   useEffect(() => {
-    if (!isClassic || status !== 'authenticated' || waitingForTodayRun) return;
+    if (!isClassic || status !== 'authenticated') return;
+    if (streetFocusRef.current) {
+      if (!streetInFlightRef.current) {
+        fetchStreetDataRef.current?.(
+          streetFocusSuburbRef.current || reportSuburbFilter || suburbFilter,
+          streetFocusRef.current
+        );
+      }
+      return;
+    }
+    if (waitingForTodayRun) return;
     const key = buildCacheKey(currentPage);
     const cached = cacheRef.current.get(key);
     if (cached) {
@@ -905,7 +952,7 @@ export default function OutreachPage() {
       setClassicLoading(true);
       try {
         const result = await fetchPageData(currentPage);
-        if (!cancelled) {
+        if (!cancelled && !streetFocusRef.current) {
           cacheRef.current.set(key, {
             items: result.items,
             pagination: result.pagination,
@@ -930,6 +977,7 @@ export default function OutreachPage() {
   }, [paginationMode, viewMode]);
 
   const loadMore = useCallback(async () => {
+    if (streetFocusRef.current) return;
     if (loadingMoreRef.current || !hasMoreRef.current) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
@@ -1023,6 +1071,72 @@ export default function OutreachPage() {
     return 'pending';
   };
 
+  // Street selection fetches immediately (bypassing the debounce) so it can
+  // never be starved by other state churn (e.g. the default report applying).
+  const fetchStreetData = useCallback(async (suburb: string, street: string) => {
+    if (!street) return;
+    const seq = ++streetSeqRef.current;
+    streetAbortRef.current?.abort();
+    const controller = new AbortController();
+    streetAbortRef.current = controller;
+    streetInFlightRef.current = true;
+    if (isClassic) setClassicLoading(true);
+    else setLoading(true);
+
+    const params = new URLSearchParams({
+      status: activeTab,
+      page: '1',
+      limit: String(pageSize),
+      sortOrder,
+      street,
+    });
+    if (suburb) params.set('suburb', suburb);
+    if (sentStatusFilter) params.set('sent_status', sentStatusFilter);
+    if (activeQuarter) params.set('report_quarter', activeQuarter);
+    if (debouncedSearch) params.set('search', debouncedSearch);
+    if (propertyFilter === 'house') params.set('standalone_only', 'true');
+    if (propertyFilter === 'townhouse') params.set('townhouse_only', 'true');
+    if (marketStatus !== 'all') params.set('market_status', marketStatus);
+    if (junkFilter !== 'all') params.set('no_junk_mail', junkFilter === 'no_junk' ? 'true' : 'false');
+    if (sortMode === 'time') params.set('sort_mode', 'time');
+
+    try {
+      const res = await fetch(`/api/admin/outreach?${params}`, { signal: controller.signal });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to fetch street');
+      if (seq !== streetSeqRef.current) return;
+      // Invalidate any in-flight generic list fetch so it can't overwrite
+      // this street result with the older auto-selected run batch.
+      fetchSeqRef.current++;
+      const list = (data.data ?? []).map((item: OutreachProperty) => ({
+        ...item,
+        status: normalizeStatus(item.status),
+      }));
+      if (isClassic) {
+        setClassicItems(list);
+        setClassicPagination(data.pagination ?? null);
+      } else {
+        setItems(list);
+        setPagination(data.pagination ?? null);
+        setHasMore(list.length >= pageSize);
+        hasMoreRef.current = list.length >= pageSize;
+        pageRef.current = 1;
+      }
+    } catch (error) {
+      if ((error as Error)?.name !== 'AbortError') {
+        console.error('Error fetching street:', error);
+      }
+    } finally {
+      if (seq === streetSeqRef.current) {
+        streetInFlightRef.current = false;
+        if (isClassic) setClassicLoading(false);
+        else setLoading(false);
+      }
+    }
+  }, [activeTab, sentStatusFilter, activeQuarter, pageSize, sortOrder, debouncedSearch, propertyFilter, marketStatus, junkFilter, sortMode, isClassic]);
+
+  fetchStreetDataRef.current = fetchStreetData;
+
   const handleMarkAsSentSuccess = () => {
     cacheRef.current.clear();
     if (isClassic) {
@@ -1030,6 +1144,7 @@ export default function OutreachPage() {
     } else {
       fetchItems();
     }
+    setTodayRunRefreshKey((k) => k + 1);
     window.scrollTo(0, 0);
   };
 
@@ -1251,6 +1366,11 @@ export default function OutreachPage() {
     const todayRunKey = `${todayRunSuburb}|${activeQuarter || ''}`;
     if (todayRunSuburbQuarterRef.current !== todayRunKey) {
       todayRunSuburbQuarterRef.current = todayRunKey;
+      if (!streetFocusRef.current || streetFocusSuburbRef.current !== todayRunSuburb) {
+        streetFocusRef.current = '';
+        streetFocusSuburbRef.current = '';
+        setStreetFilter('');
+      }
       setRunStreetFilter([]);
     }
 
@@ -1303,21 +1423,29 @@ export default function OutreachPage() {
     };
   }, [activeTab, sentStatusFilter, todayRunSuburb, todayRunRefreshKey, activeQuarter, viewMode]);
 
+  const [firstBatchShown, setFirstBatchShown] = useState(false);
+
   const todayRunBatchKey = todayRunBatchStreets.join('|');
   useEffect(() => {
     if (activeTab !== 'pending' || sentStatusFilter !== 'unsent') return;
     if (!todayRunBatchKey) {
+      setFirstBatchShown(false);
       if (todayRunData) {
         setRunStreetFilter((prev) => (prev.length > 0 ? [] : prev));
       }
       return;
     }
-    setRunStreetFilter((prev) =>
-      prev.join('|') === todayRunBatchKey ? prev : todayRunBatchStreets
-    );
     if (!reportSuburbFilter && todayRunSuburb) {
       setReportSuburbFilter(todayRunSuburb);
     }
+    // A specific street selection always wins over the auto-selected run batch.
+    if (streetFilter) {
+      setRunStreetFilter((prev) => (prev.length > 0 ? [] : prev));
+    }
+    // Only keep the street explicitly selected by the user (via streetFilter).
+    // Do NOT auto-load every batch street here — that causes a slow bulk fetch.
+    // The remaining streets are added in the delayed effect below.
+    setFirstBatchShown(false);
   }, [
     activeTab,
     sentStatusFilter,
@@ -1326,6 +1454,79 @@ export default function OutreachPage() {
     todayRunData,
     reportSuburbFilter,
     todayRunSuburb,
+    streetFilter,
+  ]);
+
+  // Delayed second batch: after the selected street renders, add the remaining
+  // streets from today's run so the UI shows the first street immediately.
+  useEffect(() => {
+    if (activeTab !== 'pending' || sentStatusFilter !== 'unsent') return;
+    if (!todayRunBatchKey || firstBatchShown) return;
+    const selected = streetFilter ? [streetFilter] : [];
+    const remaining = todayRunBatchStreets.filter((s) => !selected.includes(s));
+    if (remaining.length === 0) {
+      setFirstBatchShown(true);
+      return;
+    }
+    const timer = setTimeout(() => {
+      // Only auto-load the remaining streets when the user has NOT manually
+      // picked a specific street. Otherwise keep showing just the selected one.
+      if (streetFilter) {
+        setFirstBatchShown(true);
+        return;
+      }
+      setRunStreetFilter((prev) => {
+        const joined = prev.join('|');
+        if (joined === todayRunBatchStreets.join('|')) return prev;
+        return todayRunBatchStreets;
+      });
+      setFirstBatchShown(true);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    activeTab,
+    sentStatusFilter,
+    todayRunBatchKey,
+    todayRunBatchStreets,
+    streetFilter,
+    firstBatchShown,
+  ]);
+
+  useEffect(() => {
+    if (activeTab !== 'pending' || sentStatusFilter !== 'unsent') return;
+    if (!todayRunSuburb || todayRunBatchStreets.length <= 1) return;
+
+    const currentStreet = streetFilter || todayRunStartStreet || todayRunBatchStreets[0];
+    const currentIndex = todayRunBatchStreets.indexOf(currentStreet);
+    const nearby = currentIndex >= 0
+      ? todayRunBatchStreets.slice(currentIndex + 1, currentIndex + 7)
+      : todayRunBatchStreets.slice(1, 7);
+
+    if (nearby.length === 0) return;
+
+    const timer = setTimeout(() => {
+      fetch('/api/admin/outreach/prefetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          suburb: todayRunSuburb,
+          streets: nearby,
+          status: 'pending',
+          sent_status: 'unsent',
+          report_quarter: activeQuarter || undefined,
+        }),
+      }).catch(() => {});
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [
+    activeTab,
+    sentStatusFilter,
+    todayRunSuburb,
+    streetFilter,
+    todayRunStartStreet,
+    todayRunBatchStreets,
+    activeQuarter,
   ]);
 
   useEffect(() => {
@@ -1526,7 +1727,7 @@ export default function OutreachPage() {
             {(['liked', 'pending', 'sent'] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => { setActiveTab(tab); setCurrentPage(1); setReportSuburbFilter('');  setSentStatusFilter('all'); setSortMode(tab === 'sent' ? 'time' : 'address'); setSortOrder('asc'); setSentDateFilter(tab === 'sent' ? [todayDateKey()] : []); setRunStreetFilter([]); setStreetFilter(''); if (tab !== 'liked') { setLikedStreetModeApplied(false); setLikedSelectedStreet(''); setLikedStreetSearch(''); setLikedStartStreet(''); setLikedApiStreets([]); setLikedOrderedStreets([]); } }}
+                onClick={() => { streetFocusRef.current = ''; streetFocusSuburbRef.current = ''; setActiveTab(tab); setCurrentPage(1); setReportSuburbFilter('');  setSentStatusFilter('all'); setSortMode(tab === 'sent' ? 'time' : 'address'); setSortOrder(tab === 'sent' ? 'desc' : 'asc'); setSentDateFilter(tab === 'sent' ? [todayDateKey()] : []); setRunStreetFilter([]); setStreetFilter(''); if (tab !== 'liked') { setLikedStreetModeApplied(false); setLikedSelectedStreet(''); setLikedStreetSearch(''); setLikedStartStreet(''); setLikedApiStreets([]); setLikedOrderedStreets([]); } }}
                 style={{
                   padding: '8px 18px',
                   backgroundColor: activeTab === tab ? (tab === 'liked' ? '#ec4899' : tab === 'pending' ? '#3b82f6' : '#8b5cf6') : 'white',
@@ -1574,6 +1775,8 @@ export default function OutreachPage() {
               setSuburbFilter={setSuburbFilter}
               setLastSoldPreset={setLastSoldPreset}
               onClearRunFilter={() => {
+                streetFocusRef.current = '';
+                streetFocusSuburbRef.current = '';
                 setRunStreetFilter([]);
                 setStreetFilter('');
               }}
@@ -1588,14 +1791,38 @@ export default function OutreachPage() {
             loading={todayRunLoading}
             error={todayRunError}
             onSelectStreet={(suburb, street) => {
+              streetFocusRef.current = street;
+              streetFocusSuburbRef.current = suburb;
               setReportSuburbFilter(suburb);
               setRunStreetFilter([]);
               setStreetFilter(street);
+              setCurrentPage(1);
+              skipDebounceRef.current = true;
+              void fetchStreetData(suburb, street);
             }}
             startStreet={todayRunStartStreet}
+            selectedStreet={streetFilter}
             onStartStreetChange={(suburb, street) => {
-              window.localStorage.setItem(`today_run_start_street:${suburb}`, street);
-              setTodayRunStartStreet(street);
+              if (street) {
+                streetFocusRef.current = street;
+                streetFocusSuburbRef.current = suburb;
+                window.localStorage.setItem(`today_run_start_street:${suburb}`, street);
+                setTodayRunStartStreet(street);
+                setReportSuburbFilter(suburb);
+                setRunStreetFilter([]);
+                setStreetFilter(street);
+                setCurrentPage(1);
+                skipDebounceRef.current = true;
+                void fetchStreetData(suburb, street);
+              } else {
+                streetFocusRef.current = '';
+                streetFocusSuburbRef.current = '';
+                window.localStorage.removeItem(`today_run_start_street:${suburb}`);
+                setTodayRunStartStreet('');
+                setStreetFilter('');
+                setCurrentPage(1);
+                if (!isClassic) setLoading(true);
+              }
             }}
           />
         )}
@@ -2399,6 +2626,8 @@ export default function OutreachPage() {
               setAddressInput('');
               setSuburbFilter('Northcross');
               setStreetFilter('');
+              streetFocusRef.current = '';
+              streetFocusSuburbRef.current = '';
               setCampaignFilter('');
               setSortOrder('asc');
               setLastSoldPreset('all');
@@ -3517,6 +3746,7 @@ export default function OutreachPage() {
               onCoordsLoaded={handleMapCoordsLoaded}
               statusFilter={mapStatusFilter}
               onStatusFilterChange={setMapStatusFilter}
+              refreshKey={todayRunRefreshKey}
               onRunSelect={(runId) => {
                 setActiveMapRunId(runId);
                 setActiveMapStreet(null);
@@ -3524,6 +3754,32 @@ export default function OutreachPage() {
               onStreetSelect={(suburb, street) => {
                 setActiveMapStreet(street);
                 setReportSuburbFilter(suburb);
+              }}
+              onMarkAsJunk={async (id: string) => {
+                if (!id) {
+                  showNotification('error', 'Invalid address ID');
+                  return;
+                }
+                try {
+                  const res = await fetch(`/api/admin/outreach/${id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ no_junk_mail: true }),
+                  });
+                  if (!res.ok) throw new Error('Failed to mark as junk');
+                  await res.json();
+                  showNotification('success', 'Marked as junk');
+                  setTodayRunRefreshKey((k) => k + 1);
+                } catch {
+                  showNotification('error', 'Failed to mark as junk');
+                }
+              }}
+              onMarkAsSent={(id: string, suburb: string) => {
+                const mapSuburb = suburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb || suburbFilter;
+                const prop = items.find((p) => p.id === id);
+                setSendTargetSuburb(mapSuburb || prop?.suburb || '');
+                setSendTargetIds([id]);
+                setSendModalOpen(true);
               }}
             />
           </div>

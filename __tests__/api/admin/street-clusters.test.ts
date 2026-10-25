@@ -266,7 +266,7 @@ describe('GET /api/admin/outreach/street-clusters', () => {
     expect(beta.addressCoords![0].status).toBe('junk');
   });
 
-  it('deduplicates duplicate rows for the same address and resolves one final status by precedence (sent > junk > unsent)', async () => {
+  it('deduplicates duplicate rows for the same address and resolves one final status by precedence (junk > sent > unsent)', async () => {
     mockAuth();
     vi.mocked(marieDB.query)
       .mockResolvedValueOnce({
@@ -285,7 +285,7 @@ describe('GET /api/admin/outreach/street-clusters', () => {
     const body = await response.json();
     const street = body.runs[0].groups.flatMap((g: any) => g.streets).find((s: any) => s.street === 'Helen Ryburn Place');
     expect(street.addressCoords).toHaveLength(1);
-    expect(street.addressCoords[0].status).toBe('sent');
+    expect(street.addressCoords[0].status).toBe('junk');
     expect(street.addressCoords[0].sent).toBe(true);
   });
 
@@ -311,8 +311,8 @@ describe('GET /api/admin/outreach/street-clusters', () => {
 
     const alpha = body.runs[0].groups.flatMap((g: any) => g.streets).find((s: any) => s.street === 'Alpha Street');
     expect(alpha.addressCoords).toEqual([
-      { address: '1 Alpha Street', lat: -36.7, lng: 174.7, sent: true, status: 'sent' },
-      { address: '3 Alpha Street', lat: -36.7001, lng: 174.7001, sent: false, status: 'unsent' },
+      { id: '1', address: '1 Alpha Street', lat: -36.7, lng: 174.7, sent: true, status: 'sent' },
+      { id: '2', address: '3 Alpha Street', lat: -36.7001, lng: 174.7001, sent: false, status: 'unsent' },
     ]);
   });
 
@@ -345,9 +345,9 @@ describe('GET /api/admin/outreach/street-clusters', () => {
     const body = await response.json();
     const alpha = body.runs[0].groups.flatMap((g: any) => g.streets).find((s: any) => s.street === 'Alpha Street');
     expect(alpha.addressCoords).toEqual([
-      { address: '1 Alpha Street', lat: -36.7, lng: 174.7, sent: false, status: 'unsent' },
-      { address: '3 Alpha Street', lat: -36.7001, lng: 174.7001, sent: false, status: 'unsent' },
-      { address: '5 Alpha Street', lat: -36.7002, lng: 174.7002, sent: true, status: 'sent' },
+      { id: '1', address: '1 Alpha Street', lat: -36.7, lng: 174.7, sent: false, status: 'unsent' },
+      { id: '2', address: '3 Alpha Street', lat: -36.7001, lng: 174.7001, sent: false, status: 'unsent' },
+      { id: '3', address: '5 Alpha Street', lat: -36.7002, lng: 174.7002, sent: true, status: 'sent' },
     ]);
   });
 });

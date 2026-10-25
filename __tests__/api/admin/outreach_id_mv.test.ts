@@ -138,6 +138,88 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
 
     expect(response.status).toBe(404);
   });
+
+  it('updates properties.no_junk_mail via property_id when only no_junk_mail is provided', async () => {
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'test-id', suburb: 'Torbay', property_id: '96d479bd-6139-4949-a617-f9f83b7973a0' }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no_junk_mail: true }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const calls = vi.mocked(marieDB.query).mock.calls;
+    const selectSql = calls[0][0] as string;
+    expect(selectSql).toContain('outreach_properties WHERE id = $1');
+    expect(selectSql).not.toContain('no_junk_mail');
+    const propertiesSql = calls[1][0] as string;
+    expect(propertiesSql).toContain('UPDATE properties SET no_junk_mail');
+    expect(propertiesSql).toContain('id = $2');
+  });
+
+  it('does not include no_junk_mail in the outreach UPDATE when combined with other fields', async () => {
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'test-id', suburb: 'Torbay', property_id: '96d479bd-6139-4949-a617-f9f83b7973a0' }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'sent', no_junk_mail: true }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const calls = vi.mocked(marieDB.query).mock.calls;
+    const outreachSql = calls[0][0] as string;
+    expect(outreachSql).toContain('UPDATE outreach_properties');
+    expect(outreachSql).toContain('status');
+    expect(outreachSql).not.toContain('no_junk_mail');
+    const propertiesSql = calls[1][0] as string;
+    expect(propertiesSql).toContain('UPDATE properties SET no_junk_mail');
+  });
+
+  it('updates properties.no_junk_mail via address+suburb fallback when property_id is missing', async () => {
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'test-id', suburb: 'Torbay', property_address: '5 Cliff Road', property_id: null }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no_junk_mail: false }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const calls = vi.mocked(marieDB.query).mock.calls;
+    const propertiesSql = calls[1][0] as string;
+    expect(propertiesSql).toContain('UPDATE properties SET no_junk_mail');
+    expect(propertiesSql).toContain('LOWER(TRIM(address))');
+    expect(propertiesSql).toContain('LOWER(TRIM(suburb))');
+  });
 });
 
 describe('Outreach [id] MV DELETE /api/admin/outreach/[id]', () => {

@@ -23,6 +23,7 @@ export interface StreetSummary {
   addresses: string[];
   // Optional per-address coordinates and status (only when requested)
   addressCoords?: Array<{
+    id?: string | null;
     address: string;
     lat: number;
     lng: number;
@@ -34,8 +35,8 @@ export interface StreetSummary {
 export function resolveAddressStatus(
   row: Pick<AddressRow, 'no_junk_mail' | 'sent'> & { status?: string | null }
 ): 'unsent' | 'sent' | 'junk' {
-  if (row.sent || row.status === 'sent') return 'sent';
   if (row.no_junk_mail) return 'junk';
+  if (row.sent || row.status === 'sent') return 'sent';
   return 'unsent';
 }
 
@@ -43,13 +44,14 @@ export function mergeAddressStatus(
   current: 'unsent' | 'sent' | 'junk',
   next: 'unsent' | 'sent' | 'junk'
 ): 'unsent' | 'sent' | 'junk' {
-  const order = { unsent: 0, junk: 1, sent: 2 } as const;
-  return order[current] >= order[next] ? current : next;
+  if (current === 'junk' || next === 'junk') return 'junk';
+  if (current === 'sent' || next === 'sent') return 'sent';
+  return 'unsent';
 }
 
 export function buildStreetSummaries(rows: AddressRow[], suburb: string, includeAddressCoords: boolean = false): StreetSummary[] {
   const map = new Map<string, StreetSummary>();
-  const streetAddressKey = new Map<string, Map<string, { lat: number; lng: number; address: string; sent: boolean; status: 'unsent' | 'sent' | 'junk' }>>();
+  const streetAddressKey = new Map<string, Map<string, { id: string | null; lat: number; lng: number; address: string; sent: boolean; status: 'unsent' | 'sent' | 'junk' }>>();
 
   for (const r of rows) {
     let s = map.get(r.street);
@@ -106,6 +108,7 @@ export function buildStreetSummaries(rows: AddressRow[], suburb: string, include
           s.addressCoords = Array.from(streetKeyMap.values());
         } else {
           streetKeyMap.set(dedupeKey, {
+            id: r.id ?? null,
             address: normalizedAddress,
             lat,
             lng,

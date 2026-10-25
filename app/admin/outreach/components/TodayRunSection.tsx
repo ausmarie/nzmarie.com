@@ -50,6 +50,7 @@ interface TodayRunSectionProps {
   error: string | null;
   onSelectStreet: (suburb: string, street: string) => void;
   startStreet?: string;
+  selectedStreet?: string;
   onStartStreetChange?: (suburb: string, street: string) => void;
 }
 
@@ -60,6 +61,7 @@ export default function TodayRunSection({
   error,
   onSelectStreet,
   startStreet = '',
+  selectedStreet = '',
   onStartStreetChange = () => {},
 }: TodayRunSectionProps) {
   if (status !== 'unsent') return null;
@@ -157,14 +159,14 @@ export default function TodayRunSection({
       )}
 
       <div style={{ padding: '12px 16px' }}>
-        {loading && <div style={{ fontSize: '0.85rem', color: '#7c3aed' }}>Loading…</div>}
+        {loading && !data && <div style={{ fontSize: '0.85rem', color: '#7c3aed' }}>Loading…</div>}
         {error && <div style={{ fontSize: '0.85rem', color: '#dc2626' }}>{error}</div>}
-        {!loading && !error && data && !hasStreets && (
+        {!error && data && !hasStreets && (
           <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
             No pending addresses in this suburb.
           </div>
         )}
-        {!loading && !error && data && hasStreets && (
+        {!error && data && hasStreets && (
           <>
             <div
               style={{
@@ -189,10 +191,10 @@ export default function TodayRunSection({
                     gap: '6px',
                     padding: '5px 10px',
                     borderRadius: '999px',
-                    border: street.street === startStreet
+                    border: street.street === (selectedStreet || startStreet)
                       ? '1px solid #7c3aed'
                       : '1px solid #e9d5ff',
-                    backgroundColor: street.street === startStreet ? '#f5f3ff' : '#ffffff',
+                    backgroundColor: street.street === (selectedStreet || startStreet) ? '#f5f3ff' : '#ffffff',
                     color: '#4c1d95',
                     fontSize: '0.78rem',
                     cursor: 'pointer',

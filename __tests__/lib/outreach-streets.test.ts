@@ -8,10 +8,10 @@ import {
 
 describe('outreach-streets status resolution & deduplication', () => {
   describe('resolveAddressStatus', () => {
-    it('resolves to sent when sent is true even if no_junk_mail is true', () => {
-      expect(resolveAddressStatus({ sent: true, no_junk_mail: true })).toBe('sent');
+    it('resolves to junk when no_junk_mail is true even if sent is true', () => {
+      expect(resolveAddressStatus({ sent: true, no_junk_mail: true })).toBe('junk');
       expect(resolveAddressStatus({ sent: true, no_junk_mail: false })).toBe('sent');
-      expect(resolveAddressStatus({ status: 'sent', no_junk_mail: true })).toBe('sent');
+      expect(resolveAddressStatus({ status: 'sent', no_junk_mail: true })).toBe('junk');
     });
 
     it('resolves to junk when not sent and no_junk_mail is true', () => {
@@ -26,16 +26,16 @@ describe('outreach-streets status resolution & deduplication', () => {
   });
 
   describe('mergeAddressStatus', () => {
-    it('prioritizes sent over junk and unsent', () => {
-      expect(mergeAddressStatus('unsent', 'sent')).toBe('sent');
-      expect(mergeAddressStatus('sent', 'unsent')).toBe('sent');
-      expect(mergeAddressStatus('junk', 'sent')).toBe('sent');
-      expect(mergeAddressStatus('sent', 'junk')).toBe('sent');
-    });
-
-    it('prioritizes junk over unsent', () => {
+    it('prioritizes junk over sent and unsent', () => {
       expect(mergeAddressStatus('unsent', 'junk')).toBe('junk');
       expect(mergeAddressStatus('junk', 'unsent')).toBe('junk');
+      expect(mergeAddressStatus('junk', 'sent')).toBe('junk');
+      expect(mergeAddressStatus('sent', 'junk')).toBe('junk');
+    });
+
+    it('prioritizes sent over unsent', () => {
+      expect(mergeAddressStatus('unsent', 'sent')).toBe('sent');
+      expect(mergeAddressStatus('sent', 'unsent')).toBe('sent');
     });
 
     it('retains same status when merging identical values', () => {
@@ -46,7 +46,7 @@ describe('outreach-streets status resolution & deduplication', () => {
   });
 
   describe('buildStreetSummaries', () => {
-    it('deduplicates multiple rows for the same property address and assigns single sent status', () => {
+    it('deduplicates multiple rows for the same property address and assigns single junk status when junk mail is present', () => {
       const rows: AddressRow[] = [
         {
           id: '1',
@@ -87,11 +87,12 @@ describe('outreach-streets status resolution & deduplication', () => {
       expect(summaries).toHaveLength(1);
       expect(summaries[0].addressCoords).toHaveLength(1);
       expect(summaries[0].addressCoords![0]).toEqual({
+        id: '1',
         address: '26 Helen Ryburn Place',
         lat: -36.70333,
         lng: 174.72455,
         sent: true,
-        status: 'sent',
+        status: 'junk',
       });
     });
 

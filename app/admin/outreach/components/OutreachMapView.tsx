@@ -10,6 +10,7 @@ import {
 } from '@/lib/outreach-map';
 
 interface AddressCoord {
+  id?: string | null;
   address: string;
   lat: number;
   lng: number;
@@ -54,6 +55,9 @@ export interface OutreachMapViewProps {
   ) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   onStatusFilterChange?: (status: 'all' | 'unsent' | 'sent' | 'junk') => void;
+  onMarkAsJunk?: (id: string, suburb: string) => void;
+  onMarkAsSent?: (id: string, suburb: string) => void;
+  refreshKey?: number;
 }
 
 const MAX_BOUNDS_ZOOM = 16;
@@ -65,9 +69,9 @@ function dotScaleForZoom(zoom: number, isUnsent: boolean): number | null {
   return isUnsent ? 6 : 5;
 }
 
-function buildAddressInfoWindowContent(address: string, statusLabel: string, color: string, suburb?: string): HTMLElement {
+function buildAddressInfoWindowContent(address: string, statusLabel: string, color: string, suburb?: string, id?: string | null, onMarkAsJunk?: (id: string, suburb: string) => void, onMarkAsSent?: (id: string, suburb: string) => void): HTMLElement {
   const container = document.createElement('div');
-  container.style.cssText = 'padding:8px 10px;min-width:190px;font-family:inherit;';
+  container.style.cssText = 'padding:8px 10px;min-width:210px;font-family:inherit;';
   const row = document.createElement('div');
   row.style.cssText = 'display:flex;align-items:center;font-weight:700;font-size:13px;color:#1f2937;';
   const dot = document.createElement('span');
@@ -85,12 +89,31 @@ function buildAddressInfoWindowContent(address: string, statusLabel: string, col
   status.style.cssText = 'font-size:11px;color:#6b7280;margin-top:2px;';
   status.textContent = statusLabel;
   container.appendChild(status);
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+  if (onMarkAsJunk) {
+    const btnJunk = document.createElement('button');
+    btnJunk.type = 'button';
+    btnJunk.textContent = 'Junk';
+    btnJunk.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;border:1px solid #dc2626;color:#dc2626;background:#fff;border-radius:4px;cursor:pointer;';
+    btnJunk.onclick = (e) => { e.stopPropagation(); onMarkAsJunk?.(id ?? '', suburb ?? ''); };
+    btnRow.appendChild(btnJunk);
+  }
+  if (onMarkAsSent) {
+    const btnSent = document.createElement('button');
+    btnSent.type = 'button';
+    btnSent.textContent = 'Sent';
+    btnSent.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;border:1px solid #2563eb;color:#2563eb;background:#fff;border-radius:4px;cursor:pointer;';
+    btnSent.onclick = (e) => { e.stopPropagation(); onMarkAsSent?.(id ?? '', suburb ?? ''); };
+    btnRow.appendChild(btnSent);
+  }
+  container.appendChild(btnRow);
   const link = document.createElement('a');
   link.href = `https://www.google.com/maps?q=${encodeURIComponent([address, suburb].filter(Boolean).join(', '))}`;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
   link.textContent = 'Google Maps ↗';
-  link.style.cssText = 'display:inline-block;margin-top:6px;font-size:12px;font-weight:600;color:#2563eb;text-decoration:none;';
+  link.style.cssText = 'display:block;margin-top:6px;font-size:12px;font-weight:600;color:#2563eb;text-decoration:none;';
   container.appendChild(link);
   return container;
 }
@@ -136,6 +159,8 @@ function NativeMarkerManager({
   selectedStreet,
   onStreetSelect,
   statusFilter = 'all',
+  onMarkAsJunk,
+  onMarkAsSent,
 }: {
   map: google.maps.Map;
   groups: Array<{ suburb?: string; streets: ClusterStreet[] }>;
@@ -143,9 +168,15 @@ function NativeMarkerManager({
   selectedStreet: string | null;
   onStreetSelect: (suburb: string, street: string) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
+  onMarkAsJunk?: (id: string, suburb: string) => void;
+  onMarkAsSent?: (id: string, suburb: string) => void;
 }) {
   const onStreetSelectRef = useRef(onStreetSelect);
   onStreetSelectRef.current = onStreetSelect;
+  const onMarkAsJunkRef = useRef(onMarkAsJunk);
+  onMarkAsJunkRef.current = onMarkAsJunk;
+  const onMarkAsSentRef = useRef(onMarkAsSent);
+  onMarkAsSentRef.current = onMarkAsSent;
 
   const [zoom, setZoom] = useState<number>(() => map.getZoom() ?? 12);
   useEffect(() => {
@@ -257,8 +288,17 @@ function NativeMarkerManager({
           });
           dotMarker.addListener('click', () => {
             onStreetSelectRef.current(suburb, streetName);
+            if (infoWindowRef.current) infoWindowRef.current.close();
             if (!infoWindowRef.current) infoWindowRef.current = new google.maps.InfoWindow();
-            infoWindowRef.current.setContent(buildAddressInfoWindowContent(a.address, statusLabel, dotColor, suburb));
+            const handleJunk = (addressId: string, addressSuburb: string) => {
+              infoWindowRef.current?.close();
+              onMarkAsJunkRef.current?.(addressId, addressSuburb);
+            };
+            const handleSent = (addressId: string, addressSuburb: string) => {
+              infoWindowRef.current?.close();
+              onMarkAsSentRef.current?.(addressId, addressSuburb);
+            };
+            infoWindowRef.current.setContent(buildAddressInfoWindowContent(a.address, statusLabel, dotColor, suburb, a.id ?? undefined, handleJunk, handleSent));
             infoWindowRef.current.setPosition({ lat: a.lat, lng: a.lng });
             infoWindowRef.current.open(map);
           });
@@ -310,6 +350,8 @@ function MapInner({
   onMapLoad,
   error,
   statusFilter,
+  onMarkAsJunk,
+  onMarkAsSent,
 }: {
   coordsData: ClusterPayload | null;
   activeRunId: number | null;
@@ -318,6 +360,8 @@ function MapInner({
   onMapLoad: (map: google.maps.Map) => void;
   error: string | null;
   statusFilter: 'all' | 'unsent' | 'sent' | 'junk';
+  onMarkAsJunk?: (id: string, suburb: string) => void;
+  onMarkAsSent?: (id: string, suburb: string) => void;
 }) {
   const map = useMap();
   const [legendVisible, setLegendVisible] = useState(true);
@@ -393,6 +437,8 @@ function MapInner({
             selectedStreet={selectedStreet}
             onStreetSelect={onStreetSelect}
             statusFilter={statusFilter}
+            onMarkAsJunk={onMarkAsJunk}
+            onMarkAsSent={onMarkAsSent}
           />
         )}
       </div>
@@ -409,6 +455,9 @@ export default function OutreachMapView({
   onStreetSelect,
   onCoordsLoaded,
   statusFilter: externalStatusFilter = 'all',
+  onMarkAsJunk,
+  onMarkAsSent,
+  refreshKey,
 }: OutreachMapViewProps) {
   const [coordsData, setCoordsData] = useState<ClusterPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -422,6 +471,7 @@ export default function OutreachMapView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const userMarkerRef = useRef<google.maps.Marker | null>(null);
   const userCircleRef = useRef<google.maps.Circle | null>(null);
+  const lastFetchParamsRef = useRef<string>('');
 
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen((f) => !f);
@@ -513,9 +563,14 @@ export default function OutreachMapView({
 
   const onCoordsLoadedRef = useRef(onCoordsLoaded);
   onCoordsLoadedRef.current = onCoordsLoaded;
+  const coordsDataRef = useRef(coordsData);
+  coordsDataRef.current = coordsData;
 
   const loadCoords = useCallback(async () => {
     if (!suburb) return;
+    const fetchKey = `${suburb}|${sentStatus}|${reportQuarter ?? ''}|${refreshKey ?? 0}`;
+    if (lastFetchParamsRef.current === fetchKey && coordsDataRef.current) return;
+    lastFetchParamsRef.current = fetchKey;
     setError(null);
     try {
       const params = new URLSearchParams({
@@ -568,7 +623,39 @@ export default function OutreachMapView({
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [suburb, sentStatus, reportQuarter]);
+  }, [suburb, sentStatus, reportQuarter, refreshKey]);
+
+  const handleMarkAsJunk = useCallback(async (id: string) => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/admin/outreach/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no_junk_mail: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(err.error || 'Failed to mark as junk');
+      }
+      await res.json();
+      loadCoords();
+    } catch (err) {
+      console.error('Mark as junk failed:', err);
+    }
+  }, [loadCoords]);
+
+  const handleMarkAsSent = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/admin/outreach/${id}/mark-sent`, {
+        method: 'PATCH',
+      });
+      if (!res.ok) throw new Error('Failed to mark as sent');
+      await res.json();
+      loadCoords();
+    } catch {
+      // silently ignore
+    }
+  }, [loadCoords]);
 
   useEffect(() => { if (suburb) loadCoords(); }, [suburb, loadCoords]);
 
@@ -688,6 +775,8 @@ export default function OutreachMapView({
           onMapLoad={handleMapLoad}
           error={error}
           statusFilter={statusFilter}
+          onMarkAsJunk={onMarkAsJunk ?? handleMarkAsJunk}
+          onMarkAsSent={onMarkAsSent ?? handleMarkAsSent}
         />
         <button
           type="button"

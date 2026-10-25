@@ -27,6 +27,28 @@ export default function ReportSidebar() {
   const suburbs = useReportStore(s => s.overviewSuburbs);
 
   useEffect(() => {
+    if (!selectedDocId || !suburbs.length) return;
+    const suburb = suburbs.find((s) =>
+      s.introDoc?.id === selectedDocId ||
+      s.letterDoc?.id === selectedDocId ||
+      s.reports.some((report) => report.id === selectedDocId)
+    );
+    if (suburb) {
+      setExpanded(true);
+      setSelectedSuburb(suburb.name);
+      setExpandedSuburbs(prev => {
+        const next = new Set(prev);
+        next.add(suburb.name);
+        return next;
+      });
+      setTimeout(() => {
+        const el = document.getElementById(selectedDocId);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
+  }, [selectedDocId, suburbs]);
+
+  useEffect(() => {
     if (slugMap['about-marie']) {
       setAboutMarieDoc({ id: slugMap['about-marie'] });
       setAboutMarieLoading(false);
@@ -278,9 +300,10 @@ export default function ReportSidebar() {
                   {suburb.name}
                 </div>
               {expandedSuburbs.has(suburb.name) && allDocs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="sidebar-doc-row"
+              <div
+                key={doc.id}
+                id={doc.id}
+                className="sidebar-doc-row"
                   onClick={() => handleClick(doc.id)}
                   style={{
                     padding: '2px 12px 2px 28px', cursor: 'pointer', fontSize: '0.78rem',

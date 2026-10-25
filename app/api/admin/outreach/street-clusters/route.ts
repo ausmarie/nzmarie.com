@@ -107,10 +107,14 @@ export async function GET(request: Request) {
     const { rows: addressRowsRaw } = await marieDB.query(
       `
       SELECT op.id AS id, op.street, op.house_number, op.property_address,
-             p.latitude AS lat, p.longitude AS lng, p.no_junk_mail AS no_junk_mail,
+             COALESCE(p.latitude, p_addr.latitude) AS lat,
+             COALESCE(p.longitude, p_addr.longitude) AS lng,
+             COALESCE(p.no_junk_mail, p_addr.no_junk_mail, false) AS no_junk_mail,
              op.sent_at, op.last_sent_at, op.total_send_count, op.status, op.last_campaign
       FROM outreach_properties op
       LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
+      LEFT JOIN properties p_addr ON LOWER(TRIM(op.property_address)) = LOWER(TRIM(p_addr.address))
+            AND LOWER(TRIM(op.suburb)) = LOWER(TRIM(p_addr.suburb))
       WHERE ${where}
       ORDER BY op.street ASC, op.house_number ASC NULLS LAST, op.property_address ASC
       `,

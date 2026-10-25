@@ -19,6 +19,9 @@ export async function PATCH(
     const body = await request.json();
     const { id } = await params;
 
+    const noJunkMailValue = body.no_junk_mail;
+    const hasNoJunkMail = noJunkMailValue !== undefined;
+
     const updates: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
@@ -48,24 +51,33 @@ export async function PATCH(
       }
     });
 
-    if (updates.length === 0) {
+    if (updates.length === 0 && !hasNoJunkMail) {
       return NextResponse.json(
         { error: 'No valid fields to update' },
         { status: 400 }
       );
     }
 
-    updates.push(`updated_at = NOW()`);
-    values.push(id);
+    let result;
 
-    const query = `
-      UPDATE outreach_properties
-      SET ${updates.join(', ')}
-      WHERE id = $${idx}
-      RETURNING *
-    `;
+    if (updates.length > 0) {
+      updates.push(`updated_at = NOW()`);
+      values.push(id);
 
-    const result = await marieDB.query(query, values);
+      const query = `
+        UPDATE outreach_properties
+        SET ${updates.join(', ')}
+        WHERE id = $${idx}
+        RETURNING *
+      `;
+
+      result = await marieDB.query(query, values);
+    } else {
+      result = await marieDB.query(
+        `SELECT * FROM outreach_properties WHERE id = $1`,
+        [id]
+      );
+    }
 
     if (result.rows.length === 0) {
       return NextResponse.json(
@@ -74,8 +86,24 @@ export async function PATCH(
       );
     }
 
-    // Invalidate street-clusters cache if status or suburb changed
     const updatedProperty = result.rows[0];
+
+    if (hasNoJunkMail) {
+      if (updatedProperty.property_id) {
+        const pid = String(updatedProperty.property_id).replace(/-/g, '');
+        await marieDB.query(
+          `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE id = $2`,
+          [noJunkMailValue, pid]
+        );
+      }
+      if (updatedProperty.property_address && updatedProperty.suburb) {
+        await marieDB.query(
+          `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE LOWER(TRIM(address)) = LOWER(TRIM($2)) AND LOWER(TRIM(suburb)) = LOWER(TRIM($3))`,
+          [noJunkMailValue, updatedProperty.property_address, updatedProperty.suburb]
+        );
+      }
+    }
+
     if (updatedProperty?.suburb) {
       invalidateStreetClustersForSuburb(updatedProperty.suburb).catch(() => { });
     }
@@ -87,7 +115,7 @@ export async function PATCH(
 
     return NextResponse.json({
       success: true,
-      data: result.rows[0],
+      data: { ...result.rows[0], no_junk_mail: hasNoJunkMail ? noJunkMailValue : result.rows[0].no_junk_mail },
     });
   } catch (error) {
     console.error('Error updating outreach property:', error);

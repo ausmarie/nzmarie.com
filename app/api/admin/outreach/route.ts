@@ -3,9 +3,20 @@ import { DateTime } from 'luxon';
 import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
-import { invalidateStreetClustersForSuburb } from '@/lib/redis';
+import {
+  invalidateStreetClustersForSuburb,
+  outreachCardsKey,
+  getOutreachCardsFromCache,
+  setOutreachCardsInCache,
+} from '@/lib/redis';
 import { batchGetCachedR2Urls } from '@/lib/streetview';
 import { parseReportQuarter } from '@/lib/outreach-quarter';
+import { getQueryCacheKey } from '@/lib/outreach-cache-key';
+
+async function fetchOutreachData(searchParams: URLSearchParams, view: string = 'full') {
+  const useMV = process.env.USE_OUTREACH_MV === 'true';
+  return useMV ? handleMVQuery(searchParams, view) : handleLegacyQuery(searchParams);
+}
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -15,17 +26,32 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const useMV = process.env.USE_OUTREACH_MV === 'true';
   const view = searchParams.get('view') || 'full';
 
   try {
     await marieDB.ensureOutreachTablesExist?.();
 
-    if (useMV) {
-      return handleMVQuery(searchParams, view);
+    const suburb = searchParams.get('suburb')?.trim() || '';
+    const cacheKey = suburb ? outreachCardsKey(suburb, getQueryCacheKey(searchParams)) : null;
+
+    if (cacheKey) {
+      const cached = await getOutreachCardsFromCache<Record<string, unknown>>(cacheKey);
+      if (cached) {
+        return NextResponse.json(cached, {
+          headers: { 'X-Cache': 'HIT' },
+        });
+      }
     }
 
-    return handleLegacyQuery(searchParams);
+    const payload = await fetchOutreachData(searchParams, view);
+
+    if (cacheKey && suburb) {
+      Promise.resolve(setOutreachCardsInCache(suburb, cacheKey, payload)).catch(() => {});
+    }
+
+    return NextResponse.json(payload, {
+      headers: { 'X-Cache': 'MISS' },
+    });
   } catch (error) {
     console.error('Error fetching outreach properties:', error);
     return NextResponse.json(
@@ -328,7 +354,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
     total = parseInt(countResult.rows[0]?.total ?? '0', 10);
   }
 
-  return NextResponse.json({
+  return {
     success: true,
     data: result.rows,
     pagination: {
@@ -337,7 +363,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
       total,
       totalPages: total > 0 ? Math.ceil(total / limit) : undefined,
     },
-  });
+  };
 }
 
 async function handleLegacyQuery(searchParams: URLSearchParams) {
@@ -681,7 +707,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     total = parseInt(countResult.rows[0]?.total ?? '0', 10);
   }
 
-  return NextResponse.json({
+  return {
     success: true,
     data: result.rows,
     pagination: {
@@ -690,7 +716,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
       total,
       totalPages: total > 0 ? Math.ceil(total / limit) : undefined,
     },
-  });
+  };
 }
 
 export async function POST(request: Request) {

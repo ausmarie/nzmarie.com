@@ -7,9 +7,9 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn() }),
 }));
 
-const mockStore = {
+const mockStoreState: any = {
   selectedDocId: null,
-  setSelectedDocId: vi.fn(),
+  setSelectedDocId: vi.fn((id: string | null) => { mockStoreState.selectedDocId = id; }),
   setSidebarCollapsed: vi.fn(),
   bumpRefreshKey: vi.fn(),
   slugMap: { 'about-marie': 'am-1' },
@@ -60,7 +60,7 @@ const mockStore = {
 };
 
 vi.mock('../../app/admin/reports/stores/report-store', () => ({
-  useReportStore: (selector: (s: typeof mockStore) => unknown) => selector(mockStore),
+  useReportStore: (selector: (s: typeof mockStoreState) => unknown) => selector(mockStoreState),
 }));
 
 vi.mock('next/image', () => ({
@@ -194,5 +194,33 @@ describe('ReportSidebar', () => {
 
     fireEvent.click(screen.getByText('Suburbs'));
     expect(screen.getByPlaceholderText('Search suburbs...')).toBeDefined();
+  });
+
+  it('auto-expands suburb containing the selected document on mount', () => {
+    mockStoreState.selectedDocId = 'd3';
+    render(<ReportSidebar />);
+    expect(screen.getByText('Q2 2026 Report')).toBeDefined();
+    const docEl = document.getElementById('d3');
+    expect(docEl).toBeDefined();
+    expect(docEl?.style.color).toBe('rgb(26, 115, 232)');
+    expect(docEl?.style.backgroundColor).toBe('rgb(232, 240, 254)');
+  });
+
+  it('highlights the selected document row', () => {
+    mockStoreState.selectedDocId = 'd0r1';
+    render(<ReportSidebar />);
+    const docEl = document.getElementById('d0r1');
+    expect(docEl).toBeDefined();
+    expect(docEl?.style.color).toBe('rgb(26, 115, 232)');
+    expect(docEl?.style.backgroundColor).toBe('rgb(232, 240, 254)');
+  });
+
+  it('does not expand any suburb when selectedDocId is null', () => {
+    mockStoreState.selectedDocId = null;
+    render(<ReportSidebar />);
+    expect(screen.queryByText('North Shore Introduction')).toBeNull();
+    expect(screen.queryByText('North Shore 2026 Q2 Market Report')).toBeNull();
+    expect(screen.queryByText('Torbay Introduction')).toBeNull();
+    expect(screen.queryByText('Q2 2026 Report')).toBeNull();
   });
 });
