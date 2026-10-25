@@ -1709,11 +1709,10 @@ if (s.includes('/api/admin/pdf/reports')) {
 
         await waitFor(() => {
           expect(screen.getAllByText(/Displaying 1 to 2 of 2 properties/).length).toBeGreaterThanOrEqual(1);
+          expect(screen.getByText('5 Alpha Road')).toBeDefined();
+          expect(screen.getByText('12 Alpha Road')).toBeDefined();
+          expect(screen.queryByText('9 Bravo Road')).toBeNull();
         });
-        // The displayed list shows only the selected street's addresses.
-        expect(screen.getByText('5 Alpha Road')).toBeDefined();
-        expect(screen.getByText('12 Alpha Road')).toBeDefined();
-        expect(screen.queryByText('9 Bravo Road')).toBeNull();
       });
 
       it('lists all liked streets alphabetically in Start street and re-fetches from the chosen street', async () => {
@@ -2429,13 +2428,14 @@ describe('Outreach page - Return to Pending actions', () => {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
       }
       if (s.includes('/api/admin/outreach?')) {
+        const isSentTab = s.includes('status=sent');
         return Promise.resolve({
           ok: true,
           json: async () => ({
             success: true,
             data: [
-              { id: 'addr-1', property_address: '1 Main St', suburb: 'Oteha', city: 'North Shore', region: 'Auckland', status: sentStatus, created_at: '2024-01-01', bedrooms: 3, bathrooms: 1, car_spaces: 1, capital_value: 500000, last_sold_price: 400000, last_sold_date: '2020-01-01', build_year: 1990, image_url: '', property_url: '' },
-              { id: 'addr-2', property_address: '2 Oak Ave', suburb: 'Oteha', city: 'North Shore', region: 'Auckland', status: sentStatus, created_at: '2024-01-02', bedrooms: 4, bathrooms: 2, car_spaces: 2, capital_value: 600000, last_sold_price: 500000, last_sold_date: '2021-01-01', build_year: 1995, image_url: '', property_url: '' },
+              { id: 'addr-1', property_address: isSentTab ? '1 Sent Main St' : '1 Main St', suburb: 'Oteha', city: 'North Shore', region: 'Auckland', status: sentStatus, created_at: '2024-01-01', bedrooms: 3, bathrooms: 1, car_spaces: 1, capital_value: 500000, last_sold_price: 400000, last_sold_date: '2020-01-01', build_year: 1990, image_url: '', property_url: '' },
+              { id: 'addr-2', property_address: isSentTab ? '2 Sent Oak Ave' : '2 Oak Ave', suburb: 'Oteha', city: 'North Shore', region: 'Auckland', status: sentStatus, created_at: '2024-01-02', bedrooms: 4, bathrooms: 2, car_spaces: 2, capital_value: 600000, last_sold_price: 500000, last_sold_date: '2021-01-01', build_year: 1995, image_url: '', property_url: '' },
             ],
             pagination: { page: 1, limit: 9, total: 2, totalPages: 1 },
           }),
@@ -2499,8 +2499,8 @@ describe('Outreach page - Return to Pending actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '✓ Sent' }));
 
     await waitFor(() => {
-      expect(screen.getByText('1 Main St')).toBeTruthy();
-      expect(screen.getByText('2 Oak Ave')).toBeTruthy();
+      expect(screen.getByText('1 Sent Main St')).toBeTruthy();
+      expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy();
       expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     }, { timeout: 3000 });
 
@@ -2766,5 +2766,3 @@ describe('Outreach page - Today Run street switching', () => {
     expect(h3s).toEqual(['1 Beta Street']);
   });
 });
-
-
