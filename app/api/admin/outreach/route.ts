@@ -12,6 +12,17 @@ import {
 import { batchGetCachedR2Urls } from '@/lib/streetview';
 import { parseReportQuarter } from '@/lib/outreach-quarter';
 import { getQueryCacheKey } from '@/lib/outreach-cache-key';
+import { normalizeOutreachStreet } from '@/lib/outreach-streets';
+import { extractStreetPrefixSql } from '@/lib/street-ordering';
+
+function normalizeStreetFields(rows: Array<Record<string, unknown>>): void {
+  for (const row of rows) {
+    row.street = normalizeOutreachStreet(
+      row.street == null ? null : String(row.street),
+      String(row.property_address ?? '')
+    );
+  }
+}
 
 async function fetchOutreachData(searchParams: URLSearchParams, view: string = 'full') {
   const useMV = process.env.USE_OUTREACH_MV === 'true';
@@ -32,7 +43,7 @@ export async function GET(request: Request) {
     await marieDB.ensureOutreachTablesExist?.();
 
     const suburb = searchParams.get('suburb')?.trim() || '';
-    const cacheKey = suburb ? outreachCardsKey(suburb, getQueryCacheKey(searchParams)) : null;
+    const cacheKey = suburb ? outreachCardsKey(suburb, `v2:${getQueryCacheKey(searchParams)}`) : null;
 
     if (cacheKey) {
       const cached = await getOutreachCardsFromCache<Record<string, unknown>>(cacheKey);
@@ -67,6 +78,54 @@ function paginationParams(searchParams: URLSearchParams) {
   return { page, limit, offset: (page - 1) * limit };
 }
 
+function quarterSentPredicate(
+  propertyId: string,
+  quarter: { quarter: string; year: number; campaignPattern: string },
+  params: unknown[],
+  suburb?: string | null
+) {
+  if (!/^Q[1-4]$/.test(quarter.quarter)) return null;
+
+  const quarterParam = params.length + 1;
+  const yearParam = quarterParam + 1;
+  const campaignParam = quarterParam + 2;
+  params.push(quarter.quarter, quarter.year, quarter.campaignPattern);
+
+  let suburbClause = '';
+  let quarterSuburbClause = '';
+  if (suburb) {
+    const suburbParam = params.length + 1;
+    params.push(suburb);
+    suburbClause = ` AND (sl3.suburb = $${suburbParam} OR sr3.suburb = $${suburbParam} OR sl3.suburb IS NULL)`;
+    quarterSuburbClause = ` AND quarter_status.suburb = $${suburbParam}`;
+  }
+
+  const quarterStatus = (status: string) =>
+    `SELECT 1
+     FROM outreach_property_quarter_status quarter_status
+     WHERE quarter_status.outreach_property_id = ${propertyId}
+       AND quarter_status.year = $${yearParam}
+       AND quarter_status.quarter = $${quarterParam}
+       AND quarter_status.status ${status}${quarterSuburbClause}`;
+
+  return `(
+    EXISTS (${quarterStatus("IN ('sent', 'partial')")})
+    OR (
+      NOT EXISTS (${quarterStatus("= 'pending'" )})
+      AND EXISTS (
+        SELECT 1
+        FROM outreach_send_logs sl3
+        LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id
+        WHERE sl3.outreach_property_id = ${propertyId}
+          AND (
+            (sr3.quarter = $${quarterParam} AND sr3.year = $${yearParam})
+            OR sl3.campaign_key ~ $${campaignParam}
+          )${suburbClause}
+      )
+    )
+  )`;
+}
+
 async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   const status = searchParams.get('status');
   const campaign = searchParams.get('campaign');
@@ -89,8 +148,8 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   const sentStatus = searchParams.get('sent_status');
   const reportQuarter = searchParams.get('report_quarter');
   const sentDates = (searchParams.get('sent_dates') || '').split(',').map(s => s.trim()).filter(Boolean);
-  const sortOrder = searchParams.get('sortOrder') || 'asc';
   const sortMode = searchParams.get('sort_mode');
+  const sortOrder = searchParams.get('sortOrder') || (sortMode === 'time' ? 'desc' : 'asc');
   const startStreet = searchParams.get('start_street')?.trim() || '';
   // Classic pagination fetches each page independently and needs a real total
   // for "Page X of Y" on every page. Infinite scroll omits it: it already knows
@@ -105,10 +164,15 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
 
   if (status === 'sent') {
     if (qi) {
-      let sub = `EXISTS (SELECT 1 FROM outreach_send_logs sl2 LEFT JOIN suburb_reports sr2 ON sl2.suburb_report_id = sr2.id WHERE sl2.outreach_property_id = outreach_enriched.id`;
-      sub += ` AND ((sr2.quarter = $${params.length + 1} AND sr2.year = $${params.length + 2}) OR sl2.campaign_key ~ $${params.length + 3}))`;
-      params.push(qi.quarter, qi.year, qi.campaignPattern);
-      conditions.push(sub);
+      const quarterPredicate = quarterSentPredicate('outreach_enriched.id', qi, params, suburb);
+      if (quarterPredicate) {
+        conditions.push(quarterPredicate);
+      } else {
+        let sub = `EXISTS (SELECT 1 FROM outreach_send_logs sl2 LEFT JOIN suburb_reports sr2 ON sl2.suburb_report_id = sr2.id WHERE sl2.outreach_property_id = outreach_enriched.id`;
+        sub += ` AND ((sr2.quarter = $${params.length + 1} AND sr2.year = $${params.length + 2}) OR sl2.campaign_key ~ $${params.length + 3}))`;
+        params.push(qi.quarter, qi.year, qi.campaignPattern);
+        conditions.push(sub);
+      }
     } else {
       conditions.push(`EXISTS (SELECT 1 FROM outreach_send_logs sl2 WHERE sl2.outreach_property_id = outreach_enriched.id)`);
     }
@@ -174,7 +238,8 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   }
   if (streets.length > 0) {
     const placeholders = streets.map((_, i) => `$${params.length + 1 + i}`).join(', ');
-    conditions.push(`street IN (${placeholders})`);
+    const addressStreet = `TRIM(REGEXP_REPLACE(SPLIT_PART(property_address, ',', 1), '${extractStreetPrefixSql()}', ''))`;
+    conditions.push(`(street IN (${placeholders}) OR LOWER(${addressStreet}) IN (${streets.map((_, i) => `LOWER($${params.length + 1 + i})`).join(', ')}))`);
     params.push(...streets);
   }
   if (search) {
@@ -226,14 +291,19 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
     const isSent = sentStatus === 'sent';
     const existsOp = isSent ? 'EXISTS' : 'NOT EXISTS';
     if (qi) {
-      let sub = `SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id`;
-      if (suburb) {
-        sub += ` AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
-        params.push(suburb);
+      const quarterPredicate = quarterSentPredicate('outreach_enriched.id', qi, params, suburb);
+      if (quarterPredicate) {
+        conditions.push(isSent ? quarterPredicate : `NOT ${quarterPredicate}`);
+      } else {
+        let sub = `SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id`;
+        if (suburb) {
+          sub += ` AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
+          params.push(suburb);
+        }
+        sub += ` AND ((sr3.quarter = $${params.length + 1} AND sr3.year = $${params.length + 2}) OR sl3.campaign_key ~ $${params.length + 3} OR last_campaign ~ $${params.length + 3})`;
+        params.push(qi.quarter, qi.year, qi.campaignPattern);
+        conditions.push(`${existsOp} (${sub})`);
       }
-      sub += ` AND ((sr3.quarter = $${params.length + 1} AND sr3.year = $${params.length + 2}) OR sl3.campaign_key ~ $${params.length + 3} OR last_campaign ~ $${params.length + 3})`;
-      params.push(qi.quarter, qi.year, qi.campaignPattern);
-      conditions.push(`${existsOp} (${sub})`);
     } else if (suburb) {
       if (isSent) {
         let sub = `EXISTS (SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
@@ -262,7 +332,8 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   const orderDirection = sortOrder === 'desc' ? 'DESC' : 'ASC';
   let orderClause: string;
   if (sortMode === 'time') {
-    orderClause = `ORDER BY latest_sent_at ${orderDirection} NULLS LAST`;
+    const sentAtSort = "COALESCE(latest_sent_at, last_sent_at, sent_at AT TIME ZONE 'Pacific/Auckland')";
+    orderClause = `ORDER BY ${sentAtSort} ${orderDirection} NULLS LAST, created_at DESC NULLS LAST, property_address ASC, id ASC`;
   } else {
     const streetSortExpr = `COALESCE(
         NULLIF(TRIM(street), ''),
@@ -285,7 +356,16 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   let quarterStatusSelect = '';
   if (qi) {
     const base = params.length;
-    quarterStatusSelect = `, CASE WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = outreach_enriched.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent' ELSE 'pending' END AS status`;
+    if (/^Q[1-4]$/.test(qi.quarter)) {
+      quarterStatusSelect = `, CASE
+        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = outreach_enriched.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = outreach_enriched.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status IN ('sent', 'partial')) THEN 'sent'
+        WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = outreach_enriched.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent'
+        ELSE 'pending'
+      END AS status`;
+    } else {
+      quarterStatusSelect = `, CASE WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = outreach_enriched.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent' ELSE 'pending' END AS status`;
+    }
     params.push(qi.quarter, qi.year, qi.campaignPattern);
   }
   const limitIdx = params.length + 1;
@@ -354,6 +434,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
     total = parseInt(countResult.rows[0]?.total ?? '0', 10);
   }
 
+  normalizeStreetFields(result.rows as Array<Record<string, unknown>>);
   return {
     success: true,
     data: result.rows,
@@ -378,7 +459,8 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     .map((s) => s.trim())
     .filter(Boolean);
   const search = searchParams.get('search');
-  const sortOrder = searchParams.get('sortOrder') || 'asc';
+  const sortMode = searchParams.get('sort_mode');
+  const sortOrder = searchParams.get('sortOrder') || (sortMode === 'time' ? 'desc' : 'asc');
   const page = parseInt(searchParams.get('page') || '1');
   const limit = parseInt(searchParams.get('limit') || '100');
   const offset = (page - 1) * limit;
@@ -393,7 +475,6 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   const reportQuarter = searchParams.get('report_quarter');
   const qiLegacy = parseReportQuarter(reportQuarter);
   const sentDates = (searchParams.get('sent_dates') || '').split(',').map(s => s.trim()).filter(Boolean);
-  const sortMode = searchParams.get('sort_mode');
   const startStreet = searchParams.get('start_street')?.trim() || '';
   const includeTotal = searchParams.get('include_total') === 'true';
 
@@ -455,9 +536,15 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
 
   if (status === 'sent') {
     if (qiLegacy) {
-      query += ` AND EXISTS (SELECT 1 FROM outreach_send_logs sl2 LEFT JOIN suburb_reports sr2 ON sl2.suburb_report_id = sr2.id WHERE sl2.outreach_property_id = op.id AND ((sr2.quarter = $${idx} AND sr2.year = $${idx + 1}) OR sl2.campaign_key ~ $${idx + 2}))`;
-      params.push(qiLegacy.quarter, qiLegacy.year, qiLegacy.campaignPattern);
-      idx += 3;
+      const quarterPredicate = quarterSentPredicate('op.id', qiLegacy, params, suburb);
+      if (quarterPredicate) {
+        query += ` AND ${quarterPredicate}`;
+        idx = params.length + 1;
+      } else {
+        query += ` AND EXISTS (SELECT 1 FROM outreach_send_logs sl2 LEFT JOIN suburb_reports sr2 ON sl2.suburb_report_id = sr2.id WHERE sl2.outreach_property_id = op.id AND ((sr2.quarter = $${idx} AND sr2.year = $${idx + 1}) OR sl2.campaign_key ~ $${idx + 2}))`;
+        params.push(qiLegacy.quarter, qiLegacy.year, qiLegacy.campaignPattern);
+        idx += 3;
+      }
     } else {
       query += ` AND EXISTS (SELECT 1 FROM outreach_send_logs sl2 WHERE sl2.outreach_property_id = op.id)`;
     }
@@ -500,7 +587,9 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   }
   if (streets.length > 0) {
     const placeholders = streets.map(() => `$${idx++}`).join(', ');
-    query += ` AND op.street IN (${placeholders})`;
+    const addressStreet = `TRIM(REGEXP_REPLACE(SPLIT_PART(op.property_address, ',', 1), '${extractStreetPrefixSql()}', ''))`;
+    const lowerPlaceholders = streets.map((_, i) => `LOWER($${idx - streets.length + i})`).join(', ');
+    query += ` AND (op.street IN (${placeholders}) OR LOWER(${addressStreet}) IN (${lowerPlaceholders}))`;
     params.push(...streets);
   }
   if (search) {
@@ -552,8 +641,14 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   if (sentStatus === 'sent' || sentStatus === 'unsent') {
     const isSent = sentStatus === 'sent';
     const existsOp = isSent ? 'EXISTS' : 'NOT EXISTS';
-    let sub = `SELECT 1 FROM outreach_send_logs sl3 ${qiLegacy ? 'LEFT JOIN' : 'JOIN'} suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = op.id`;
-    if (qiLegacy) {
+    const quarterPredicate = qiLegacy
+      ? quarterSentPredicate('op.id', qiLegacy, params, suburb)
+      : null;
+    if (quarterPredicate) {
+      query += ` AND ${isSent ? quarterPredicate : `NOT ${quarterPredicate}`}`;
+      idx = params.length + 1;
+    } else if (qiLegacy) {
+      let sub = `SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = op.id`;
       if (suburb) {
         sub += ` AND (sl3.suburb = $${idx} OR sr3.suburb = $${idx} OR sl3.suburb IS NULL)`;
         params.push(suburb);
@@ -564,6 +659,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
       idx += 3;
       query += ` AND (${existsOp} (${sub}))`;
     } else if (suburb) {
+      let sub = `SELECT 1 FROM outreach_send_logs sl3 JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = op.id`;
       sub += ` AND sr3.suburb = $${idx}`;
       params.push(suburb);
       idx++;
@@ -620,7 +716,8 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   const ORDER_BY_SENTINEL = '/*__OUTER_ORDER_BY__*/';
 
   if (sortMode === 'time') {
-    query += ` ${ORDER_BY_SENTINEL} ORDER BY ls.sent_at ${orderDirection} NULLS LAST LIMIT $${idx++} OFFSET $${idx++}`;
+    const sentAtSort = "COALESCE(ls.sent_at, op.last_sent_at, op.sent_at AT TIME ZONE 'Pacific/Auckland')";
+    query += ` ${ORDER_BY_SENTINEL} ORDER BY ${sentAtSort} ${orderDirection} NULLS LAST, op.created_at DESC NULLS LAST, op.property_address ASC, op.id ASC LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
   } else {
     const streetSortExpr = `COALESCE(
@@ -650,7 +747,16 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   let quarterStatusSelect = '';
   if (qiLegacy) {
     const base = params.length;
-    quarterStatusSelect = `, CASE WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = op.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent' ELSE 'pending' END AS status`;
+    if (/^Q[1-4]$/.test(qiLegacy.quarter)) {
+      quarterStatusSelect = `, CASE
+        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = op.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status = 'pending') THEN 'pending'
+        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = op.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status IN ('sent', 'partial')) THEN 'sent'
+        WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = op.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent'
+        ELSE 'pending'
+      END AS status`;
+    } else {
+      quarterStatusSelect = `, CASE WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = op.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent' ELSE 'pending' END AS status`;
+    }
     params.push(qiLegacy.quarter, qiLegacy.year, qiLegacy.campaignPattern);
   }
   query = query.replace('@@QUARTER_STATUS@@', quarterStatusSelect);
@@ -707,6 +813,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     total = parseInt(countResult.rows[0]?.total ?? '0', 10);
   }
 
+  normalizeStreetFields(result.rows as Array<Record<string, unknown>>);
   return {
     success: true,
     data: result.rows,

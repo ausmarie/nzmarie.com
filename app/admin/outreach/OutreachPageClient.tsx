@@ -339,6 +339,13 @@ export default function OutreachPage() {
   }, [sentStatusFilter]);
 
   useEffect(() => {
+    if (activeTab !== 'pending') return;
+    const showSent = sentStatusFilter === 'sent';
+    setSortMode(showSent ? 'time' : 'address');
+    setSortOrder(showSent ? 'desc' : 'asc');
+  }, [activeTab, sentStatusFilter]);
+
+  useEffect(() => {
     if (activeTab !== 'sent' || availableReports.length > 0) return;
     let cancelled = false;
     (async () => {
@@ -1148,6 +1155,17 @@ export default function OutreachPage() {
     window.scrollTo(0, 0);
   };
 
+  const clearStreetFocus = () => {
+    streetFocusRef.current = '';
+    streetFocusSuburbRef.current = '';
+    streetAbortRef.current?.abort();
+    streetSeqRef.current++;
+    streetInFlightRef.current = false;
+    abortRef.current?.abort();
+    fetchSeqRef.current++;
+    skipDebounceRef.current = false;
+  };
+
   const toggleStreet = (suburb: string, street: string) => {
     const key = `${suburb}::${street}`;
     setCollapsedStreets((prev) => {
@@ -1177,15 +1195,96 @@ export default function OutreachPage() {
     openSendModal();
   };
 
+  const returnToPendingBody = () => {
+    const quarterStatusSupported = !activeQuarter || /^\d{4}-Q[1-4]$/.test(activeQuarter);
+    return JSON.stringify({
+      status: 'pending',
+      ...(quarterStatusSupported
+        ? { return_to_pending: true, report_quarter: activeQuarter || undefined }
+        : {}),
+    });
+  };
+
+  const returnItemsToPendingOptimistically = async (ids: string[]) => {
+    if (ids.length === 0) return;
+
+    const idSet = new Set(ids);
+    const previousItems = items;
+    const previousClassicItems = classicItems;
+    const previousPagination = pagination;
+    const previousClassicPagination = classicPagination;
+    const previousLastValidTotal = lastValidTotalRef.current;
+    const previousSelected = new Set(selected);
+    const removedCount = activeTab === 'sent'
+      ? displayItems.filter((item) => idSet.has(item.id)).length
+      : 0;
+
+    cacheRef.current.clear();
+    if (activeTab === 'sent') {
+      setItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+      setClassicItems((prev) => prev.filter((item) => !idSet.has(item.id)));
+      setPagination((prev) => prev ? {
+        ...prev,
+        total: Math.max(0, prev.total - removedCount),
+        totalPages: Math.ceil(Math.max(0, prev.total - removedCount) / prev.limit),
+      } : prev);
+      setClassicPagination((prev) => prev ? {
+        ...prev,
+        total: Math.max(0, prev.total - removedCount),
+        totalPages: Math.ceil(Math.max(0, prev.total - removedCount) / prev.limit),
+      } : prev);
+      lastValidTotalRef.current = Math.max(0, lastValidTotalRef.current - removedCount);
+    } else {
+      const markPending = (item: OutreachProperty) =>
+        idSet.has(item.id) ? { ...item, status: 'pending' as const } : item;
+      setItems((prev) => prev.map(markPending));
+      setClassicItems((prev) => prev.map(markPending));
+    }
+    setSelectedByTab((prev) => ({ ...prev, [activeTab]: new Set() }));
+    showNotification(
+      'success',
+      `Moved ${ids.length} address${ids.length === 1 ? '' : 'es'} to Pending`
+    );
+
+    try {
+      await Promise.all(ids.map(async (id) => {
+        const response = await fetch(`/api/admin/outreach/${id}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: returnToPendingBody(),
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(data?.error || 'Failed to return address to Pending');
+      }));
+      handleMarkAsSentSuccess();
+    } catch (error) {
+      setItems(previousItems);
+      setClassicItems(previousClassicItems);
+      setPagination(previousPagination);
+      setClassicPagination(previousClassicPagination);
+      lastValidTotalRef.current = previousLastValidTotal;
+      setSelectedByTab((prev) => ({ ...prev, [activeTab]: previousSelected }));
+      showNotification(
+        'error',
+        error instanceof Error ? error.message : 'Failed to return address to Pending'
+      );
+    }
+  };
+
   const markAsPending = async () => {
     if (selected.size === 0) return;
     try {
       const results = await Promise.all(
         Array.from(selected).map(async (id) => {
+          const selectedItem = items.find((item) => item.id === id)
+            ?? classicItems.find((item) => item.id === id);
+          const isReturningSentItem = activeTab === 'sent' || selectedItem?.status === 'sent';
           const response = await fetch(`/api/admin/outreach/${id}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'pending' }),
+            body: isReturningSentItem
+              ? returnToPendingBody()
+              : JSON.stringify({ status: 'pending' }),
           });
           const data = await response.json().catch(() => null);
           if (!response.ok) throw new Error(data?.error || 'Failed to mark as pending');
@@ -1227,8 +1326,8 @@ export default function OutreachPage() {
 
   const returnToPending = async () => {
     if (selected.size === 0) return;
-    if (!window.confirm(`Return ${selected.size} address${selected.size === 1 ? '' : 'es'} to Pending? Their send records will be removed.`)) return;
-    await markAsPending();
+    if (!window.confirm(`Return ${selected.size} address${selected.size === 1 ? '' : 'es'} to Pending? Their send history will be preserved.`)) return;
+    await returnItemsToPendingOptimistically(Array.from(selected));
   };
 
   // Remove a property from the Liked tab: confirm, DELETE the outreach record,
@@ -1539,6 +1638,8 @@ export default function OutreachPage() {
 
   const groupedBySuburb = useMemo(() => {
     const sourceItems = filteredLikedItems ?? displayItems;
+    const sortBySentTime = sortMode === 'time' &&
+      (activeTab === 'sent' || (activeTab === 'pending' && sentStatusFilter === 'sent'));
     const groups = new Map<string, Map<string, OutreachProperty[]>>();
 
     sourceItems.forEach((item) => {
@@ -1574,7 +1675,7 @@ export default function OutreachPage() {
         const streets = Array.from(streetMap.entries())
           .map(([street, properties]) => ({
             street,
-            properties: properties.sort((a, b) => {
+            properties: sortBySentTime ? properties : properties.sort((a, b) => {
               const houseA = extractHouseNumber(a.property_address);
               const houseB = extractHouseNumber(b.property_address);
 
@@ -1594,6 +1695,7 @@ export default function OutreachPage() {
             totalCount: properties.length,
           }))
           .sort((a, b) => {
+            if (sortBySentTime) return 0;
             const ia = clusterOrder.get(a.street);
             const ib = clusterOrder.get(b.street);
             if (ia !== undefined && ib !== undefined) return ia - ib;
@@ -1608,13 +1710,19 @@ export default function OutreachPage() {
           totalCount: streets.reduce((sum, s) => sum + s.totalCount, 0),
         };
       })
-      .sort((a, b) => a.suburb.localeCompare(b.suburb, undefined, { sensitivity: 'base' }));
-  }, [currentContentKey, effectiveTodayRunData, filteredLikedItems]); // eslint-disable-line react-hooks/exhaustive-deps
+      .sort((a, b) => sortBySentTime
+        ? 0
+        : a.suburb.localeCompare(b.suburb, undefined, { sensitivity: 'base' }));
+  }, [activeTab, currentContentKey, effectiveTodayRunData, filteredLikedItems, sentStatusFilter, sortMode, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Card view mirrors the list view's ordering: streets follow the Today's Run
   // cluster order (from street-clusters), then house number within a street.
   const cardOrderedItems = useMemo(() => {
     const items = [...(filteredLikedItems ?? displayItems)];
+    const sortBySentTime = sortMode === 'time' &&
+      (activeTab === 'sent' || (activeTab === 'pending' && sentStatusFilter === 'sent'));
+    if (sortBySentTime) return items;
+
     const clusterOrder = new Map<string, number>();
     if (effectiveTodayRunData && effectiveTodayRunData.suburb) {
       effectiveTodayRunData.groups.forEach((g) => {
@@ -1655,7 +1763,7 @@ export default function OutreachPage() {
         : new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     return items;
-  }, [displayItems, filteredLikedItems, effectiveTodayRunData, sortOrder]);
+  }, [activeTab, displayItems, filteredLikedItems, effectiveTodayRunData, sentStatusFilter, sortOrder, sortMode]);
 
   // Restore classic items from the shared per-page cache when switching to
   // classic mode. This avoids a loading flash when the data was already
@@ -1727,7 +1835,26 @@ export default function OutreachPage() {
             {(['liked', 'pending', 'sent'] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => { streetFocusRef.current = ''; streetFocusSuburbRef.current = ''; setActiveTab(tab); setCurrentPage(1); setReportSuburbFilter('');  setSentStatusFilter('all'); setSortMode(tab === 'sent' ? 'time' : 'address'); setSortOrder(tab === 'sent' ? 'desc' : 'asc'); setSentDateFilter(tab === 'sent' ? [todayDateKey()] : []); setRunStreetFilter([]); setStreetFilter(''); if (tab !== 'liked') { setLikedStreetModeApplied(false); setLikedSelectedStreet(''); setLikedStreetSearch(''); setLikedStartStreet(''); setLikedApiStreets([]); setLikedOrderedStreets([]); } }}
+                onClick={() => {
+                  clearStreetFocus();
+                  setActiveTab(tab);
+                  setCurrentPage(1);
+                  setReportSuburbFilter('');
+                  setSentStatusFilter('all');
+                  setSortMode(tab === 'sent' ? 'time' : 'address');
+                  setSortOrder(tab === 'sent' ? 'desc' : 'asc');
+                  setSentDateFilter(tab === 'sent' ? [todayDateKey()] : []);
+                  setRunStreetFilter([]);
+                  setStreetFilter('');
+                  if (tab !== 'liked') {
+                    setLikedStreetModeApplied(false);
+                    setLikedSelectedStreet('');
+                    setLikedStreetSearch('');
+                    setLikedStartStreet('');
+                    setLikedApiStreets([]);
+                    setLikedOrderedStreets([]);
+                  }
+                }}
                 style={{
                   padding: '8px 18px',
                   backgroundColor: activeTab === tab ? (tab === 'liked' ? '#ec4899' : tab === 'pending' ? '#3b82f6' : '#8b5cf6') : 'white',
@@ -1775,8 +1902,7 @@ export default function OutreachPage() {
               setSuburbFilter={setSuburbFilter}
               setLastSoldPreset={setLastSoldPreset}
               onClearRunFilter={() => {
-                streetFocusRef.current = '';
-                streetFocusSuburbRef.current = '';
+                clearStreetFocus();
                 setRunStreetFilter([]);
                 setStreetFilter('');
               }}
@@ -1932,8 +2058,10 @@ export default function OutreachPage() {
                 <button
                   key={s}
                   onClick={() => {
-                    if (suburbFilter === s) return;
+                    if (suburbFilter === s && !reportSuburbFilter) return;
+                    clearStreetFocus();
                     setAddressInput('');
+                    setReportSuburbFilter('');
                     setSuburbFilter(s);
                   }}
                   style={{
@@ -2881,27 +3009,8 @@ export default function OutreachPage() {
           <button
             onClick={async () => {
               if (selected.size === 0) return;
-              if (!window.confirm(`Return ${selected.size} address${selected.size === 1 ? '' : 'es'} to Pending? Their send records will be removed.`)) return;
-              try {
-                const results = await Promise.all(
-                  Array.from(selected).map(async (id) => {
-                    const response = await fetch(`/api/admin/outreach/${id}/status`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ status: 'pending' }),
-                    });
-                    const data = await response.json().catch(() => null);
-                    if (!response.ok) throw new Error(data?.error || 'Failed');
-                    return data.data as OutreachProperty;
-                  })
-                );
-                if (results.length === 0) return;
-                showNotification('success', `Moved ${selected.size} address${selected.size === 1 ? '' : 'es'} to Pending`);
-                clearSelected();
-                handleMarkAsSentSuccess();
-              } catch {
-                showNotification('error', 'Bulk update failed');
-              }
+              if (!window.confirm(`Return ${selected.size} address${selected.size === 1 ? '' : 'es'} to Pending? Their send history will be preserved.`)) return;
+              await returnItemsToPendingOptimistically(Array.from(selected));
             }}
             className="px-4 py-2 bg-amber-500 text-white rounded-lg text-sm hover:bg-amber-600 transition-colors"
           >
@@ -3541,7 +3650,7 @@ export default function OutreachPage() {
                             const res = await fetch(`/api/admin/outreach/${prop.id}/status`, {
                               method: 'PATCH',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ status: 'pending' }),
+                              body: returnToPendingBody(),
                             });
                             if (!res.ok) throw new Error('Failed');
                             await res.json();
@@ -3935,19 +4044,7 @@ export default function OutreachPage() {
                                       type="button"
                                       onClick={async () => {
                                         if (!window.confirm(`Return "${prop.property_address}" to Pending?`)) return;
-                                        try {
-                                          const res = await fetch(`/api/admin/outreach/${prop.id}/status`, {
-                                            method: 'PATCH',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ status: 'pending' }),
-                                          });
-                                          if (!res.ok) throw new Error('Failed');
-                                          await res.json();
-                                          showNotification('success', 'Returned to Pending');
-                                          handleMarkAsSentSuccess();
-                                        } catch {
-                                          showNotification('error', 'Failed to return to Pending');
-                                        }
+                                        await returnItemsToPendingOptimistically([prop.id]);
                                       }}
                                       className="transition-colors px-3 py-1.5 bg-amber-50 text-amber-600 hover:bg-amber-100 rounded text-xs font-medium"
                                       title="Return to Pending"

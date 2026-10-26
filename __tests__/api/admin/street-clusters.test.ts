@@ -326,6 +326,7 @@ describe('GET /api/admin/outreach/street-clusters', () => {
           { id: '3', street: 'Alpha Street', property_address: '5 Alpha Street', house_number: 5, lat: -36.7002, lng: 174.7002, no_junk_mail: false, status: 'sent', last_campaign: '2026_Q3_Oteha' },
         ],
       } as any)
+      .mockResolvedValueOnce({ rows: [{ outreach_property_id: '3', status: 'sent' }] } as any)
       .mockResolvedValueOnce({ rows: [{ outreach_property_id: '3' }] } as any)
       .mockResolvedValueOnce({ rows: [] } as any);
 
@@ -337,8 +338,10 @@ describe('GET /api/admin/outreach/street-clusters', () => {
     const listSql = vi.mocked(marieDB.query).mock.calls[0][0] as string;
     expect(listSql).toContain("op.status IN ('pending', 'sent')");
 
-    const sendSql = vi.mocked(marieDB.query).mock.calls[1][0] as string;
-    const sendParams = vi.mocked(marieDB.query).mock.calls[1][1] as unknown[];
+    const quarterStatusSql = vi.mocked(marieDB.query).mock.calls[1][0] as string;
+    expect(quarterStatusSql).toContain('outreach_property_quarter_status');
+    const sendSql = vi.mocked(marieDB.query).mock.calls[2][0] as string;
+    const sendParams = vi.mocked(marieDB.query).mock.calls[2][1] as unknown[];
     expect(sendSql).toContain('campaign_key ~ $5');
     expect(sendParams).toContain('^2026[_-]Q3');
 

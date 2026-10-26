@@ -3,10 +3,16 @@ import {
   resolveAddressStatus,
   mergeAddressStatus,
   buildStreetSummaries,
+  normalizeOutreachStreet,
   AddressRow,
 } from '@/lib/outreach-streets';
 
 describe('outreach-streets status resolution & deduplication', () => {
+  it('normalizes stored street labels to the street parsed from the property address', () => {
+    expect(normalizeOutreachStreet('East Coast Road Fairview', '1010 East Coast Road')).toBe('East Coast Road');
+    expect(normalizeOutreachStreet('East Coast Road', '1008A East Coast Road')).toBe('East Coast Road');
+  });
+
   describe('resolveAddressStatus', () => {
     it('resolves to junk when no_junk_mail is true even if sent is true', () => {
       expect(resolveAddressStatus({ sent: true, no_junk_mail: true })).toBe('junk');

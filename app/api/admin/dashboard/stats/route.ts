@@ -234,7 +234,7 @@ export async function GET(request: Request) {
   try {
     await ensureCampaignTablesExist();
 
-    const cacheKey = `dashboard:stats:v3:${suburb || 'all'}:${quarterKey || 'all'}`;
+    const cacheKey = `dashboard:stats:v4:${suburb || 'all'}:${quarterKey || 'all'}`;
 
     const result = await getCachedOrFetch(
       cacheKey,
@@ -428,6 +428,13 @@ export async function GET(request: Request) {
                 sl.outreach_property_id
               FROM outreach_send_logs sl
               WHERE sl.sent_at IS NOT NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM outreach_property_quarter_status returned
+                  WHERE returned.outreach_property_id = sl.outreach_property_id
+                    AND returned.suburb_report_id = sl.suburb_report_id
+                    AND returned.status = 'pending'
+                )
             ),
             junk_props_base AS MATERIALIZED (
               SELECT
@@ -480,6 +487,13 @@ export async function GET(request: Request) {
               FROM outreach_send_logs sl
               LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
               WHERE sl.suburb IS NOT NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM outreach_property_quarter_status returned
+                  WHERE returned.outreach_property_id = sl.outreach_property_id
+                    AND returned.suburb_report_id = sl.suburb_report_id
+                    AND returned.status = 'pending'
+                )
                 ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
               GROUP BY 1, 2
             ),
@@ -494,6 +508,13 @@ export async function GET(request: Request) {
                   THEN sr.year::text || '-Q' || substring(sr.quarter from 'Q([1-4])')
                   ELSE sr.year::text || '-' || substring(sr.quarter from 'M([0-9]{2})')
                 END AS period_key,
+                CASE WHEN sr.quarter ~ '^Q[1-4]$'
+                  THEN make_date(
+                    sr.year::int,
+                    (substring(sr.quarter from 'Q([1-4])')::int - 1) * 3 + 1,
+                    1
+                  ) + INTERVAL '3 months'
+                END AS period_end,
                 (sr.year::text || '_' || sr.quarter || '_' || sr.suburb) AS campaign_key
               FROM suburb_reports sr
               WHERE sr.status = 'active'
@@ -527,6 +548,41 @@ export async function GET(request: Request) {
               LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
               WHERE sl.suburb IS NOT NULL
                 ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM outreach_property_quarter_status returned
+                  WHERE returned.outreach_property_id = sl.outreach_property_id
+                    AND returned.suburb_report_id = sl.suburb_report_id
+                    AND returned.status = 'pending'
+                )
+              UNION ALL
+              SELECT
+                quarter_status_sent.suburb,
+                quarter_status_sent.year::int * 4
+                  + (substring(quarter_status_sent.quarter from 'Q([1-4])')::int - 1),
+                quarter_status_sent.quarter_key,
+                quarter_status_sent.outreach_property_id,
+                quarter_status_sent.last_sent_at,
+                COALESCE(
+                  quarter_status_sent.campaign_keys[1],
+                  quarter_status_sent.year::text || '_' || quarter_status_sent.quarter || '_' || quarter_status_sent.suburb
+                )
+              FROM outreach_property_quarter_status quarter_status_sent
+              WHERE quarter_status_sent.quarter ~ '^Q[1-4]$'
+                AND (
+                  quarter_status_sent.status = 'sent'
+                  OR (
+                    quarter_status_sent.status = 'partial'
+                    AND COALESCE(quarter_status_sent.sent_count, 0) > 0
+                  )
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM outreach_send_logs sl
+                  WHERE sl.outreach_property_id = quarter_status_sent.outreach_property_id
+                    AND sl.suburb_report_id = quarter_status_sent.suburb_report_id
+                )
+                ${suburbFilter ? sql`AND quarter_status_sent.suburb = ${suburb}` : sql``}
             ),
             dispatch_quarter_sent AS MATERIALIZED (
               SELECT
@@ -561,6 +617,15 @@ export async function GET(request: Request) {
                 ON op.suburb = rq.suburb AND LOWER(op.status) IN ('pending', 'sent')
               WHERE rq.period_type = 'quarter'
                 AND prev.suburb IS NULL
+                AND op.created_at < rq.period_end
+              UNION
+              SELECT rq.suburb, rq.period_key, returned.outreach_property_id
+              FROM dispatch_report_periods rq
+              JOIN outreach_property_quarter_status returned
+                ON returned.suburb = rq.suburb
+               AND returned.quarter_key = rq.period_key
+               AND returned.status = 'pending'
+              WHERE rq.period_type = 'quarter'
               UNION
               SELECT rq.suburb, rq.period_key, prevq.pid
               FROM dispatch_report_periods rq

@@ -1,4 +1,4 @@
-import { parseHouseNumber, OrderableStreet } from './street-ordering';
+import { extractStreetNameFromAddress, parseHouseNumber, OrderableStreet } from './street-ordering';
 
 export interface AddressRow {
   street: string;
@@ -30,6 +30,23 @@ export interface StreetSummary {
     sent: boolean;
     status: 'unsent' | 'sent' | 'junk';
   }>;
+}
+
+export function normalizeOutreachStreet(street: string | null | undefined, propertyAddress: string): string {
+  const storedStreet = street?.trim() ?? '';
+  const addressStreet = extractStreetNameFromAddress(propertyAddress.split(',')[0]).trim();
+  if (!addressStreet || addressStreet === 'Unknown Street') return storedStreet || addressStreet;
+
+  const normalizedStored = storedStreet.toLocaleLowerCase();
+  const normalizedAddress = addressStreet.toLocaleLowerCase();
+  if (
+    !storedStreet ||
+    normalizedStored === normalizedAddress ||
+    normalizedStored.startsWith(`${normalizedAddress} `)
+  ) {
+    return addressStreet;
+  }
+  return storedStreet;
 }
 
 export function resolveAddressStatus(

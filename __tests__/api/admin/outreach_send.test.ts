@@ -3,6 +3,7 @@ import { POST } from '@/app/api/admin/outreach/send/route';
 import { GET } from '@/app/api/admin/outreach/[id]/history/route';
 import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
+import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
 
 vi.mock('@/lib/auth', () => ({
   auth: vi.fn(),
@@ -17,6 +18,11 @@ vi.mock('@/lib/db', () => ({
 
 vi.mock('@/lib/permissions', () => ({
   isAdmin: vi.fn().mockReturnValue(true),
+}));
+
+vi.mock('@/lib/redis', () => ({
+  invalidateDashboardStatsCache: vi.fn().mockResolvedValue(undefined),
+  invalidateStreetClustersForSuburb: vi.fn().mockResolvedValue(undefined),
 }));
 
 function mockSendQueries({
@@ -243,6 +249,14 @@ describe('Outreach Send and History API Routes', () => {
       expect(statements).toContain('REFRESH MATERIALIZED VIEW mv_quarter_overview');
       expect(statements).toContain('REFRESH MATERIALIZED VIEW mv_dispatch_timeline');
       expect(statements.some((statement) => statement.includes('refresh_quarter_mv_incremental'))).toBe(false);
+      expect(invalidateDashboardStatsCache).toHaveBeenCalledOnce();
+      expect(invalidateStreetClustersForSuburb).toHaveBeenCalledWith('Oteha');
+      const lastRefreshCall = mockQuery.mock.calls.findIndex((call) =>
+        String(call[0]).startsWith('REFRESH MATERIALIZED VIEW mv_dispatch_timeline')
+      );
+      expect(vi.mocked(invalidateDashboardStatsCache).mock.invocationCallOrder[0]).toBeGreaterThan(
+        mockQuery.mock.invocationCallOrder[lastRefreshCall]
+      );
     });
   });
 

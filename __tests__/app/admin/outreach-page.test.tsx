@@ -2418,11 +2418,14 @@ describe('Outreach page - Return to Pending actions', () => {
     window.localStorage.clear();
   });
 
-  function makeOutreachFetch(sentStatus = 'sent') {
+  function makeOutreachFetch(
+    sentStatus = 'sent',
+    reports: Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string; label: string }> = []
+  ) {
     return (global.fetch as any) = vi.fn((url: RequestInfo, init?: RequestInit) => {
       const s = String(url || '');
       if (s.includes('/api/admin/pdf/reports')) {
-        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports: [] }) });
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports }) });
       }
       if (s.includes('/api/admin/outreach/default-report')) {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
@@ -2487,7 +2490,14 @@ describe('Outreach page - Return to Pending actions', () => {
   });
 
   it('confirms and PATCHes status to pending from the Sent tab bulk bar', async () => {
-    makeOutreachFetch('sent');
+    makeOutreachFetch('sent', [{
+      suburb: 'Oteha',
+      quarter: 'Q3',
+      year: 2026,
+      id: 'report-q3',
+      uploaded_at: '2026-10-20T00:00:00Z',
+      label: '2026-Q3',
+    }]);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<OutreachPage />);
@@ -2503,6 +2513,7 @@ describe('Outreach page - Return to Pending actions', () => {
       expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy();
       expect(screen.getAllByRole('checkbox')).toHaveLength(2);
     }, { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: /2026-Q3/ }));
 
     const checkboxes = screen.getAllByRole('checkbox');
     checkboxes.forEach((cb) => fireEvent.click(cb));
@@ -2520,11 +2531,163 @@ describe('Outreach page - Return to Pending actions', () => {
       );
       expect(statusCalls.length).toBe(2);
       for (const call of statusCalls) {
-        expect(JSON.parse((call[1] as RequestInit).body as string).status).toBe('pending');
+        expect(JSON.parse((call[1] as RequestInit).body as string)).toMatchObject({
+          status: 'pending',
+          return_to_pending: true,
+          report_quarter: '2026-Q3',
+        });
       }
     }, { timeout: 3000 });
 
     confirmSpy.mockRestore();
+  });
+
+  it('passes the selected quarter when returning sent rows from the Pending tab', async () => {
+    makeOutreachFetch('sent', [{
+      suburb: 'Oteha',
+      quarter: 'Q3',
+      year: 2026,
+      id: 'report-q3',
+      uploaded_at: '2026-10-20T00:00:00Z',
+      label: '2026-Q3',
+    }]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<OutreachPage />);
+    await waitFor(() => expect(screen.getByText('1 Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: '⏳ Pending' }));
+    await waitFor(() => expect(screen.getByText('1 Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: /2026-Q3/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sent ✓' }));
+    await waitFor(() => expect(screen.getByText('1 Sent Main St')).toBeTruthy(), { timeout: 3000 });
+
+    screen.getAllByRole('checkbox').forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(screen.getByRole('button', { name: /Return to Pending/i }));
+
+    await waitFor(() => {
+      const statusCalls = (global.fetch as any).mock.calls.filter(
+        (call: unknown[]) => String(call[0]).includes('/status') && (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(statusCalls).toHaveLength(2);
+      for (const call of statusCalls) {
+        expect(JSON.parse((call[1] as RequestInit).body as string)).toMatchObject({
+          status: 'pending',
+          return_to_pending: true,
+          report_quarter: '2026-Q3',
+        });
+      }
+    }, { timeout: 3000 });
+  });
+
+  it('updates the Sent UI immediately and reconciles after the Return to Pending request completes', async () => {
+    let returned = false;
+    let resolveStatusRequest: ((response: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
+    (global.fetch as any) = vi.fn((url: RequestInfo, init?: RequestInit) => {
+      const path = String(url || '');
+      if (path.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports: [] }) });
+      }
+      if (path.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (path.includes('/api/admin/outreach?')) {
+        const isSent = path.includes('status=sent');
+        const sentItems = [
+          { id: 'addr-1', property_address: '1 Sent Main St', suburb: 'Oteha', status: 'sent', created_at: '2024-01-01' },
+          { id: 'addr-2', property_address: '2 Sent Oak Ave', suburb: 'Oteha', status: 'sent', created_at: '2024-01-02' },
+        ].filter((item) => !returned || item.id !== 'addr-1');
+        const data = isSent
+          ? sentItems
+          : [
+              { id: 'addr-1', property_address: '1 Main St', suburb: 'Oteha', status: 'pending', created_at: '2024-01-01' },
+              { id: 'addr-2', property_address: '2 Oak Ave', suburb: 'Oteha', status: 'pending', created_at: '2024-01-02' },
+            ];
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            data,
+            pagination: { page: 1, limit: 9, total: data.length, totalPages: data.length ? 1 : 0 },
+          }),
+        });
+      }
+      if (path.includes('/status') && init?.method === 'PATCH') {
+        return new Promise((resolve) => {
+          resolveStatusRequest = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<OutreachPage />);
+
+    await waitFor(() => expect(screen.getByText('1 Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: '✓ Sent' }));
+    await waitFor(() => expect(screen.getByText('1 Sent Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Return to Pending/i }));
+
+    await waitFor(() => expect(resolveStatusRequest).toBeTypeOf('function'));
+    await waitFor(() => expect(screen.queryByText('1 Sent Main St')).toBeNull());
+    expect(screen.getByText('Moved 1 address to Pending')).toBeTruthy();
+    expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy();
+
+    returned = true;
+    await act(async () => {
+      resolveStatusRequest?.({ ok: true, json: async () => ({ success: true }) });
+    });
+    await waitFor(() => expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy());
+    expect(screen.queryByText('1 Sent Main St')).toBeNull();
+  });
+
+  it('rolls back the optimistic Return to Pending UI if the status request fails', async () => {
+    let resolveStatusRequest: ((response: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
+    (global.fetch as any) = vi.fn((url: RequestInfo, init?: RequestInit) => {
+      const path = String(url || '');
+      if (path.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports: [] }) });
+      }
+      if (path.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (path.includes('/api/admin/outreach?')) {
+        const isSent = path.includes('status=sent');
+        const data = isSent
+          ? [{ id: 'addr-1', property_address: '1 Sent Main St', suburb: 'Oteha', status: 'sent', created_at: '2024-01-01' }]
+          : [{ id: 'addr-1', property_address: '1 Main St', suburb: 'Oteha', status: 'pending', created_at: '2024-01-01' }];
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            data,
+            pagination: { page: 1, limit: 9, total: 1, totalPages: 1 },
+          }),
+        });
+      }
+      if (path.includes('/status') && init?.method === 'PATCH') {
+        return new Promise((resolve) => {
+          resolveStatusRequest = resolve;
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<OutreachPage />);
+
+    await waitFor(() => expect(screen.getByText('1 Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: '✓ Sent' }));
+    await waitFor(() => expect(screen.getByText('1 Sent Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getAllByRole('checkbox')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Return to Pending/i }));
+
+    await waitFor(() => expect(resolveStatusRequest).toBeTypeOf('function'));
+    await waitFor(() => expect(screen.queryByText('1 Sent Main St')).toBeNull());
+    await act(async () => {
+      resolveStatusRequest?.({ ok: false, json: async () => ({ error: 'Database unavailable' }) });
+    });
+
+    await waitFor(() => expect(screen.getByText('1 Sent Main St')).toBeTruthy());
+    expect(screen.getByText('Database unavailable')).toBeTruthy();
   });
 
   it('does not PATCH when the Return to Pending confirm is cancelled on the Sent tab', async () => {
@@ -2631,6 +2794,88 @@ describe('Outreach page - Today Run street switching', () => {
     await screen.findByText('Nearby streets in walking order', {}, { timeout: 5000 });
     await screen.findByRole('button', { name: 'Alpha Street (1)' }, { timeout: 5000 });
   }
+
+  it('clears the focused street when changing report suburb', async () => {
+    const suburbs = ['Fairview Heights', 'Torbay'];
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const value = String(url || '');
+      if (value.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            reports: suburbs.map((suburb, index) => ({
+              suburb, quarter: 'Q2', year: 2026, id: `r-${index}`,
+              uploaded_at: `2026-08-0${index + 1}T00:00:00.000Z`,
+            })),
+          }),
+        });
+      }
+      if (value.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (value.includes('/api/admin/outreach/street-clusters')) {
+        const parsed = new URL(value, 'http://localhost');
+        const suburb = parsed.searchParams.get('suburb') || 'Fairview Heights';
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            suburb,
+            groups: [{ groupId: 1, streets: [{ street: 'Baker Street', suburb, lat: -36.6, lng: 174.7, pendingCount: 1, addresses: ['1 Baker Street'] }], totalPending: 1, extentMeters: 500 }],
+            runs: [{ runId: 1, groups: [{ groupId: 1, streets: [{ street: 'Baker Street', suburb, lat: -36.6, lng: 174.7, pendingCount: 1, addresses: ['1 Baker Street'] }], totalPending: 1, extentMeters: 500 }], totalPending: 1, streetCount: 1 }],
+            totalPending: 1,
+            unclusteredStreets: [],
+            allStreets: [{ street: 'Baker Street', count: 1 }],
+          }),
+        });
+      }
+      if (value.includes('/api/admin/outreach?')) {
+        const parsed = new URL(value, 'http://localhost');
+        const suburb = parsed.searchParams.get('suburb') || 'Fairview Heights';
+        const street = parsed.searchParams.get('street');
+        const itemSuburb = street ? 'Fairview Heights' : suburb;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: [{
+              id: `id-${itemSuburb}`,
+              property_address: `1 ${itemSuburb} Road`,
+              street: `${itemSuburb} Road`,
+              suburb: itemSuburb,
+              city: 'Auckland',
+              region: 'Auckland',
+              status: 'PENDING',
+              created_at: '2026-10-25T10:00:00Z',
+            }],
+            pagination: { page: 1, limit: 9, total: 1, totalPages: 1 },
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ success: true, data: [], pagination: { page: 1, limit: 9, total: 0, totalPages: 0 } }) });
+    });
+
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unsent' }));
+    await screen.findByText('Nearby streets in walking order', {}, { timeout: 5000 });
+    fireEvent.click(await screen.findByRole('button', { name: 'Baker Street (1)' }, { timeout: 5000 }));
+    await screen.findByText('1 Fairview Heights Road');
+
+    const reportSection = (await screen.findByText('📋 Filter by Report')).closest('div') as HTMLElement;
+    const callsBeforeSuburbChange = (global.fetch as any).mock.calls.length;
+    fireEvent.click(within(reportSection).getByRole('button', { name: 'Torbay' }));
+
+    await screen.findByText('1 Torbay Road');
+    await waitFor(() => {
+      const suburbCalls = (global.fetch as any).mock.calls
+        .slice(callsBeforeSuburbChange)
+        .map((call: unknown[]) => String(call[0]))
+        .filter((call: string) => call.includes('/api/admin/outreach?') && call.includes('suburb=Torbay'));
+      expect(suburbCalls.some((call: string) => !call.includes('street='))).toBe(true);
+    });
+  });
 
   it('switches cards to the clicked street for 10 consecutive selections', async () => {
     await openUnsent();

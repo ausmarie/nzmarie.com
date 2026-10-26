@@ -13,7 +13,7 @@ import {
   Flex,
   Badge,
 } from "@radix-ui/themes";
-import { Bed, Bath, Car, Square, Ruler } from "lucide-react";
+import { Bed, Bath, Car, Square, Ruler, ChevronLeft, ChevronRight } from "lucide-react";
 import PropertyDetails from "./PropertyDetails";
 
 interface PropertyZh {
@@ -338,6 +338,7 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(
     null
   );
+  const [cardImageIndex, setCardImageIndex] = useState<Record<number, number>>({});
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -422,17 +423,127 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
                 }}
                 onClick={() => setSelectedProperty(property)}
               >
-                <Image
-                  src={property.imageUrl}
-                  alt={property.title}
-                  fill
-                  style={{
-                    objectFit: "cover",
-                    objectPosition: "top center",
-                  }}
-                  priority={false}
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 50vw, 50vw"
-                />
+                {(() => {
+                  const images = property.images && property.images.length > 0 ? property.images : [property.imageUrl];
+                  const currentIndex = cardImageIndex[property.id] || 0;
+                  const currentImage = images[currentIndex];
+                  const hasMultipleImages = images.length > 1;
+
+                  return (
+                    <>
+                      <Image
+                        src={currentImage}
+                        alt={property.title}
+                        fill
+                        style={{
+                          objectFit: "cover",
+                          objectPosition: "top center",
+                          transition: "opacity 0.3s ease",
+                        }}
+                        priority={false}
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 50vw, 50vw"
+                      />
+                      {hasMultipleImages && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={lang === "zh" ? "卡片上一张图片" : "Card previous image"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setCardImageIndex((prev) => ({
+                                ...prev,
+                                [property.id]: (prev[property.id] || 0) > 0 ? (prev[property.id] || 0) - 1 : images.length - 1,
+                              }));
+                            }}
+                            style={{
+                              position: "absolute",
+                              top: "50%",
+                              left: "8px",
+                              transform: "translateY(-50%)",
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "50%",
+                              border: "none",
+                              backgroundColor: "rgba(255, 255, 255, 0.8)",
+                              backdropFilter: "blur(4px)",
+                              WebkitBackdropFilter: "blur(4px)",
+                              color: "var(--gray-12)",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 0,
+                              zIndex: 3,
+                              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                            }}
+                          >
+                            <ChevronLeft size={22} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={lang === "zh" ? "卡片下一张图片" : "Card next image"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setCardImageIndex((prev) => ({
+                                ...prev,
+                                [property.id]: ((prev[property.id] || 0) + 1) % images.length,
+                              }));
+                            }}
+                            style={{
+                              position: "absolute",
+                              top: "50%",
+                              right: "8px",
+                              transform: "translateY(-50%)",
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "50%",
+                              border: "none",
+                              backgroundColor: "rgba(255, 255, 255, 0.8)",
+                              backdropFilter: "blur(4px)",
+                              WebkitBackdropFilter: "blur(4px)",
+                              color: "var(--gray-12)",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: 0,
+                              zIndex: 3,
+                              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+                            }}
+                          >
+                            <ChevronRight size={22} />
+                          </button>
+                          {/* Image indicator dots */}
+                          <div style={{
+                            position: "absolute",
+                            bottom: "12px",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            display: "flex",
+                            gap: "6px",
+                            zIndex: 3,
+                          }}>
+                            {images.map((_, index) => (
+                              <span
+                                key={index}
+                                style={{
+                                  width: "8px",
+                                  height: "8px",
+                                  borderRadius: "50%",
+                                  backgroundColor: index === currentIndex ? "var(--accent-9)" : "rgba(255,255,255,0.6)",
+                                  transition: "all 0.2s ease",
+                                  boxShadow: index === currentIndex ? "0 0 4px var(--accent-9)" : "none",
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
                 {/* Status Badge */}
                 <Box
                   style={{ position: "absolute", top: "12px", right: "12px" }}

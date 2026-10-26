@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
-import { invalidateStreetClustersForSuburb } from '@/lib/redis';
+import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
 
 // Forces the suburb segment of a campaign key (e.g. "2026_Q2_Fairview Heights")
 // to match the property being sent, so sends are never logged under the wrong
@@ -204,15 +204,21 @@ export async function POST(request: Request) {
 
     // Invalidate street-clusters cache for all affected suburbs
     for (const suburb of affectedSuburbs) {
-      invalidateStreetClustersForSuburb(suburb).catch(() => { });
+      invalidateStreetClustersForSuburb(suburb).catch((error) => {
+        console.error(`Street-cluster cache invalidation failed for ${suburb}:`, error);
+      });
     }
 
-    // Refresh quarter materialized views asynchronously
-    Promise.all([
-      marieDB.query('REFRESH MATERIALIZED VIEW mv_suburb_quarter_summary'),
-      marieDB.query('REFRESH MATERIALIZED VIEW mv_quarter_overview'),
-      marieDB.query('REFRESH MATERIALIZED VIEW mv_dispatch_timeline'),
-    ]).catch(err => console.error('Quarter MV refresh failed (non-critical):', err));
+    // Refresh dependent views in order so the overview never reads stale suburb totals.
+    try {
+      await marieDB.query('REFRESH MATERIALIZED VIEW mv_suburb_quarter_summary');
+      await marieDB.query('REFRESH MATERIALIZED VIEW mv_quarter_overview');
+      await marieDB.query('REFRESH MATERIALIZED VIEW mv_dispatch_timeline');
+    } catch (error) {
+      console.error('Quarter MV refresh failed after recording outreach sends:', error);
+    } finally {
+      await invalidateDashboardStatsCache();
+    }
 
     if (process.env.USE_OUTREACH_MV === 'true') {
       marieDB.query('REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched')

@@ -62,6 +62,36 @@ describe("PropertyListings - 2/21 Birdwood Crescent, Parnell, Auckland", () => {
     });
   });
 
+  it("shows image carousel arrows for properties with multiple images", async () => {
+    render(<PropertyListings lang="en" />);
+
+    await waitFor(() => {
+      const card = screen.getByText("2/21 Birdwood Crescent, Parnell, Auckland").closest(".property-card") as HTMLElement;
+      // Check for carousel arrows (card-specific labels)
+      const prevArrow = within(card).getByRole("button", { name: /Card previous image/i });
+      const nextArrow = within(card).getByRole("button", { name: /Card next image/i });
+      expect(prevArrow).toBeTruthy();
+      expect(nextArrow).toBeTruthy();
+    });
+  });
+
+  it("cycles through images when clicking carousel arrows", async () => {
+    render(<PropertyListings lang="en" />);
+
+    await waitFor(() => {
+      const card = screen.getByText("2/21 Birdwood Crescent, Parnell, Auckland").closest(".property-card") as HTMLElement;
+      const img = within(card).getByAltText("2/21 Birdwood Crescent, Parnell, Auckland");
+      const initialSrc = img.getAttribute("src");
+      
+      // Click next arrow
+      const nextArrow = within(card).getByRole("button", { name: /Card next image/i });
+      fireEvent.click(nextArrow);
+      
+      // Image should change
+      expect(img.getAttribute("src")).not.toBe(initialSrc);
+    });
+  });
+
   it("shows the full Birdwood address in property details", async () => {
     render(<PropertyListings lang="en" />);
 

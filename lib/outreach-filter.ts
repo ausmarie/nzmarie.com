@@ -36,7 +36,7 @@ export function buildOutreachFilter(opts: OutreachFilterOptions): OutreachFilter
   }
 
   if (opts.sentStatus === 'unsent' || opts.sentStatus === 'sent') {
-    const exists = opts.sentStatus === 'sent' ? 'EXISTS' : 'NOT EXISTS';
+    const isSent = opts.sentStatus === 'sent';
     let sub = `SELECT 1 FROM outreach_send_logs sl3
       LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id
       WHERE sl3.outreach_property_id = op.id
@@ -44,22 +44,28 @@ export function buildOutreachFilter(opts: OutreachFilterOptions): OutreachFilter
     params.push(opts.suburb);
     idx++;
     if (qi) {
-      sub += ` AND ((sr3.quarter = $${idx} AND sr3.year = $${idx + 1}) OR sl3.campaign_key ~ $${idx + 2} OR op.last_campaign ~ $${idx + 2})`;
+      sub += ` AND ((sr3.quarter = $${idx} AND sr3.year = $${idx + 1}) OR sl3.campaign_key ~ $${idx + 2})`;
+      const quarterParam = idx;
+      const yearParam = idx + 1;
       params.push(qi.quarter, qi.year, qi.campaignPattern);
       idx += 3;
-    }
-    if (opts.sentStatus === 'sent') {
-      if (qi) {
-        sql += ` AND (${exists} (${sub}))`;
-      } else {
-        sql += ` AND (${exists} (${sub}) OR op.status = 'sent' OR COALESCE(op.total_send_count, 0) > 0 OR op.last_sent_at IS NOT NULL OR op.sent_at IS NOT NULL)`;
-      }
+      const quarterStatus = (status: string) => `SELECT 1
+        FROM outreach_property_quarter_status quarter_status
+        WHERE quarter_status.outreach_property_id = op.id
+          AND quarter_status.suburb = $1
+          AND quarter_status.year = $${yearParam}
+          AND quarter_status.quarter = $${quarterParam}
+          AND quarter_status.status ${status}`;
+      const quarterSent = `(EXISTS (${quarterStatus("IN ('sent', 'partial')")})
+        OR (NOT EXISTS (${quarterStatus("= 'pending'" )}) AND EXISTS (${sub})))`;
+      sql += ` AND ${isSent ? quarterSent : `NOT ${quarterSent}`}`;
+    } else if (isSent) {
+      sql += ` AND (EXISTS (${sub}) OR op.status = 'sent' OR COALESCE(op.total_send_count, 0) > 0 OR op.last_sent_at IS NOT NULL OR op.sent_at IS NOT NULL)`;
     } else {
-      if (qi) {
-        sql += ` AND (${exists} (${sub}))`;
-      } else {
-        sql += ` AND (${exists} (${sub}) AND COALESCE(op.total_send_count, 0) = 0 AND op.last_sent_at IS NULL AND op.sent_at IS NULL)`;
-      }
+      sql += ` AND (NOT EXISTS (${sub}) AND COALESCE(op.total_send_count, 0) = 0 AND op.last_sent_at IS NULL AND op.sent_at IS NULL)`;
+      sql += ` AND op.status <> 'sent'`;
+    }
+    if (!isSent) {
       sql += ` AND NOT EXISTS (
         SELECT 1
         FROM properties p2

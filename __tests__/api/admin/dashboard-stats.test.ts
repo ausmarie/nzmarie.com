@@ -707,6 +707,13 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(allSql).toContain('[0-9]{4}');
     expect(allSql).toContain('[_-]Q([1-4])');
     expect(allSql).toContain('cur.q_index = rq.q_index');
+    expect(allSql).toContain('returned.suburb_report_id = sl.suburb_report_id');
+    expect(allSql).toContain("returned.status = 'pending'");
+    expect(allSql.match(/returned\.outreach_property_id = sl\.outreach_property_id/g)).toHaveLength(3);
+    expect(allSql).toContain('returned.quarter_key = rq.period_key');
+    expect(allSql).toContain('quarter_status_sent.status = \'sent\'');
+    expect(allSql).toContain('quarter_status_sent.outreach_property_id');
+    expect(allSql).toContain('op.created_at < rq.period_end');
     expect(allSql).toContain('junk_props_base');
     expect(allSql).toContain('no_junk_mail_updated_at');
     expect(allSql).toContain('sr.uploaded_at <= COALESCE(p.no_junk_mail_updated_at');

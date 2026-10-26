@@ -147,6 +147,77 @@ describe('Outreach street-clusters GET - Start street ordering', () => {
     expect(data.runs[0].groups[0].streets[0].street).toBe('Alpha Street');
   });
 
+  it('counts returned quarter addresses with the canonical street and marks them unsent on the map', async () => {
+    mockAuth();
+    vi.mocked(getStreetClustersFromCache).mockResolvedValueOnce(null as any);
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'unreturned-id',
+            street: 'East Coast Road',
+            house_number: 1008,
+            property_address: '1008A East Coast Road',
+            lat: '-36.72',
+            lng: '174.75',
+            status: 'pending',
+          },
+          {
+            id: 'returned-id-1',
+            street: 'East Coast Road Fairview',
+            house_number: 1010,
+            property_address: '1010 East Coast Road',
+            lat: '-36.721',
+            lng: '174.751',
+            status: 'pending',
+            last_campaign: '2026_Q3_Fairview Heights',
+          },
+          {
+            id: 'returned-id-2',
+            street: 'East Coast Road Fairview',
+            house_number: 1038,
+            property_address: '1038 East Coast Road',
+            lat: '-36.722',
+            lng: '174.752',
+            status: 'pending',
+            last_campaign: '2026_Q3_Fairview Heights',
+          },
+        ],
+      } as any)
+      .mockResolvedValueOnce({
+        rows: [
+          { outreach_property_id: 'returned-id-1', status: 'pending' },
+          { outreach_property_id: 'returned-id-2', status: 'pending' },
+        ],
+      } as any)
+      // Stale log rows must not override explicit returned quarter statuses.
+      .mockResolvedValueOnce({
+        rows: [
+          { outreach_property_id: 'returned-id-1' },
+          { outreach_property_id: 'returned-id-2' },
+        ],
+      } as any)
+      .mockResolvedValueOnce({ rows: [] } as any);
+
+    const response = await GET(new Request(
+      'http://localhost:3000/api/admin/outreach/street-clusters?suburb=Fairview%20Heights&budget=30&status=pending&sent_status=unsent&report_quarter=2026-Q3&address_coords=true'
+    ));
+    expect(response.status).toBe(200);
+
+    const body = await response.json();
+    expect(body.allStreets).toEqual([{ street: 'East Coast Road', count: 3 }]);
+    expect(body.groups[0].totalPending).toBe(3);
+    expect(body.groups[0].streets).toHaveLength(1);
+    expect(body.groups[0].streets[0].addressCoords).toHaveLength(3);
+    expect(body.groups[0].streets[0].addressCoords.map((address: { status: string }) => address.status))
+      .toEqual(['unsent', 'unsent', 'unsent']);
+
+    const quarterStatusQuery = String(vi.mocked(marieDB.query).mock.calls[1][0]);
+    expect(quarterStatusQuery).toContain('outreach_property_quarter_status');
+    const sendLogsQuery = String(vi.mocked(marieDB.query).mock.calls[2][0]);
+    expect(sendLogsQuery).toContain("returned.status = 'pending'");
+  });
+
   it('orders Run 1 from the start street on a cache miss (DB path)', async () => {
     mockAuth();
     vi.mocked(getStreetClustersFromCache).mockResolvedValueOnce(null as any);

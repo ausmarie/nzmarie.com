@@ -53,6 +53,8 @@ describe('buildOutreachFilter - Unsent Status', () => {
     expect(filter.params).toContain(2026);
     expect(filter.params).toContain('^2026[_-]Q2');
     expect(filter.sql).toContain('campaign_key ~');
+    expect(filter.sql).toContain("quarter_status.status = 'pending'");
+    expect(filter.sql).toContain("quarter_status.status IN ('sent', 'partial')");
   });
 
   it('should combine pending status and unsent filters correctly', () => {
@@ -169,6 +171,8 @@ describe('buildOutreachFilter - Unsent Status', () => {
     expect(filter.params).toContain('Q3');
     expect(filter.params).toContain(2026);
     expect(filter.params).toContain('^2026[_-]Q3');
+    expect(filter.sql).toContain("quarter_status.status = 'pending'");
+    expect(filter.sql).toContain('NOT EXISTS (SELECT 1');
   });
 
   it('should not use global sent heuristics when reportQuarter is malformed', () => {

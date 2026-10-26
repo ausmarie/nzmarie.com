@@ -163,7 +163,7 @@ export function streetClustersKey(
   budget: number,
 ): string {
   const q = reportQuarter ?? 'all';
-  return `street_clusters:${suburb.toLowerCase().trim()}:${status}:${sentStatus}:${q}:${budget}`;
+  return `street_clusters:${suburb.toLowerCase().trim()}:${status}:${sentStatus}:${q}:${budget}:v2`;
 }
 
 export async function getStreetClustersFromCache<T>(key: string): Promise<T | null> {

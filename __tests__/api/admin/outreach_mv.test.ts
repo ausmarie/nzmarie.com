@@ -25,6 +25,10 @@ function mockAuth() {
   } as any);
 }
 
+function normalizeSql(query: string) {
+  return query.replace(/\s+/g, ' ').trim();
+}
+
 describe('Outreach MV GET /api/admin/outreach', () => {
   const OLD_ENV = process.env.USE_OUTREACH_MV;
 
@@ -110,9 +114,12 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=sent&report_quarter=2026-Q2&limit=10'));
     expect(response.status).toBe(200);
 
-    const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
-    expect(queryCall).toContain('sl2.outreach_property_id = outreach_enriched.id');
-    expect(queryCall).not.toMatch(/sl2\.outreach_property_id = id\b/);
+    const queryCall = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
+    expect(queryCall).toContain('quarter_status.outreach_property_id = outreach_enriched.id');
+    expect(queryCall).not.toMatch(/quarter_status\.outreach_property_id = id\b/);
+    expect(queryCall).toContain("quarter_status.status IN ('sent', 'partial')");
+    expect(queryCall).toContain("quarter_status.status = 'pending'");
+    expect(queryCall).toContain('sl3.campaign_key ~ $3');
     const params = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
     expect(params).toContain('Q2');
     expect(params).toContain('^2026[_-]Q2');
@@ -272,9 +279,10 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=sent&report_quarter=2026-Q2&sent_dates=2026-10-14&limit=10'));
     expect(response.status).toBe(200);
 
-    const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const queryCall = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     const params = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
-    expect(queryCall).toContain('sl2.outreach_property_id = outreach_enriched.id');
+    expect(queryCall).toContain('quarter_status.outreach_property_id = outreach_enriched.id');
+    expect(queryCall).toContain('quarter_status.status IN (\'sent\', \'partial\')');
     expect(queryCall).toContain('EXISTS (SELECT 1 FROM outreach_send_logs sl6 WHERE sl6.outreach_property_id = outreach_enriched.id AND (');
     expect(params).toContain('Q2');
     expect(params).toContain(2026);
@@ -296,9 +304,10 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=sent&report_quarter=2026-Q2&sent_dates=2026-10-14&limit=10'));
     expect(response.status).toBe(200);
 
-    const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const queryCall = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     const params = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
-    expect(queryCall).toContain('sl2.outreach_property_id = op.id');
+    expect(queryCall).toContain('quarter_status.outreach_property_id = op.id');
+    expect(queryCall).toContain('quarter_status.status IN (\'sent\', \'partial\')');
     expect(queryCall).toContain('EXISTS (SELECT 1 FROM outreach_send_logs sl6 WHERE sl6.outreach_property_id = op.id AND (');
     expect(params).toContain('Q2');
     expect(params).toContain(2026);
@@ -348,17 +357,18 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=pending&sent_status=all&suburb=Oteha&report_quarter=2026-Q3&limit=10'));
     expect(response.status).toBe(200);
 
-    const dataQuery = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const dataQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     const dataParams = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
     expect(dataQuery).toContain("status IN ('pending', 'sent')");
-    expect(dataQuery).toContain("CASE WHEN EXISTS");
-    expect(dataQuery).toContain("THEN 'sent' ELSE 'pending' END AS status");
+    expect(dataQuery).toContain("CASE WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst");
+    expect(dataQuery).toContain("qst.status = 'pending') THEN 'pending'");
+    expect(dataQuery).toContain("qst.status IN ('sent', 'partial')) THEN 'sent'");
     expect(dataQuery).toContain('campaign_key ~');
     expect(dataParams).toContain('^2026[_-]Q3');
     expect(dataParams).toContain('Q3');
     expect(dataParams).toContain(2026);
 
-    const countQuery = vi.mocked(marieDB.query).mock.calls[1][0] as string;
+    const countQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[1][0] as string);
     expect(countQuery).not.toContain('CASE WHEN EXISTS');
   });
 
@@ -372,11 +382,13 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=pending&sent_status=sent&suburb=Oteha&report_quarter=2026-Q3&limit=10'));
     expect(response.status).toBe(200);
 
-    const dataQuery = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const dataQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     expect(dataQuery).toContain("status IN ('pending', 'sent')");
-    expect(dataQuery).toContain('EXISTS (SELECT 1 FROM outreach_send_logs sl3');
+    expect(dataQuery).toContain('outreach_property_quarter_status quarter_status');
+    expect(dataQuery).toContain("quarter_status.status IN ('sent', 'partial')");
+    expect(dataQuery).toContain("quarter_status.status = 'pending'");
     expect(dataQuery).not.toContain('OR COALESCE(total_send_count, 0) > 0');
-    expect(dataQuery).toContain("THEN 'sent' ELSE 'pending' END AS status");
+    expect(dataQuery).toContain("qst.status = 'pending') THEN 'pending'");
   });
 
   it('matches campaign keys with quarter regex in sent + reportQuarter in MV mode', async () => {
@@ -389,10 +401,10 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=pending&sent_status=sent&suburb=Oteha&report_quarter=2026-Q3&limit=10'));
     expect(response.status).toBe(200);
 
-    const dataQuery = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const dataQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     const dataParams = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
     expect(dataQuery).toMatch(/sl3\.campaign_key ~ \$\d+/);
-    expect(dataQuery).toMatch(/last_campaign ~ \$\d+/);
+    expect(dataQuery).not.toMatch(/last_campaign ~ \$\d+/);
     expect(dataParams).toContain('^2026[_-]Q3');
     expect(dataParams).not.toContain('2026-Q3');
     expect(dataParams).not.toContain('2026_Q3');
@@ -408,9 +420,10 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=pending&sent_status=unsent&suburb=Oteha&report_quarter=2026-Q3&limit=10'));
     expect(response.status).toBe(200);
 
-    const dataQuery = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const dataQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     expect(dataQuery).toContain("status IN ('pending', 'sent')");
-    expect(dataQuery).toContain('NOT EXISTS (SELECT 1 FROM outreach_send_logs sl3');
+    expect(dataQuery).toContain("NOT ( EXISTS (SELECT 1 FROM outreach_property_quarter_status quarter_status");
+    expect(dataQuery).toContain("quarter_status.status = 'pending'");
     expect(dataQuery).not.toContain("status <> 'sent'");
     expect(dataQuery).not.toContain('COALESCE(total_send_count, 0) = 0');
     expect(dataQuery).toContain('(no_junk_mail IS NULL OR no_junk_mail = false)');
@@ -427,18 +440,18 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=pending&sent_status=unsent&suburb=Oteha&report_quarter=2026-Q3&limit=10'));
     expect(response.status).toBe(200);
 
-    const dataQuery = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const dataQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
     const dataParams = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
     expect(dataQuery).toContain("op.status IN ('pending', 'sent')");
-    expect(dataQuery).toContain('NOT EXISTS (SELECT 1 FROM outreach_send_logs sl3');
+    expect(dataQuery).toContain("NOT ( EXISTS (SELECT 1 FROM outreach_property_quarter_status quarter_status");
     expect(dataQuery).not.toContain("op.status <> 'sent'");
     expect(dataQuery).not.toContain('COALESCE(op.total_send_count, 0) = 0');
     expect(dataQuery).toContain('slq.outreach_property_id = op.id');
-    expect(dataQuery).toContain("THEN 'sent' ELSE 'pending' END AS status");
+    expect(dataQuery).toContain("qst.status = 'pending') THEN 'pending'");
     expect(dataParams).toContain('^2026[_-]Q3');
     expect(dataParams).toContain('Q3');
 
-    const countQuery = vi.mocked(marieDB.query).mock.calls[1][0] as string;
+    const countQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[1][0] as string);
     expect(countQuery).not.toContain('CASE WHEN EXISTS');
   });
 
