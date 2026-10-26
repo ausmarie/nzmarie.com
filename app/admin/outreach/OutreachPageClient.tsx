@@ -412,6 +412,8 @@ export default function OutreachPage() {
   const canMarkAsSent = isAdmin(session?.user?.email ?? '');
 
   const [sendModalOpen, setSendModalOpen] = useState(false);
+  const mapSendRef = useRef(false);
+  const mapSendSubmittedRef = useRef(false);
   const [sendTargetIds, setSendTargetIds] = useState<string[]>([]);
   const [sendTargetSuburb, setSendTargetSuburb] = useState('');
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
@@ -3886,6 +3888,8 @@ export default function OutreachPage() {
               onMarkAsSent={(id: string, suburb: string) => {
                 const mapSuburb = suburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb || suburbFilter;
                 const prop = items.find((p) => p.id === id);
+                mapSendRef.current = true;
+                mapSendSubmittedRef.current = false;
                 setSendTargetSuburb(mapSuburb || prop?.suburb || '');
                 setSendTargetIds([id]);
                 setSendModalOpen(true);
@@ -4475,17 +4479,32 @@ export default function OutreachPage() {
 
       <SendReportModal
         isOpen={sendModalOpen}
-        onClose={() => setSendModalOpen(false)}
+        onClose={() => {
+          setSendModalOpen(false);
+          if (!mapSendSubmittedRef.current) {
+            mapSendRef.current = false;
+          }
+        }}
         selectedIds={sendTargetIds}
         suburb={sendTargetSuburb}
         onSuccess={() => {
+          mapSendSubmittedRef.current = mapSendRef.current;
           showNotification('success', 'Report dispatch logged successfully');
           clearSelected();
           cacheRef.current.clear();
           window.scrollTo(0, 0);
         }}
         onConfirmed={() => {
-          setTodayRunRefreshKey((k) => k + 1);
+          if (!mapSendRef.current) {
+            setTodayRunRefreshKey((k) => k + 1);
+          }
+          mapSendRef.current = false;
+          mapSendSubmittedRef.current = false;
+        }}
+        onFailure={(message) => {
+          mapSendRef.current = false;
+          mapSendSubmittedRef.current = false;
+          showNotification('error', `Dispatch failed, changes reverted: ${message}`);
         }}
         onOptimisticSend={(ids) => {
           const idSet = new Set(ids);
@@ -4497,9 +4516,6 @@ export default function OutreachPage() {
             setItems(previousItems);
             setClassicItems(previousClassicItems);
           };
-        }}
-        onFailure={(message) => {
-          showNotification('error', `Dispatch failed, changes reverted: ${message}`);
         }}
       />
 

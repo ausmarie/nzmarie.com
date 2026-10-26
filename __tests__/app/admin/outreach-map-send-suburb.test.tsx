@@ -28,8 +28,8 @@ vi.mock('@/lib/geo-data', () => ({
 }));
 
 vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
-  default: (props: { onMarkAsSent?: (id: string, suburb: string) => void }) => (
-    <div data-testid="map-stub">
+  default: (props: { onMarkAsSent?: (id: string, suburb: string) => void; refreshKey?: number }) => (
+    <div data-testid="map-stub" data-refresh-key={props.refreshKey}>
       <button
         type="button"
         onClick={() => props.onMarkAsSent?.('map-address-1', 'Torbay')}
@@ -120,5 +120,33 @@ describe('Outreach map Sent modal suburb', () => {
       .filter((u) => u.includes('/api/admin/pdf/reports'));
     expect(pdfCalls.some((u) => u.includes('suburb=Torbay'))).toBe(true);
     expect(pdfCalls.some((u) => u.includes('suburb=Fairview+Heights'))).toBe(false);
+  });
+
+  it('does not reload the map after dispatching an address from map mode', async () => {
+    render(<OutreachPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Map$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Map Sent' }));
+
+    await screen.findByText('Send Market Report');
+    await waitFor(() => {
+      expect(screen.getByDisplayValue(/Torbay 2026-Q3 Market Report/)).toBeTruthy();
+      expect(screen.getByDisplayValue('2026_Q3_Torbay')).toBeTruthy();
+    });
+    const map = screen.getByTestId('map-stub');
+    const initialRefreshKey = map.getAttribute('data-refresh-key');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Dispatch Log' }));
+
+    await waitFor(() => {
+      expect(
+        vi.mocked(global.fetch).mock.calls.some(([url]) =>
+          String(url).includes('/api/admin/outreach/send')
+        )
+      ).toBe(true);
+    });
+
+    expect(screen.queryByRole('button', { name: 'Confirm Dispatch Log' })).toBeNull();
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
   });
 });
