@@ -15,7 +15,7 @@ export default function Chatbot() {
   const { open, toggleChat } = useChat();
   const clientId = process.env.NEXT_PUBLIC_CHATBOT_CLIENT_ID;
 
-  if (pathname === "/" || pathname === "/privacy" || !clientId) return null;
+  if (pathname === "/" || pathname === "/cn" || pathname === "/privacy" || !clientId) return null;
 
   return (
     <>
