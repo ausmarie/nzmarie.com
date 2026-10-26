@@ -5,6 +5,7 @@ import { isAdmin } from '@/lib/permissions';
 import { generateChartImageUrl, generateMetricChartImageUrl, type ChartPeriodType, type LeadChartMetric } from '@/lib/report-charts';
 import { getMonthlyData } from '@/lib/market-data-aggregator';
 import { computeMarketPulse, computeQuarterlyMarketPulse, formatMillions, monthLabel, quarterLabel, shiftMonth, MONTH_NAMES, type MarketPulseResult } from '@/lib/market-pulse';
+import { aggregateToQuarterly } from '@/lib/quarterly-aggregator';
 import { reportDocumentPeriodKey } from '@/lib/report-period';
 import { ensureLeadIntroduction } from '@/lib/lead-introduction-server';
 import { extractDaysToSellDescription, filterOutDaysToSellFromIntro, updateIntroMonthYear } from './intro-utils';
@@ -217,8 +218,11 @@ function buildBlocks(
 ): unknown[] {
   const blocks: unknown[] = [];
   const displayName = suburbName === 'North Shore City' ? 'North Shore' : suburbName;
+  const pulseQuarter = pulsePeriodType === 'quarter'
+    ? `${pulse.anchor.year}-Q${Math.ceil(pulse.anchor.month / 3)}`
+    : quarter;
   const periodTitle = pulsePeriodType === 'quarter'
-    ? quarterLabel(quarter) || monthLabel(reportYear, reportMonth)
+    ? quarterLabel(pulseQuarter) || monthLabel(reportYear, reportMonth)
     : monthLabel(reportYear, reportMonth);
 
   // Page 1: Cover
@@ -616,8 +620,13 @@ export async function POST(request: Request) {
         }
       : undefined;
 
+    const pulseQuarter = pulsePeriodType === 'quarter'
+      ? aggregateToQuarterly(monthlyRaw)
+          .filter((point) => point.period <= reportQuarter && (point.suburbs[suburb.name] || point.cityDetail))
+          .at(-1)?.period ?? reportQuarter
+      : reportQuarter;
     const pulse = pulsePeriodType === 'quarter'
-      ? computeQuarterlyMarketPulse(monthlyRaw, suburb.name, reportQuarter)
+      ? computeQuarterlyMarketPulse(monthlyRaw, suburb.name, pulseQuarter)
       : computeMarketPulse(monthlyRaw, suburb.name, reportYear, reportMonth);
     const customName = typeof report_name === 'string' ? report_name.trim() : '';
     const title = customName || `${displayName} ${reportYear} Market Report`;

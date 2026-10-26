@@ -311,6 +311,48 @@ describe('report generate API', () => {
     );
   });
 
+  it('includes all quarterly comparison charts and falls back to the latest available quarter for a lead report', async () => {
+    mockDbWithTrends('Torbay', 'tor-1', [
+      trendRow('Torbay', 'suburb', '2026-07-01', 3, 1000000, 40),
+      trendRow('North Shore City', 'district', '2026-07-01', 250, 1100000, 55),
+    ]);
+    vi.mocked(getMonthlyData).mockResolvedValue([
+      monthlyPoint('2026-04', detail(1000000, 10, 60), detail(1100000, 200, 65)),
+      monthlyPoint('2026-05', detail(1100000, 12, 55), detail(1150000, 210, 60)),
+      monthlyPoint('2026-06', detail(1200000, 14, 50), detail(1200000, 220, 55)),
+      monthlyPoint('2026-07', detail(1000000, 3, 40), detail(1100000, 250, 55)),
+      monthlyPoint('2026-08', detail(1200000, 4, 50), detail(1150000, 260, 52)),
+      monthlyPoint('2026-09', detail(1400000, 5, 60), detail(1200000, 270, 50)),
+    ] as any);
+
+    const response = await generateRequest({
+      suburb_id: 'tor-1',
+      quarter: '2026-Q4',
+      period_type: 'quarter',
+      start_quarter: '2026-Q1',
+      end_quarter: '2026-Q4',
+      lead_id: 'lead-9',
+    });
+
+    expect(response.status).toBe(200);
+    expect(generateMetricChartImageUrl).toHaveBeenCalledTimes(3);
+    expect(generateMetricChartImageUrl).toHaveBeenCalledWith('Torbay', 'sales', 'quarter', '2026-01-01', '2027-01-01');
+    expect(generateMetricChartImageUrl).toHaveBeenCalledWith('Torbay', 'median_price', 'quarter', '2026-01-01', '2027-01-01');
+    expect(generateMetricChartImageUrl).toHaveBeenCalledWith('Torbay', 'days_to_sell', 'quarter', '2026-01-01', '2027-01-01');
+
+    const content = getInsertedContent();
+    expect(content).toContain('Chart: Number of Sales/Quarter — Torbay vs North Shore.');
+    expect(content).toContain('Chart: Median Sale Price — Torbay vs North Shore.');
+    expect(content).toContain('Chart: Median Days to Sell — Torbay vs North Shore.');
+    expect(content).toContain('Torbay Market Pulse (Q3 2026)');
+    expect(content).toContain('"medianPrice":"$1.2M"');
+    expect(content).toContain('"salesCount":"12"');
+    expect(content).toContain('"daysToSell":"50 Days"');
+    expect(content).toContain('"compareLabel":"Compared to Previous Quarter (Q2)"');
+    expect(content).not.toContain('Quarterly data is not yet available for Q4 2026.');
+    expect(content.split('https://r2.example.com/metric.svg')).toHaveLength(4);
+  });
+
   it('shows a quarterly placeholder when the report quarter has no data', async () => {
     mockDbForSuburb('Torbay', 'tor-1');
 

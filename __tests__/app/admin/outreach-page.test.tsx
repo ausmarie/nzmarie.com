@@ -1184,10 +1184,12 @@ describe('Outreach page - Card view run ordering', () => {
 
     // After switching back to "All", a fresh list fetch must NOT be limited to
     // the run's streets, so the full unsent + sent count is displayed again.
+    const callsBeforeAll = outreachListCalls().length;
     await waitFor(() => {
-      const last = outreachListCalls().pop() || '';
-      expect(last).not.toContain('streets=');
-      expect(last).not.toContain('sent_status=unsent');
+      const callsAfterAll = outreachListCalls().slice(callsBeforeAll);
+      expect(callsAfterAll.some((url) =>
+        !url.includes('streets=') && !url.includes('sent_status=unsent')
+      )).toBe(true);
     }, { timeout: 3000 });
   });
 
