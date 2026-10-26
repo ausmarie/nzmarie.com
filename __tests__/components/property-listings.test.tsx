@@ -89,6 +89,34 @@ describe("PropertyListings", () => {
     expect(within(card).getByText(/10,000m²/)).toBeTruthy();
   });
 
+  it("shows video play button on 1 Wake Road card (has videoUrl)", () => {
+    render(<PropertyListings />);
+    const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("1 Wake Road"))!;
+    const playButton = within(card).getByRole("button", { name: /Play video/i });
+    expect(playButton).toBeTruthy();
+
+    fireEvent.click(playButton);
+
+    const player = within(card).getByTitle("1 Wake Road, Coatesville, Rodney video player") as HTMLIFrameElement;
+    expect(player.src).toBe(
+      "https://www.youtube-nocookie.com/embed/TcFgLRdiLPM?autoplay=1&playsinline=1"
+    );
+    expect(within(card).queryByRole("button", { name: /Play video/i })).toBeNull();
+    expect(within(card).getByRole("button", { name: /Close video/i })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: /1 Wake Road/ })).toBeNull();
+
+    fireEvent.click(within(card).getByRole("button", { name: /Close video/i }));
+    expect(within(card).queryByTitle(/video player/i)).toBeNull();
+    expect(within(card).getByRole("button", { name: /Play video/i })).toBeTruthy();
+  });
+
+  it("does not show video play button on cards without videoUrl", () => {
+    render(<PropertyListings />);
+    const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("62 Lord Street"))!;
+    // Should not have a play button
+    expect(within(card).queryByRole("button", { name: /Play video/i })).toBeNull();
+  });
+
   it("does not render bed/bath/parking/floor counts for the bare section", () => {
     render(<PropertyListings />);
     const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("1 Wake Road"))!;

@@ -13,7 +13,7 @@ import {
   Flex,
   Badge,
 } from "@radix-ui/themes";
-import { Bed, Bath, Car, Square, Ruler, ChevronLeft, ChevronRight } from "lucide-react";
+import { Bed, Bath, Car, Square, Ruler, ChevronLeft, ChevronRight, Play } from "lucide-react";
 import PropertyDetails from "./PropertyDetails";
 
 interface PropertyZh {
@@ -59,6 +59,10 @@ function localizeProperty(property: Property, lang: Language): Property {
     openHomes: property.zh.openHomes ?? property.openHomes,
     deadline: property.zh.deadline ?? property.deadline,
   };
+}
+
+function getYouTubeVideoId(videoUrl?: string) {
+  return videoUrl?.match(/(?:youtu\.be\/|v=|shorts\/)([A-Za-z0-9_-]{6,})/)?.[1];
 }
 
 const properties: Property[] = [
@@ -339,6 +343,7 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
     null
   );
   const [cardImageIndex, setCardImageIndex] = useState<Record<number, number>>({});
+  const [playingVideoPropertyId, setPlayingVideoPropertyId] = useState<number | null>(null);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -421,28 +426,119 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
                   overflow: "hidden",
                   cursor: "pointer",
                 }}
-                onClick={() => setSelectedProperty(property)}
+                onClick={() => {
+                  setPlayingVideoPropertyId(null);
+                  setSelectedProperty(property);
+                }}
               >
                 {(() => {
                   const images = property.images && property.images.length > 0 ? property.images : [property.imageUrl];
                   const currentIndex = cardImageIndex[property.id] || 0;
                   const currentImage = images[currentIndex];
                   const hasMultipleImages = images.length > 1;
+                  const youTubeId = getYouTubeVideoId(property.videoUrl);
+                  const isPlayingVideo = playingVideoPropertyId === property.id && currentIndex === 0;
 
                   return (
                     <>
-                      <Image
-                        src={currentImage}
-                        alt={property.title}
-                        fill
-                        style={{
-                          objectFit: "cover",
-                          objectPosition: "top center",
-                          transition: "opacity 0.3s ease",
-                        }}
-                        priority={false}
-                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 50vw, 50vw"
-                      />
+                      {isPlayingVideo && youTubeId ? (
+                        <iframe
+                          src={`https://www.youtube-nocookie.com/embed/${youTubeId}?autoplay=1&playsinline=1`}
+                          title={`${property.title} video player`}
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            width: "100%",
+                            height: "100%",
+                            border: "none",
+                            zIndex: 2,
+                          }}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      ) : (
+                        <Image
+                          src={currentImage}
+                          alt={property.title}
+                          fill
+                          style={{
+                            objectFit: "cover",
+                            objectPosition: "top center",
+                            transition: "opacity 0.3s ease",
+                          }}
+                          priority={false}
+                          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 50vw, 50vw"
+                        />
+                      )}
+                      {/* Play button overlay for video */}
+                      {youTubeId && currentIndex === 0 && !isPlayingVideo && (
+                        <button
+                          type="button"
+                          aria-label={lang === "zh" ? "播放视频" : "Play video"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setPlayingVideoPropertyId(property.id);
+                          }}
+                          style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            width: "72px",
+                            height: "72px",
+                            borderRadius: "50%",
+                            border: "none",
+                            backgroundColor: "rgba(255, 255, 255, 0.95)",
+                            backdropFilter: "blur(8px)",
+                            WebkitBackdropFilter: "blur(8px)",
+                            color: "var(--blue-9)",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 0,
+                            zIndex: 4,
+                            boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+                            transition: "transform 0.2s ease, background-color 0.2s ease",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = "translate(-50%, -50%) scale(1.1)";
+                            e.currentTarget.style.backgroundColor = "white";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = "translate(-50%, -50%) scale(1)";
+                            e.currentTarget.style.backgroundColor = "rgba(255, 255, 255, 0.95)";
+                          }}
+                        >
+                          <Play size={28} style={{ marginLeft: "4px" }} />
+                        </button>
+                      )}
+                      {isPlayingVideo && (
+                        <button
+                          type="button"
+                          aria-label={lang === "zh" ? "关闭视频" : "Close video"}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPlayingVideoPropertyId(null);
+                          }}
+                          style={{
+                            position: "absolute",
+                            top: "12px",
+                            right: "12px",
+                            zIndex: 4,
+                            border: "none",
+                            borderRadius: "6px",
+                            padding: "6px 10px",
+                            backgroundColor: "rgba(0, 0, 0, 0.7)",
+                            color: "white",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {lang === "zh" ? "关闭视频" : "Close video"}
+                        </button>
+                      )}
                       {hasMultipleImages && (
                         <>
                           <button
@@ -451,6 +547,7 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
                             onClick={(e) => {
                               e.stopPropagation();
                               e.preventDefault();
+                              setPlayingVideoPropertyId(null);
                               setCardImageIndex((prev) => ({
                                 ...prev,
                                 [property.id]: (prev[property.id] || 0) > 0 ? (prev[property.id] || 0) - 1 : images.length - 1,
@@ -486,6 +583,7 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
                             onClick={(e) => {
                               e.stopPropagation();
                               e.preventDefault();
+                              setPlayingVideoPropertyId(null);
                               setCardImageIndex((prev) => ({
                                 ...prev,
                                 [property.id]: ((prev[property.id] || 0) + 1) % images.length,
