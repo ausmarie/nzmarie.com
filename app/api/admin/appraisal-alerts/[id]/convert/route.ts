@@ -3,20 +3,7 @@ import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
 import { matchPropertyIdByAddress } from '@/lib/lead-property';
-
-const TIMELINE_PRIORITY: Record<string, string> = {
-  'within-3-months': 'high',
-  '3-6-months': 'medium',
-  '6-12-months': 'low',
-  'just-exploring': 'low',
-};
-
-const TIMELINE_LABELS: Record<string, string> = {
-  'within-3-months': 'Within 3 months',
-  '3-6-months': '3–6 months',
-  '6-12-months': '6–12 months',
-  'just-exploring': 'Just exploring',
-};
+import { resolvePriority, timelineLabel } from '@/lib/priority';
 
 export async function POST(
   request: Request,
@@ -32,8 +19,8 @@ export async function POST(
   try {
     const appraisalResult = await marieDB.query(
       `SELECT id, client_name, property_address, suburb, region, city,
-              email, phone, timeline, motivation, language_preference, heard_from,
-              lead_id
+              email, phone, timeline, priority, priority_source, motivation,
+              language_preference, heard_from, lead_id
        FROM appraisal_leads
        WHERE id = $1`,
       [params.id]
@@ -49,9 +36,10 @@ export async function POST(
       return NextResponse.json({ success: true, leadId: appraisal.lead_id, alreadyConverted: true });
     }
 
-    const priority = TIMELINE_PRIORITY[appraisal.timeline] || 'medium';
-    const timelineLabel = TIMELINE_LABELS[appraisal.timeline] || appraisal.timeline || 'Not provided';
-    const summary = `Appraisal request — timeline: ${timelineLabel}`;
+    // Manual overrides win; otherwise priority is derived from the timeline so
+    // the appraisal and the converted lead always agree.
+    const priority = resolvePriority(appraisal.timeline, appraisal.priority, appraisal.priority_source);
+    const summary = `Appraisal request — timeline: ${timelineLabel(appraisal.timeline)}`;
 
     const notesParts = [
       appraisal.motivation ? `Motivation: ${appraisal.motivation}` : null,

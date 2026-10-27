@@ -30,6 +30,10 @@ export async function PATCH(
 
     if (priority) {
       updates.push(`priority = $${paramIndex}`);
+      // Only an actual change counts as a manual override. The edit modal sends
+      // the priority on every save, so an unchanged value must not flip the
+      // source and block future timeline-derived updates.
+      updates.push(`priority_source = CASE WHEN priority IS DISTINCT FROM $${paramIndex} THEN 'manual' ELSE priority_source END`);
       values.push(priority);
       paramIndex++;
     }

@@ -670,8 +670,7 @@ describe('Dashboard Stats API', () => {
     expect(within(appraisalCard).getAllByText(/Oct/).length).toBeGreaterThan(0);
   });
 
-  it('shows an empty appraisals state when there are none', async () => {
-    useSessionMock = vi.fn().mockReturnValue({
+  it('shows an empty appraisals state when there are none', async () => {    useSessionMock = vi.fn().mockReturnValue({
       data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
       status: 'authenticated',
     });
@@ -709,6 +708,85 @@ describe('Dashboard Stats API', () => {
     }, { timeout: 3000 });
 
     expect(screen.getByText('No appraisals yet')).toBeTruthy();
+  });
+
+  it('shows all recent appraisals directly under the Total Appraisals total', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    const recentAppraisals = [
+      { id: 'a1', client_name: 'Client One', email: 'one@example.com', suburb: 'Torbay' },
+      { id: 'a2', client_name: 'Client Two', email: 'two@example.com', suburb: 'Albany' },
+      { id: 'a3', client_name: 'Client Three', email: 'three@example.com', suburb: 'Oteha' },
+      { id: 'a4', client_name: 'Client Four', email: 'four@example.com', suburb: 'Sunnynook' },
+      { id: 'a5', client_name: 'Client Five', email: 'five@example.com', suburb: 'Northcross' },
+    ].map((item, index) => ({
+      ...item,
+      phone: '',
+      property_address: `${index + 1} Test Road`,
+      contact_status: 'new',
+      created_at: `2026-10-0${index + 1}T05:30:08.784Z`,
+    }));
+
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          success: true,
+          stats: {
+            newLeads: 0,
+            highPriorityLeads: 0,
+            pendingOutreach: 0,
+            todayFollowups: 0,
+            overdueFollowups: 0,
+            todayDownloads: 0,
+            totalBookings: 5,
+            recentAppraisals,
+            sentSummary: {
+              total_sent: 0,
+              suburb_count: 0,
+              suburbs: [],
+              today: { total_sent: 0, suburbs: [] },
+              quarterly: [],
+            },
+            scanStats: { total_scans: 0, total_unique: 0, campaigns: [] },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [],
+          pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+        }),
+      });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    const { container } = render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Appraisals')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    const appraisalCard = Array.from(container.querySelectorAll('div.min-h-\\[192px\\]')).find(
+      (card) => card.textContent?.includes('Total Appraisals')
+    ) as HTMLElement;
+
+    // The card must not push its content to the bottom (which created a large
+    // empty gap between the total and the recent appraisals).
+    expect(appraisalCard.className).not.toContain('justify-between');
+
+    // All recent appraisals returned by the API should be visible.
+    recentAppraisals.forEach((item) => {
+      expect(within(appraisalCard).getByText(item.client_name)).toBeTruthy();
+      expect(within(appraisalCard).getByText(item.email)).toBeTruthy();
+    });
+
+    // The recent appraisal list must come after the "Total Appraisals" label.
+    const cardText = appraisalCard.textContent ?? '';
+    expect(cardText.indexOf('Total Appraisals')).toBeLessThan(cardText.indexOf('Client One'));
   });
 
   it('renders Scan Trends chart section', async () => {

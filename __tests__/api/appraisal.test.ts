@@ -154,4 +154,21 @@ describe("POST /api/appraisal (refactored)", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
   });
+
+  it("stores a timeline-derived priority as an auto priority", async () => {
+    vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const res = await POST(makeRequest({ ...validBody, timeline: "just-exploring" }));
+    expect(res.status).toBe(200);
+
+    const insertCall = vi.mocked(query).mock.calls.find(([sql]) =>
+      String(sql).includes("INSERT INTO appraisal_leads")
+    );
+    expect(insertCall).toBeTruthy();
+    expect(String(insertCall![0])).toContain("priority_source");
+    expect(insertCall![1]).toContain("low");
+    expect(String(insertCall![0])).toContain("'auto'");
+  });
 });

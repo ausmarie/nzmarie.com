@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { SkeletonBookings } from '@/components/admin/Skeleton';
 import { REGIONS, getCitiesByRegion, getSuburbsByCity, type Region } from '@/lib/geo-data';
+import { timelineLabel, type PrioritySource } from '@/lib/priority';
 
 type BookingStatus = 'new' | 'contacted' | 'scheduled' | 'appraised' | 'converted' | 'lost';
 type BookingPriority = 'high' | 'medium' | 'low';
@@ -23,6 +24,7 @@ interface Booking {
   heardFrom?: string;
   contact_status: BookingStatus;
   priority: BookingPriority;
+  priority_source?: PrioritySource;
   created_at: string;
   next_follow_up_at?: string;
   agent_notes?: string;
@@ -660,6 +662,13 @@ export default function BookingsPage() {
                     <span className={`ml-2 inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${PRIORITY_STYLES[detailBooking.priority]}`}>
                       {fmtPriority(detailBooking.priority)}
                     </span>
+                    <span className="ml-2 text-xs text-slate-500">
+                      {detailBooking.priority_source === 'manual'
+                        ? 'Manual override'
+                        : detailBooking.timeline
+                          ? `Auto · ${timelineLabel(detailBooking.timeline)}`
+                          : 'Auto'}
+                    </span>
                   </div>
                   <div>
                     <span className="font-semibold text-slate-600">Next Follow-up:</span>
@@ -717,6 +726,9 @@ export default function BookingsPage() {
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </select>
+                  <span className="mt-1 block text-xs text-slate-400">
+                    Changing this marks the priority as a manual override.
+                  </span>
                 </label>
               </div>
 

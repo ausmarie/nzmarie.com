@@ -6,6 +6,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { isAdmin } from '@/lib/permissions';
 import { getFixedImageUrl } from '@/lib/google-maps';
+import { openGoogleMaps, buildPropertyAddress } from '@/lib/clipboard';
 import { FaBed, FaBath, FaCar, FaFilePdf, FaRulerCombined, FaMapMarkerAlt } from 'react-icons/fa';
 import { LeadEditModal } from '@/components/admin/LeadEditModal';
 import { PropertyEditModal } from '@/components/admin/PropertyEditModal';
@@ -50,6 +51,10 @@ interface Lead {
   property_url?: string | null;
   description?: string | null;
   joined_property_id?: string | null;
+  joined_property_address?: string | null;
+  joined_property_suburb?: string | null;
+  joined_property_city?: string | null;
+  joined_property_region?: string | null;
   has_rental_history?: boolean | null;
   is_currently_rented?: boolean | null;
   estimated_value_low?: number | null;
@@ -124,6 +129,23 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   appraisal: '📋',
   status_change: '🔄',
 };
+
+/**
+ * When a lead is linked to a property, the property record is the canonical
+ * source for the address. This keeps the lead card in sync after the address
+ * is edited through the "Property" modal.
+ */
+function normalizeLeadAddress(lead: Lead): Lead {
+  const propertyAddress = lead.joined_property_address?.trim();
+  if (!propertyAddress) return lead;
+  return {
+    ...lead,
+    property_address: propertyAddress,
+    suburb: lead.joined_property_suburb ?? lead.suburb,
+    city: lead.joined_property_city ?? lead.city,
+    region: lead.joined_property_region ?? lead.region,
+  };
+}
 
 function buildLeadAiData(lead: Lead): string {
   const documents = Array.isArray(lead.documents) ? lead.documents : [];
@@ -373,7 +395,7 @@ export default function LeadsPage() {
       const res = await fetch(`/api/admin/leads?${params}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const json = await res.json();
-      setLeads(json.data || []);
+      setLeads((json.data || []).map(normalizeLeadAddress));
       setPagination(json.pagination || null);
     } catch {
       notify('error', 'Failed to load leads');
@@ -399,7 +421,7 @@ export default function LeadsPage() {
       const res = await fetch(`/api/admin/leads?${params}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const json = await res.json();
-      const newData = json.data || [];
+      const newData = (json.data || []).map(normalizeLeadAddress);
       if (newData.length === 0) {
         hasMoreRef.current = false;
         setHasMore(false);
@@ -612,9 +634,10 @@ export default function LeadsPage() {
     if (!selectedLead || !selectedLead.joined_property_id) return;
     setPropertyEditLoading(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload: Record<string, any> = {};
-      
+      const payload: Record<string, unknown> = {};
+
+      // The modal uses the lead-facing field names; the properties API expects
+      // the underlying properties-table column names.
       const fieldMappings: Record<string, string> = {
         address: 'address',
         suburb: 'suburb',
@@ -623,43 +646,63 @@ export default function LeadsPage() {
         postcode: 'postcode',
         bedrooms: 'bedrooms',
         bathrooms: 'bathrooms',
-        car_spaces: 'garages',
-        year_built: 'build_year',
-        floor_size: 'floor_area',
+        car_spaces: 'car_spaces',
+        year_built: 'year_built',
+        floor_size: 'floor_size',
         land_area: 'land_area',
         last_sold_price: 'last_sold_price',
         last_sold_date: 'last_sold_date',
-        capital_value: 'rv',
+        capital_value: 'capital_value',
         property_url: 'property_url',
-        cover_image_url: 'image_url',
+        cover_image_url: 'cover_image_url',
         description: 'description',
       };
 
-      Object.entries(fieldMappings).forEach(([editKey, dbKey]) => {
-        if (propertyEditData[editKey as keyof typeof propertyEditData] !== undefined) {
-          const value = propertyEditData[editKey as keyof typeof propertyEditData];
-          payload[dbKey] = value === '' ? null : value;
+      Object.entries(fieldMappings).forEach(([editKey, apiKey]) => {
+        const value = propertyEditData[editKey as keyof typeof propertyEditData];
+        if (value !== undefined) {
+          payload[apiKey] = value === '' ? null : value;
         }
       });
 
       const res = await fetch(`/api/admin/properties/${selectedLead.joined_property_id}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      
-      if (!res.ok) throw new Error('Failed to update property');
-      
-      const updated = await res.json();
-      setLeads(prev => prev.map(l => 
-        l.joined_property_id === selectedLead.joined_property_id 
-          ? { ...l, ...updated.data }
-          : l
-      ));
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'Failed to update property');
+      }
+
+      const updatedProperty = (json.property ?? null) as Record<string, unknown> | null;
+      if (updatedProperty) {
+        const patch: Partial<Lead> = {
+          property_address: (updatedProperty.address as string | null) ?? selectedLead.property_address,
+          suburb: (updatedProperty.suburb as string | null) ?? selectedLead.suburb,
+          city: (updatedProperty.city as string | null) ?? selectedLead.city,
+          region: (updatedProperty.region as string | null) ?? selectedLead.region,
+          bedrooms: updatedProperty.bedrooms as number | null,
+          bathrooms: updatedProperty.bathrooms as number | null,
+          garages: updatedProperty.garages as number | null,
+          build_year: updatedProperty.build_year as number | null,
+          floor_area: updatedProperty.floor_area as string | null,
+          land_area: updatedProperty.land_area as Lead['land_area'],
+          last_sold_price: updatedProperty.last_sold_price as number | null,
+          last_sold_date: updatedProperty.last_sold_date as string | null,
+          rv: updatedProperty.rv as number | null,
+          property_url: updatedProperty.property_url as string | null,
+          image_url: updatedProperty.image_url as string | null,
+          description: updatedProperty.description as string | null,
+        };
+        updateLeadRecord(selectedLead.id, (current) => ({ ...current, ...patch }));
+      }
+
       setPropertyEditOpen(false);
       notify('success', 'Property updated');
-    } catch {
-      notify('error', 'Failed to update property');
+    } catch (error) {
+      notify('error', error instanceof Error ? error.message : 'Failed to update property');
     } finally {
       setPropertyEditLoading(false);
     }
@@ -1275,18 +1318,18 @@ export default function LeadsPage() {
                     {/* Body */}
                     <div style={{ padding: "24px", flex: 1, display: "flex", flexDirection: "column" }}>
                       {/* Address + Actions */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px", gap: "12px" }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", marginBottom: "12px", gap: "10px" }}>
                         <h3 style={{
                           margin: 0,
                           fontSize: "1.1rem",
                           fontWeight: "700",
                           color: "#2D3748",
                           lineHeight: "1.3",
-                          flex: 1,
+                          width: "100%",
                         }}>
                           {lead.property_address}
                         </h3>
-                        <div style={{ display: "flex", gap: "8px", flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-start" }}>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1384,6 +1427,45 @@ export default function LeadsPage() {
                               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0fdf4'; e.currentTarget.style.borderColor = '#bbf7d0'; }}
                             >
                               Property
+                            </button>
+                          )}
+                          {lead.joined_property_id && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                const fullAddress = buildPropertyAddress(
+                                  lead.joined_property_address ?? lead.property_address,
+                                  lead.joined_property_suburb ?? lead.suburb,
+                                  lead.joined_property_city ?? lead.city,
+                                  lead.joined_property_region ?? lead.region,
+                                  null
+                                );
+                                openGoogleMaps(fullAddress || lead.property_address);
+                              }}
+                              aria-label={`Open ${lead.property_address} in Google Maps`}
+                              style={{
+                                fontSize: '0.85rem',
+                                color: '#2563eb',
+                                fontWeight: '600',
+                                padding: '6px 14px',
+                                borderRadius: '8px',
+                                background: '#eff6ff',
+                                border: '1px solid #bfdbfe',
+                                transition: 'all 0.2s',
+                                whiteSpace: 'nowrap',
+                                cursor: 'pointer',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.background = '#dbeafe';
+                                e.currentTarget.style.borderColor = '#93c5fd';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.background = '#eff6ff';
+                                e.currentTarget.style.borderColor = '#bfdbfe';
+                              }}
+                            >
+                              Street
                             </button>
                           )}
                         </div>

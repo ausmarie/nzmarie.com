@@ -27,6 +27,10 @@ export async function GET(request: Request) {
     let dataQuery = `
       SELECT l.*,
         p.id as joined_property_id,
+        p.address as joined_property_address,
+        p.suburb as joined_property_suburb,
+        p.city as joined_property_city,
+        p.region as joined_property_region,
         p.cover_image_url as image_url,
         p.bedrooms,
         p.bathrooms,

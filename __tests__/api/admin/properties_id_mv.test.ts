@@ -21,12 +21,20 @@ vi.mock('@/lib/permissions', () => ({
   isAdmin: vi.fn(() => true),
 }));
 
-import { PATCH } from '../../../app/api/admin/properties/[id]/route';
+import { PATCH, PUT } from '../../../app/api/admin/properties/[id]/route';
 import { auth } from '@/lib/auth';
 
 function patchRequest(id: string, body: Record<string, unknown>) {
   return new Request(`http://localhost/api/admin/properties/${id}`, {
     method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function putRequest(id: string, body: Record<string, unknown>) {
+  return new Request(`http://localhost/api/admin/properties/${id}`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -123,5 +131,24 @@ describe('PATCH /api/admin/properties/[id] — MV refresh on no_junk_mail', () =
 
     expect(response.status).toBe(401);
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it('supports PUT as a backwards-compatible alias for PATCH', async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: 'p1', address: '4 Carnmore Place', suburb: 'Torbay' }],
+    });
+
+    const response = await PUT(putRequest('p1', { address: '4 Carnmore Place' }), {
+      params: Promise.resolve({ id: 'p1' }),
+    });
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.success).toBe(true);
+    expect(data.property.address).toBe('4 Carnmore Place');
+
+    const updateCall = mockQuery.mock.calls[0];
+    expect(updateCall[0]).toContain('UPDATE properties');
+    expect(updateCall[1]).toContain('4 Carnmore Place');
   });
 });

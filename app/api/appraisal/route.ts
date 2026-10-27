@@ -4,6 +4,7 @@ import { hashEmail, isValidEmail } from "../../../lib/hash";
 import { sendAppraisalNotification } from "../../../lib/email";
 import { updateAppraisalTracking } from "../../../lib/tracking";
 import { findLocationBySuburb } from "../../../lib/geo-data";
+import { priorityFromTimeline } from "../../../lib/priority";
 
 // Cache whether region/city columns exist to avoid checking every request
 let hasLocationColumns: boolean | null = null;
@@ -127,15 +128,16 @@ export async function POST(req: Request) {
     const useAlertColumn = await checkAlertColumn();
 
     const alertColumnSql = useAlertColumn ? ', alert_status' : '';
-    const alertValueSql = useAlertColumn ? ', $13' : '';
+    const alertValueSql = useAlertColumn ? ', $14' : '';
+    const priority = priorityFromTimeline(timeline);
 
     if (useLocationColumns) {
       // Full insert with region and city
       await query(
         `INSERT INTO appraisal_leads
          (client_name, property_address, region, city, suburb, email, email_hash, phone,
-          timeline, motivation, language_preference, heard_from${alertColumnSql})
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12${alertValueSql})`,
+          timeline, motivation, language_preference, heard_from, priority, priority_source${alertColumnSql})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'auto'${alertValueSql})`,
         [
           name.trim(),
           address.trim(),
@@ -149,6 +151,7 @@ export async function POST(req: Request) {
           motivation || null,
           language || null,
           heard_from || null,
+          priority,
           ...(useAlertColumn ? ['pending'] : []),
         ]
       );
@@ -157,8 +160,8 @@ export async function POST(req: Request) {
       await query(
         `INSERT INTO appraisal_leads
          (client_name, property_address, suburb, email, email_hash, phone,
-          timeline, motivation, language_preference, heard_from${alertColumnSql})
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10${useAlertColumn ? ', $11' : ''})`,
+          timeline, motivation, language_preference, heard_from, priority, priority_source${alertColumnSql})
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'auto'${useAlertColumn ? ', $12' : ''})`,
         [
           name.trim(),
           address.trim(),
@@ -170,6 +173,7 @@ export async function POST(req: Request) {
           motivation || null,
           language || null,
           heard_from || null,
+          priority,
           ...(useAlertColumn ? ['pending'] : []),
         ]
       );

@@ -5,6 +5,7 @@ import { isAdmin } from '@/lib/permissions';
 import { findLocationBySuburb } from '@/lib/geo-data';
 import { sql, and, or, eq, ilike, desc, count } from 'drizzle-orm';
 import { appraisalLeads } from '@/database/schema';
+import { resolvePriority } from '@/lib/priority';
 
 let hasLocationColumns: boolean | null = null;
 
@@ -98,6 +99,7 @@ export async function GET(request: Request) {
         city: appraisalLeads.city,
         contact_status: appraisalLeads.contact_status,
         priority: appraisalLeads.priority,
+        priority_source: appraisalLeads.priority_source,
         created_at: appraisalLeads.created_at,
         next_follow_up_at: appraisalLeads.follow_up_at,
         agent_notes: appraisalLeads.agent_notes,
@@ -120,6 +122,10 @@ export async function GET(request: Request) {
           : null;
       return {
         ...row,
+        // Auto priorities are always shown from the timeline, so the Appraisals
+        // list cannot drift from the value used when converting to a Lead.
+        priority: resolvePriority(row.timeline, row.priority, row.priority_source),
+        priority_source: row.priority_source ?? 'auto',
         region: useLocationColumns
           ? (hasMeaningfulLocationValue(row.region) ? row.region : fallbackLocation?.region || null)
           : null,

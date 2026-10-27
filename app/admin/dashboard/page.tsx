@@ -355,7 +355,7 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
+        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col min-h-[192px]">
           <div>
             <div className="flex items-center justify-between mb-4">
               <span className="text-2xl">📋</span>
@@ -370,7 +370,7 @@ export default function AdminDashboardPage() {
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
             {stats?.recentAppraisals && stats.recentAppraisals.length > 0 ? (
-              stats.recentAppraisals.slice(0, 3).map((item) => (
+              stats.recentAppraisals.map((item) => (
                 <div key={item.id} className="flex flex-col gap-0.5">
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-xs font-semibold text-slate-700 truncate">{item.client_name}</span>

@@ -21,6 +21,7 @@ export const appraisalLeads = pgTable('appraisal_leads', {
   suburb: varchar('suburb', { length: 100 }),
   property_type: varchar('property_type', { length: 50 }),
   priority: varchar('priority', { length: 20 }).default('medium'),
+  priority_source: varchar('priority_source', { length: 20 }),
   contact_status: varchar('contact_status', { length: 50 }).default('not_contacted'),
   last_contact_at: timestamp('last_contact_at', { withTimezone: true }),
   region: varchar('region', { length: 100 }),

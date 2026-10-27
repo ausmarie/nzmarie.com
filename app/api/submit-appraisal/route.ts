@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { marieDB } from "@/lib/db";
 import { findLocationBySuburb } from "@/lib/geo-data";
+import { hashEmail } from "@/lib/hash";
+import { priorityFromTimeline } from "@/lib/priority";
 
 export async function POST(request: Request) {
   let body: Record<string, unknown>;
@@ -26,6 +28,7 @@ export async function POST(request: Request) {
       utmSource,
       region,
       city,
+      timeline,
     } = body as Record<string, string | undefined>;
 
     const propertyAddress =
@@ -74,22 +77,26 @@ export async function POST(request: Request) {
       );
     }
 
-    // Insert into appraisal_leads table
+    // Insert into appraisal_leads table. Priority comes from the timeline so
+    // this legacy funnel stays consistent with /api/appraisal.
     const result = await marieDB.query(
-      `INSERT INTO appraisal_leads 
-       (name, email, phone, property_address, suburb, region, city, message, source, contact_status, priority)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'new', 'medium')
+      `INSERT INTO appraisal_leads
+       (client_name, email, email_hash, phone, property_address, suburb, region, city,
+        source_page, agent_notes, contact_status, priority, priority_source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new', $11, 'auto')
        RETURNING *`,
       [
         name.trim(),
         email.trim().toLowerCase(),
-        phone?.trim() || null,
+        hashEmail(email),
+        phone?.trim() || '',
         propertyAddress,
         suburbValue,
         resolvedRegion,
         resolvedCity,
-        typeof message === "string" ? message.trim() : null,
         sourceValue,
+        typeof message === "string" ? message.trim() : null,
+        priorityFromTimeline(timeline),
       ]
     );
 

@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS appraisal_leads (
   
   -- Lead Management
   priority VARCHAR(20) DEFAULT 'medium',  -- 'high', 'medium', 'low'
+  priority_source VARCHAR(20),  -- NULL/'auto' = from timeline, 'manual' = admin override
   contact_status VARCHAR(50) DEFAULT 'not_contacted',  -- 'not_contacted', 'contacted', 'scheduled', 'appraised', 'converted', 'lost'
   
   -- Follow-up Tracking

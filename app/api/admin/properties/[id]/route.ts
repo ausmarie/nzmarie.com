@@ -8,12 +8,28 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  return updateProperty(request, await params);
+}
+
+// Backwards-compatible alias: older admin clients (e.g. the leads page before
+// it was switched to PATCH) still send PUT for property updates.
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  return updateProperty(request, await params);
+}
+
+async function updateProperty(
+  request: Request,
+  params: { id: string }
+) {
   const session = await auth();
   if (!session?.user?.email || !isAdmin(session.user.email)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { id } = await params;
+  const { id } = params;
   const body = await request.json();
 
   const allowedColumns = [

@@ -6,6 +6,7 @@ import { SkeletonBookings, SkeletonDownloads } from '@/components/admin/Skeleton
 import DispatchStatsPanel from '@/components/admin/DispatchStatsPanel';
 import { REGIONS, getCitiesByRegion, type Region } from '@/lib/geo-data';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import { timelineLabel, type PrioritySource } from '@/lib/priority';
 
 type BookingStatus = 'new' | 'contacted' | 'scheduled' | 'appraised' | 'converted' | 'lost';
 type BookingPriority = 'high' | 'medium' | 'low';
@@ -25,6 +26,7 @@ interface Booking {
   heardFrom?: string;
   contact_status: BookingStatus;
   priority: BookingPriority;
+  priority_source?: PrioritySource;
   created_at: string;
   next_follow_up_at?: string;
   agent_notes?: string;
@@ -479,6 +481,13 @@ function AppraisalsTab({ initialSearch = '' }: { initialSearch?: string }) {
                     <span className={`ml-2 inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${PRIORITY_STYLES[detailBooking.priority]}`}>
                       {fmtPriority(detailBooking.priority)}
                     </span>
+                    <span className="ml-2 text-xs text-slate-500">
+                      {detailBooking.priority_source === 'manual'
+                        ? 'Manual override'
+                        : detailBooking.timeline
+                          ? `Auto · ${timelineLabel(detailBooking.timeline)}`
+                          : 'Auto'}
+                    </span>
                   </div>
                   <div>
                     <span className="font-semibold text-slate-600">Next Follow-up:</span>
@@ -534,6 +543,9 @@ function AppraisalsTab({ initialSearch = '' }: { initialSearch?: string }) {
                       <option key={value} value={value}>{label}</option>
                     ))}
                   </select>
+                  <span className="mt-1 block text-xs text-slate-400">
+                    Changing this marks the priority as a manual override.
+                  </span>
                 </label>
               </div>
 
@@ -777,12 +789,12 @@ function DownloadsTab() {
 
 export default function ActivityPage() {
   const { status } = useSession();
-  const [activeTab, setActiveTab] = useState<'dispatch' | 'appraisals' | 'downloads'>('dispatch');
+  const [activeTab, setActiveTab] = useState<'dispatch' | 'appraisals' | 'downloads'>('appraisals');
   const [initialSearch, setInitialSearch] = useState('');
 
   // Track which tabs have ever been activated so we only mount them once (lazy)
   // and keep them mounted thereafter to avoid re-fetching on tab re-visits.
-  const [mountedTabs, setMountedTabs] = useState<Set<string>>(new Set(['dispatch']));
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(new Set(['appraisals']));
 
   const activateTab = (tab: 'dispatch' | 'appraisals' | 'downloads') => {
     setActiveTab(tab);
@@ -810,21 +822,11 @@ export default function ActivityPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Activity</h1>
-        <p className="text-gray-600 mt-1">Campaign dispatch stats, appraisals, and report downloads</p>
+        <p className="text-gray-600 mt-1">Appraisals, campaign dispatch stats, and report downloads</p>
       </div>
 
       <div className="border-b border-slate-200">
         <nav className="flex gap-8">
-          <button
-            onClick={() => activateTab('dispatch')}
-            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'dispatch'
-                ? 'text-indigo-600 border-indigo-600'
-                : 'text-slate-500 border-transparent hover:text-slate-700'
-            }`}
-          >
-            Dispatch Stats
-          </button>
           <button
             onClick={() => activateTab('appraisals')}
             className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
@@ -834,6 +836,16 @@ export default function ActivityPage() {
             }`}
           >
             Appraisals
+          </button>
+          <button
+            onClick={() => activateTab('dispatch')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'dispatch'
+                ? 'text-indigo-600 border-indigo-600'
+                : 'text-slate-500 border-transparent hover:text-slate-700'
+            }`}
+          >
+            Dispatch Stats
           </button>
           <button
             onClick={() => activateTab('downloads')}

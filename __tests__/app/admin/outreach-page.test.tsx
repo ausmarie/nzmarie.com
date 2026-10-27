@@ -247,15 +247,31 @@ describe('Outreach page', () => {
     const pendingTab = await screen.findByRole('button', { name: /Pending/i });
     fireEvent.click(pendingTab);
 
+    // Wait for both cards to be on screen before touching the checkboxes: the
+    // pending response can land after the first card renders, and a partially
+    // rendered list makes the checkbox indexes ambiguous.
+    expect(await screen.findByText('15 Marine Parade')).toBeTruthy();
+    expect(await screen.findByText('22 Beach Road')).toBeTruthy();
+
     const cardCheckboxes = await screen.findAllByRole('checkbox');
-    expect(cardCheckboxes.length).toBeGreaterThanOrEqual(2);
-    fireEvent.click(cardCheckboxes[0]);
-    fireEvent.click(cardCheckboxes[1]);
+    expect(cardCheckboxes).toHaveLength(2);
+    cardCheckboxes.forEach((checkbox) => fireEvent.click(checkbox));
+
+    // Confirm the selection actually committed before opening the modal, which
+    // reads selected.size at click time.
+    await waitFor(() => {
+      cardCheckboxes.forEach((checkbox) => {
+        expect((checkbox as HTMLInputElement).checked).toBe(true);
+      });
+      expect(screen.getByText('2 addresses selected')).toBeTruthy();
+    });
 
     const sendButtons = await screen.findAllByRole('button', { name: /Send Report/i });
     fireEvent.click(sendButtons[0]);
 
-    expect(await screen.findByText(/Selected 2 target addresses/i)).toBeTruthy();
+    expect(
+      await screen.findByText(/Selected 2 target addresses/i, {}, { timeout: 5000 })
+    ).toBeTruthy();
   });
 });
 
@@ -2584,6 +2600,7 @@ describe('Outreach page - Return to Pending actions', () => {
   it('updates the Sent UI immediately and reconciles after the Return to Pending request completes', async () => {
     let returned = false;
     let resolveStatusRequest: ((response: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
+    let fetchCount = 0;
     (global.fetch as any) = vi.fn((url: RequestInfo, init?: RequestInit) => {
       const path = String(url || '');
       if (path.includes('/api/admin/pdf/reports')) {
@@ -2593,6 +2610,7 @@ describe('Outreach page - Return to Pending actions', () => {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
       }
       if (path.includes('/api/admin/outreach?')) {
+        fetchCount++;
         const isSent = path.includes('status=sent');
         const sentItems = [
           { id: 'addr-1', property_address: '1 Sent Main St', suburb: 'Oteha', status: 'sent', created_at: '2024-01-01' },
@@ -2638,6 +2656,9 @@ describe('Outreach page - Return to Pending actions', () => {
     await act(async () => {
       resolveStatusRequest?.({ ok: true, json: async () => ({ success: true }) });
     });
+
+    // Wait for the reconciliation refetch to complete (cache cleared + fetchItems)
+    await waitFor(() => expect(fetchCount).toBeGreaterThanOrEqual(2), { timeout: 3000 });
     await waitFor(() => expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy());
     expect(screen.queryByText('1 Sent Main St')).toBeNull();
   });
