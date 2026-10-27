@@ -11,6 +11,7 @@ import { FaBed, FaBath, FaCar, FaFilePdf, FaRulerCombined, FaMapMarkerAlt } from
 import { LeadEditModal } from '@/components/admin/LeadEditModal';
 import { PropertyEditModal } from '@/components/admin/PropertyEditModal';
 import { PropertyHistoryView } from '@/components/admin/PropertyHistoryView';
+import { SendHistoryTable } from '@/components/admin/SendHistoryTable';
 import LeadPdfSection, { type LeadPdfDocument } from '@/components/admin/LeadPdfSection';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import LeadReportsView from './components/LeadReportsView';
@@ -89,6 +90,21 @@ interface LeadEvent {
   created_at: string;
 }
 
+interface SendHistoryLog {
+  log_id: string;
+  outreach_property_id: string;
+  suburb_report_id?: string | null;
+  report_title: string;
+  campaign_key: string;
+  suburb: string;
+  sent_at: string;
+  sent_by: string;
+  notes?: string | null;
+  pdf_file_url?: string | null;
+  pdf_file_name?: string | null;
+  scan_count: number;
+}
+
 interface PaginationMeta {
   page: number;
   limit: number;
@@ -137,13 +153,15 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
  */
 function normalizeLeadAddress(lead: Lead): Lead {
   const propertyAddress = lead.joined_property_address?.trim();
-  if (!propertyAddress) return lead;
+  const displayAddress = propertyAddress
+    || (lead.source === 'appraisal' ? lead.property_address.split(',')[0].trim() : '');
+  if (!displayAddress) return lead;
   return {
     ...lead,
-    property_address: propertyAddress,
-    suburb: lead.joined_property_suburb ?? lead.suburb,
-    city: lead.joined_property_city ?? lead.city,
-    region: lead.joined_property_region ?? lead.region,
+    property_address: displayAddress,
+    suburb: propertyAddress ? (lead.joined_property_suburb ?? lead.suburb) : lead.suburb,
+    city: propertyAddress ? (lead.joined_property_city ?? lead.city) : lead.city,
+    region: propertyAddress ? (lead.joined_property_region ?? lead.region) : lead.region,
   };
 }
 
@@ -254,6 +272,10 @@ export default function LeadsPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [events, setEvents] = useState<LeadEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
+  const [sendHistory, setSendHistory] = useState<SendHistoryLog[]>([]);
+  const [sendHistoryLoading, setSendHistoryLoading] = useState(false);
+  // Pre-fetched send history keyed by lead id for instant modal display
+  const sendHistoryCacheRef = useRef<Record<string, SendHistoryLog[]>>({});
   const [detailOpen, setDetailOpen] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -380,6 +402,33 @@ export default function LeadsPage() {
     }
   }, [notify, updateLeadRecord]);
 
+  // Pre-fetch send history for a batch of leads and store in cache
+  const preFetchSendHistory = useCallback(async (leadsToFetch: Lead[]) => {
+    const idsToFetch = leadsToFetch
+      .filter((lead) => !sendHistoryCacheRef.current[lead.id])
+      .map((lead) => lead.id);
+
+    if (idsToFetch.length === 0) return;
+
+    // Fetch in parallel (limit concurrency to avoid too many simultaneous requests)
+    const batchSize = 5;
+    for (let i = 0; i < idsToFetch.length; i += batchSize) {
+      const batch = idsToFetch.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async (id) => {
+          try {
+            const res = await fetch(`/api/admin/leads/${id}/send-history`);
+            const json = await res.json();
+            const history = Array.isArray(json.history) ? json.history : [];
+            sendHistoryCacheRef.current = { ...sendHistoryCacheRef.current, [id]: history };
+          } catch {
+            // Silently fail - will fallback to on-demand fetch when modal opens
+          }
+        })
+      );
+    }
+  }, []);
+
   const fetchLeads = useCallback(async () => {
     setLoading(true);
     try {
@@ -395,14 +444,18 @@ export default function LeadsPage() {
       const res = await fetch(`/api/admin/leads?${params}`);
       if (!res.ok) throw new Error('Failed to fetch');
       const json = await res.json();
-      setLeads((json.data || []).map(normalizeLeadAddress));
+      const normalizedLeads = (json.data || []).map(normalizeLeadAddress);
+      setLeads(normalizedLeads);
       setPagination(json.pagination || null);
+
+      // Pre-fetch send history for all leads in this batch
+      preFetchSendHistory(normalizedLeads);
     } catch {
       notify('error', 'Failed to load leads');
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, priorityFilter, sourceFilter, suburbFilter, search, page, notify]);
+  }, [statusFilter, priorityFilter, sourceFilter, suburbFilter, search, page, notify, preFetchSendHistory]);
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMoreRef.current) return;
@@ -429,6 +482,9 @@ export default function LeadsPage() {
         setAllLeads(prev => [...prev, ...newData]);
         hasMoreRef.current = newData.length >= 50;
         setHasMore(newData.length >= 50);
+
+        // Pre-fetch send history for newly loaded leads
+        preFetchSendHistory(newData);
       }
     } catch {
       notify('error', 'Failed to load more leads');
@@ -436,7 +492,7 @@ export default function LeadsPage() {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [statusFilter, priorityFilter, sourceFilter, suburbFilter, search, allLeads.length, notify]);
+  }, [statusFilter, priorityFilter, sourceFilter, suburbFilter, search, allLeads.length, notify, preFetchSendHistory]);
 
   useEffect(() => {
     if (!isClassic) {
@@ -570,28 +626,45 @@ export default function LeadsPage() {
     }
   }, []);
 
-  if (!session?.user) {
-    return <div className="flex items-center justify-center h-64 text-slate-500">Loading...</div>;
-  }
-  if (!isAdmin(session.user.email)) {
-    router.push('/');
-    return null;
-  }
-
   const openDetail = async (lead: Lead) => {
     setSelectedLead(lead);
     setDetailOpen(true);
     setEventsLoading(true);
+
+    // Check if we have pre-fetched send history
+    const cachedHistory = sendHistoryCacheRef.current[lead.id];
+    if (cachedHistory !== undefined) {
+      // Use cached data immediately - no loading state needed
+      setSendHistory(cachedHistory);
+      setSendHistoryLoading(false);
+    } else {
+      // Fallback: fetch on demand
+      setSendHistoryLoading(true);
+    }
+
     try {
-      const res = await fetch(`/api/admin/leads/${lead.id}/events`);
-      const json = await res.json();
-      const loadedEvents = Array.isArray(json.data) ? json.data : [];
+      const eventsRes = await fetch(`/api/admin/leads/${lead.id}/events`);
+      const eventsJson = await eventsRes.json();
+      const loadedEvents = Array.isArray(eventsJson.data) ? eventsJson.data : [];
       setEvents(loadedEvents);
       updateLeadRecord(lead.id, (current) => ({ ...current, events: loadedEvents }));
+
+      // Only fetch send history if not already cached
+      if (cachedHistory === undefined) {
+        const historyRes = await fetch(`/api/admin/leads/${lead.id}/send-history`);
+        const historyJson = await historyRes.json();
+        const loadedHistory = Array.isArray(historyJson.history) ? historyJson.history : [];
+        setSendHistory(loadedHistory);
+        sendHistoryCacheRef.current = { ...sendHistoryCacheRef.current, [lead.id]: loadedHistory };
+      }
     } catch {
       setEvents([]);
+      if (cachedHistory === undefined) {
+        setSendHistory([]);
+      }
     } finally {
       setEventsLoading(false);
+      setSendHistoryLoading(false);
     }
   };
 
@@ -1893,6 +1966,17 @@ export default function LeadsPage() {
                   <PropertyHistoryView raw={selectedLead.property_history.toString()} />
                 </div>
               )}
+
+              {/* Sent History */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium text-slate-500">Sent history</p>
+                  {sendHistoryLoading && (
+                    <div className="text-xs text-slate-400 animate-pulse">Loading...</div>
+                  )}
+                </div>
+                <SendHistoryTable history={sendHistory} />
+              </div>
 
               {/* Appraisal PDFs */}
               <div data-testid="lead-pdf-detail">

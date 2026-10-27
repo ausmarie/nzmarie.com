@@ -42,6 +42,30 @@ describe('comparable summary cards', () => {
     expect(html.match(/border-top:1px solid #f1f5f9/g)).toHaveLength(2);
   });
 
+  it('renders the Median marker as plain text instead of a pill', () => {
+    const html = buildComparableSummaryHTML(props);
+
+    // No pill chrome: no rounded badge container around the marker.
+    expect(html).not.toContain('border-radius:999px');
+    expect(html).not.toMatch(/background:#f8fafc;border:1px solid #e2e8f0;border-radius:999px/);
+
+    // The marker is still present and editable in both cards.
+    expect(html.match(/data-prop="saleBadge"/g)).toHaveLength(1);
+    expect(html.match(/data-prop="cvBadge"/g)).toHaveLength(1);
+    expect(html.match(/>Median</g)).toHaveLength(2);
+
+    // Plain text marker: aligned by line-height only, so copying cannot shift it.
+    const markers = html.match(/<span style="[^"]*letter-spacing:\.04em[^"]*">/g) ?? [];
+    expect(markers).toHaveLength(2);
+    for (const marker of markers) {
+      expect(marker).toContain('line-height:1.4');
+      expect(marker).not.toContain('border-radius');
+      // No box height (only line-height) and no pill background.
+      expect(marker).not.toMatch(/[^-]height:/);
+      expect(marker).not.toContain('background');
+    }
+  });
+
   it('escapes editable text', () => {
     const html = buildComparableSummaryHTML({ ...props, saleTitle: 'Sale <Price> & Value' });
 

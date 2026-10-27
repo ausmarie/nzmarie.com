@@ -73,7 +73,7 @@ export function buildComparableSummaryHTML(props: ComparableSummaryProps): strin
         <div style="padding:20px 22px 18px;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
             <span style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:.02em;line-height:1.4;">${edit(titleProp)}</span>
-            <span style="font-size:10px;font-weight:600;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:999px;padding:2px 8px;white-space:nowrap;flex:0 0 auto;">${edit(badgeProp)}</span>
+            <span style="font-size:10px;font-weight:600;color:#94a3b8;letter-spacing:.04em;line-height:1.4;white-space:nowrap;flex:0 0 auto;">${edit(badgeProp)}</span>
           </div>
           <div style="font-size:30px;font-weight:800;color:#0f172a;line-height:1.15;letter-spacing:-.02em;font-variant-numeric:tabular-nums;">${edit(medianProp)}</div>
           <div style="font-size:12px;color:#64748b;margin-top:5px;line-height:1.45;">${edit(medianLabelProp)}</div>

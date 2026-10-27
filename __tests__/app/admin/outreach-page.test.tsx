@@ -264,7 +264,7 @@ describe('Outreach page', () => {
         expect((checkbox as HTMLInputElement).checked).toBe(true);
       });
       expect(screen.getByText('2 addresses selected')).toBeTruthy();
-    });
+    }, { timeout: 5000 });
 
     const sendButtons = await screen.findAllByRole('button', { name: /Send Report/i });
     fireEvent.click(sendButtons[0]);

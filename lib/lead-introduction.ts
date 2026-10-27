@@ -241,6 +241,80 @@ function buildPropertyInfoRows(property: LeadIntroductionProperty): { cells: str
   return rows;
 }
 
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+export function buildLeadIntroductionComparableProps(property: LeadIntroductionProperty): Record<string, string> | null {
+  const historyPrices = parseLeadIntroductionHistory(property.property_history)
+    .map((entry) => entry.price.match(/[0-9][0-9,]*(?:\.[0-9]+)?/)?.[0])
+    .map((value) => (value ? Number(value.replace(/,/g, '')) : NaN))
+    .filter((value) => Number.isFinite(value));
+
+  const saleValues = historyPrices.length > 0
+    ? historyPrices
+    : [property.last_sold_price].filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  const saleMedian = saleValues.length > 0
+    ? formatLeadIntroductionMoney(median(saleValues))
+    : '';
+  const saleRange = saleValues.length > 0
+    ? `${formatLeadIntroductionMoney(Math.min(...saleValues))} – ${formatLeadIntroductionMoney(Math.max(...saleValues))}`
+    : '';
+
+  const capitalValue = typeof property.capital_value === 'number'
+    ? property.capital_value
+    : Number(property.capital_value);
+  const estimateLow = typeof property.estimated_value_low === 'number'
+    ? property.estimated_value_low
+    : Number(property.estimated_value_low);
+  const estimateHigh = typeof property.estimated_value_high === 'number'
+    ? property.estimated_value_high
+    : Number(property.estimated_value_high);
+  const cvValue = Number.isFinite(capitalValue) ? capitalValue : NaN;
+  const lowValue = Number.isFinite(estimateLow) ? estimateLow : cvValue;
+  const highValue = Number.isFinite(estimateHigh) ? estimateHigh : cvValue;
+  const cvRange = Number.isFinite(lowValue) && Number.isFinite(highValue)
+    ? `${formatLeadIntroductionMoney(lowValue)} – ${formatLeadIntroductionMoney(highValue)}`
+    : '';
+  const cvMean = Number.isFinite(lowValue) && Number.isFinite(highValue)
+    ? formatLeadIntroductionMoney((lowValue + highValue) / 2)
+    : '';
+
+  const changes: Record<string, string> = {};
+  if (saleMedian) changes.saleMedian = saleMedian;
+  if (saleRange) changes.saleRange = saleRange;
+  if (saleValues.length > 0) changes.saleMean = formatLeadIntroductionMoney(saleValues.reduce((sum, value) => sum + value, 0) / saleValues.length);
+  if (Number.isFinite(cvValue)) changes.cvMedian = formatLeadIntroductionMoney(cvValue);
+  if (cvRange) changes.cvRange = cvRange;
+  if (cvMean) changes.cvMean = cvMean;
+
+  return Object.keys(changes).length > 0 ? changes : null;
+}
+
+export function applyLeadIntroductionComparableProps(content: unknown, changes: Record<string, string>): unknown[] | null {
+  if (!Array.isArray(content)) return null;
+  let changed = false;
+  const next = content.map((block) => {
+    if (!block || typeof block !== 'object' || (block as { type?: string }).type !== 'comparableSummary') return block;
+    const row = block as { props?: Record<string, string> };
+    const props = row.props;
+    if (!props) return block;
+    const updated = { ...props };
+    for (const [key, value] of Object.entries(changes)) {
+      if (updated[key] === '\u2014' || updated[key] === '' || updated[key] == null) {
+        updated[key] = value;
+        changed = true;
+      }
+    }
+    return changed ? { ...row, props: updated } : row;
+  });
+  return changed ? next : null;
+}
+
 export function buildLeadIntroductionTitle(address: string): string {
   return `${address.trim()} Introduction`;
 }

@@ -8,6 +8,7 @@ import { SuggestionMenuController, getDefaultReactSlashMenuItems, useCreateBlock
 import { BlockNoteView } from '@blocknote/mantine';
 import '@blocknote/mantine/style.css';
 import { useAutoSave } from '../hooks/useAutoSave';
+import CardCopyToast from './CardCopyToast';
 import { useImageUpload } from '../hooks/useImageUpload';
 import { useReportStore } from '../stores/report-store';
 import { buildMarketPulseHTML, isPlaceholderValue, statDirection } from '@/lib/market-pulse';
@@ -17,6 +18,12 @@ import {
   type ComparableSummaryProps,
 } from '@/lib/comparable-cards';
 import { getClipboardImageFiles } from '@/lib/clipboard-images';
+import {
+  copyCardAsImage,
+  createCardImageBlob,
+  inlineCardStyles,
+  isImageClipboardSupported,
+} from '@/lib/card-image-copy';
 import type { ReportEditorContent } from '@/types/report';
 
 function createDeltaSVG(height: string, strokeColor: string): SVGElement {
@@ -262,6 +269,67 @@ interface EditableBlockEntry {
 
 const editableBlockEdits = new Map<string, EditableBlockEntry>();
 
+/**
+ * Renders the card off-screen and writes a PNG to the clipboard.
+ * We clone the original container (with all styles intact) and only remove
+ * editing artifacts via CSS, preserving the exact visual appearance.
+ * The HTML/text fallback set by the copy handler stays in place when image
+ * copying is unavailable or fails.
+ */
+interface PreparedCardImage {
+  source: HTMLElement;
+  blob: Promise<Blob>;
+  dispose: () => void;
+}
+
+function prepareCardElementForCopy(container: HTMLElement): PreparedCardImage | null {
+  if (!isImageClipboardSupported()) return null;
+
+  const rect = container.getBoundingClientRect();
+  const width = Math.round(rect.width) || container.offsetWidth;
+  if (!width) return null;
+
+  // Use the inlined-styles clone: Word/Word-like rasterisers drop flexbox when
+  // only class-based rules are present, which collapsed the two columns into a
+  // single text column.
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = inlineCardStyles(container);
+  const source = (wrapper.firstElementChild as HTMLElement | null) ?? wrapper;
+
+  source.style.width = `${width}px`;
+  source.style.maxWidth = 'none';
+  source.style.margin = '0';
+  // The card's blue selection outline is editor chrome, not part of the image.
+  source.style.outline = 'none';
+  source.style.outlineOffset = '0';
+  source.style.boxSizing = 'border-box';
+
+  const holder = document.createElement('div');
+  holder.style.cssText =
+    'position:fixed;left:-20000px;top:0;pointer-events:none;z-index:-1;background:#ffffff;overflow:visible;';
+  holder.style.width = `${width}px`;
+  holder.appendChild(source);
+  document.body.appendChild(holder);
+
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    holder.remove();
+  };
+  const blob = new Promise<Blob>((resolve, reject) => {
+    requestAnimationFrame(() => {
+      createCardImageBlob(source, { width }).then(resolve, reject);
+    });
+  });
+
+  return { source, blob, dispose };
+}
+
+function copyCardElementAsImage(prepared: PreparedCardImage): void {
+  void copyCardAsImage(prepared.source, {}, prepared.blob).finally(prepared.dispose);
+}
+
 function flushEditableBlockEdits(force = false): void {
   for (const entry of Array.from(editableBlockEdits.values())) {
     entry.flush(force);
@@ -279,6 +347,7 @@ function wireEditableBlock(
   const p = block.props;
   const focusOrigins = new Map<string, string>();
   let cardSelectionActive = false;
+  let preparedCardImage: PreparedCardImage | null = null;
   const previousOutline = container.style.outline;
   const previousOutlineOffset = container.style.outlineOffset;
   const previousBorderRadius = container.style.borderRadius;
@@ -310,20 +379,10 @@ function wireEditableBlock(
   const onCardCopy = (e: globalThis.ClipboardEvent) => {
     if (!cardSelectionActive || !e.clipboardData) return;
     const text = (container.innerText || container.textContent || '').trim();
-    const clone = container.cloneNode(true) as HTMLElement;
-    clone.style.outline = '';
-    clone.style.outlineOffset = '';
-    clone.style.borderRadius = '';
-    clone.querySelectorAll<HTMLElement>('[contenteditable]').forEach((el) => {
-      el.removeAttribute('contenteditable');
-      el.removeAttribute('spellcheck');
-    });
-    clone.querySelectorAll<HTMLElement>('[data-prop]').forEach((el) => {
-      el.removeAttribute('data-prop');
-      el.style.boxShadow = '';
-    });
-    clone.querySelectorAll<HTMLElement>('[data-arrow]').forEach((el) => el.removeAttribute('data-arrow'));
-    clone.querySelectorAll<HTMLElement>('[data-value-col]').forEach((el) => el.removeAttribute('data-value-col'));
+
+    // Inline the computed styles: Word keeps the two-column card layout only
+    // when flexbox rules live in style attributes (external classes are dropped).
+    const richHtml = inlineCardStyles(container);
 
     const currentProps = (editor.getBlock?.(blockId)?.props ?? p) as Record<string, unknown>;
     const internal = document.createElement('div');
@@ -336,10 +395,19 @@ function wireEditableBlock(
     });
 
     e.clipboardData.setData('blocknote/html', internal.outerHTML);
-    e.clipboardData.setData('text/html', clone.outerHTML);
+    e.clipboardData.setData('text/html', richHtml);
     e.clipboardData.setData('text/plain', text);
     e.preventDefault();
     e.stopPropagation();
+
+    // Navigator clipboard writes must start from the copy gesture. The PNG is
+    // prepared while the card is selected (and refreshed on edits) so this
+    // synchronous call can replace the textual HTML fallback in Word.
+    if (preparedCardImage) {
+      const image = preparedCardImage;
+      preparedCardImage = null;
+      copyCardElementAsImage(image);
+    }
   };
 
   const onCardCut = (e: globalThis.ClipboardEvent) => {
@@ -363,6 +431,8 @@ function wireEditableBlock(
   const clearCardSelection = () => {
     if (!cardSelectionActive) return;
     cardSelectionActive = false;
+    preparedCardImage?.dispose();
+    preparedCardImage = null;
     document.removeEventListener('keydown', onCardKeyDown, true);
     document.removeEventListener('beforeinput', onCardBeforeInput, true);
     document.removeEventListener('copy', onCardCopy, true);
@@ -385,8 +455,15 @@ function wireEditableBlock(
     if (active && container.contains(active) && active.matches('[data-prop]')) active.blur();
     clearCardSelection();
     cardSelectionActive = true;
+    preparedCardImage?.dispose();
+    preparedCardImage = prepareCardElementForCopy(container);
     document.addEventListener('keydown', onCardKeyDown, true);
     document.addEventListener('beforeinput', onCardBeforeInput, true);
+    // Capture phase on document: BlockNote's `copyToClipboard` ProseMirror
+    // plugin calls `clipboardData.clearData()` and then writes a lossy HTML
+    // payload. Because we register during selection it runs first, and
+    // `preventDefault()` makes ProseMirror's handler bail out — without this
+    // ordering Word received the flattened text instead of the card.
     document.addEventListener('copy', onCardCopy, true);
     document.addEventListener('cut', onCardCut, true);
     document.addEventListener('paste', onCardPaste, true);
@@ -455,7 +532,12 @@ function wireEditableBlock(
       el.style.boxShadow = '0 0 0 1px #93c5fd';
       if (isPlaceholderValue(el.textContent ?? '')) selectAll();
     });
-    el.addEventListener('input', () => onInput?.(prop));
+    el.addEventListener('input', () => {
+      onInput?.(prop);
+      if (!cardSelectionActive) return;
+      preparedCardImage?.dispose();
+      preparedCardImage = prepareCardElementForCopy(container);
+    });
     el.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.isComposing) return;
       const isSave = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's';
@@ -972,6 +1054,7 @@ const ReportEditor = memo(function ReportEditor({ docId, initialContent, onConte
           />
         </BlockNoteView>
       </div>
+      <CardCopyToast />
     </div>
   );
 });

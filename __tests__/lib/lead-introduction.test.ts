@@ -3,6 +3,8 @@ import {
   buildLeadIntroductionBlocks,
   buildLeadIntroductionTitle,
   formatLeadIntroductionDate,
+  buildLeadIntroductionComparableProps,
+  applyLeadIntroductionComparableProps,
   formatLeadIntroductionMoney,
   parseLeadIntroductionHistory,
   renderLeadIntroductionStatsSvg,
@@ -111,6 +113,39 @@ describe('lead introduction', () => {
     expect(historyJson).toContain('Sold');
     expect(historyJson).toContain('$360,000');
     expect(historyJson.indexOf('26 Aug 2008')).toBeLessThan(historyJson.indexOf('5 Sep 2005'));
+  });
+
+  it('backfills comparable card values from address history and council valuation', () => {
+    const blocks = buildLeadIntroductionBlocks(property);
+    const changes = buildLeadIntroductionComparableProps(property);
+    const updated = applyLeadIntroductionComparableProps(blocks, changes ?? {});
+
+    expect(changes).toEqual(expect.objectContaining({
+      saleMedian: '$345,000',
+      saleRange: '$180,000 – $360,000',
+      saleMean: '$295,000',
+      cvMedian: '$940,000',
+      cvRange: '$800,000 – $900,000',
+      cvMean: '$850,000',
+    }));
+    const comparable = (updated as unknown[]).find((block) => (block as { type: string }).type === 'comparableSummary') as {
+      props: Record<string, string>;
+    };
+    expect(comparable.props.saleMedian).toBe('$345,000');
+    expect(comparable.props.cvMedian).toBe('$940,000');
+  });
+
+  it('preserves manually edited comparable values', () => {
+    const blocks = buildLeadIntroductionBlocks(property);
+    const comparable = blocks.find((block) => (block as { type: string }).type === 'comparableSummary') as {
+      props: Record<string, string>;
+    };
+    comparable.props.saleMedian = '$555,000';
+
+    const updated = applyLeadIntroductionComparableProps(blocks, buildLeadIntroductionComparableProps(property) ?? {});
+    expect((updated as unknown[]).find((block) => (block as { type: string }).type === 'comparableSummary')).toMatchObject({
+      props: { saleMedian: '$555,000' },
+    });
   });
 
   it('falls back to placeholders when property data is missing', () => {

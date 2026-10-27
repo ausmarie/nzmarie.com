@@ -8,12 +8,16 @@ function toUuid(id: string): string | null {
   return null;
 }
 
+export function normalizePropertyStreetAddress(address: string | null | undefined): string {
+  return address?.split(',')[0].trim().replace(/\s+/g, ' ') ?? '';
+}
+
 export async function matchPropertyIdByAddress(
   address: string | null | undefined,
   suburb: string | null | undefined
 ): Promise<string | null> {
   if (!address?.trim()) return null;
-  const street = address.split(',')[0].trim();
+  const street = normalizePropertyStreetAddress(address);
   if (!street) return null;
 
   try {
@@ -21,8 +25,8 @@ export async function matchPropertyIdByAddress(
     if (sub) {
       const bySuburb = await marieDB.query(
         `SELECT id FROM properties
-         WHERE LOWER(TRIM(address)) = LOWER($1)
-           AND LOWER(TRIM(suburb)) = LOWER($2)
+         WHERE LOWER(REGEXP_REPLACE(TRIM(SPLIT_PART(address, ',', 1)), '[[:space:]]+', ' ', 'g')) = LOWER($1)
+           AND LOWER(REGEXP_REPLACE(TRIM(suburb), '[[:space:]]+', ' ', 'g')) = LOWER($2)
          LIMIT 1`,
         [street, sub]
       );
@@ -30,7 +34,8 @@ export async function matchPropertyIdByAddress(
     }
 
     const streetOnly = await marieDB.query(
-      `SELECT id FROM properties WHERE LOWER(TRIM(address)) = LOWER($1)`,
+      `SELECT id FROM properties
+       WHERE LOWER(REGEXP_REPLACE(TRIM(SPLIT_PART(address, ',', 1)), '[[:space:]]+', ' ', 'g')) = LOWER($1)`,
       [street]
     );
     if (streetOnly.rows.length === 1) {

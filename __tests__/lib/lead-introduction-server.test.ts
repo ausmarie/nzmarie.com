@@ -45,6 +45,24 @@ describe('lead introduction server helper', () => {
     expect(marieQuery).toHaveBeenCalledTimes(1);
   });
 
+  it('backfills the placeholder comparable card on an existing introduction', async () => {
+    const existingContent = [{ type: 'comparableSummary', props: { saleMedian: '\u2014', cvMedian: '\u2014', saleRange: '\u2014', cvRange: '\u2014' } }];
+    vi.mocked(marieQuery)
+      .mockResolvedValueOnce({ rows: [{ id: 'intro-existing', content: existingContent }] } as never)
+      .mockResolvedValueOnce({ rows: [leadRow] } as never)
+      .mockResolvedValueOnce({ rows: [] } as never);
+
+    await expect(ensureLeadIntroduction('lead-1', 'admin-1')).resolves.toBe('intro-existing');
+
+    const updateCall = vi.mocked(marieQuery).mock.calls[2];
+    expect(String(updateCall[0])).toContain('UPDATE report_documents');
+    const updated = JSON.parse(String(updateCall[1]?.[1])) as Array<{ props: Record<string, string> }>;
+    expect(updated[0].props).toMatchObject({
+      saleMedian: '$360,000',
+      cvMedian: '$940,000',
+    });
+  });
+
   it('creates a lead introduction document from the lead and property data', async () => {
     vi.mocked(marieQuery)
       .mockResolvedValueOnce({ rows: [] } as never)
@@ -64,6 +82,11 @@ describe('lead introduction server helper', () => {
     const content = JSON.parse(String(params[2])) as unknown[];
     expect(JSON.stringify(content)).toContain('2/65 Target Road');
     expect(JSON.stringify(content)).toContain('Address History');
+    const comparable = content.find((block) => (block as { type: string }).type === 'comparableSummary') as {
+      props: Record<string, string>;
+    };
+    expect(comparable.props.saleMedian).toBe('$360,000');
+    expect(comparable.props.cvMedian).toBe('$940,000');
   });
 
   it('returns null when the lead does not exist', async () => {

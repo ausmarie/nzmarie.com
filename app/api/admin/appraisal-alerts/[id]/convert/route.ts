@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
-import { matchPropertyIdByAddress } from '@/lib/lead-property';
+import { matchPropertyIdByAddress, normalizePropertyStreetAddress } from '@/lib/lead-property';
 import { resolvePriority, timelineLabel } from '@/lib/priority';
 
 export async function POST(
@@ -49,6 +49,7 @@ export async function POST(
     const notes = notesParts.length > 0 ? notesParts.join('\n') : null;
 
     const propertyId = await matchPropertyIdByAddress(appraisal.property_address, appraisal.suburb);
+    const propertyAddress = normalizePropertyStreetAddress(appraisal.property_address);
 
     const leadResult = await marieDB.query(
       `INSERT INTO leads (property_address, property_id, suburb, city, region, owner_name, owner_email, owner_phone,
@@ -56,7 +57,7 @@ export async function POST(
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'appraisal', 'new', $9, $10, $11)
        RETURNING id`,
       [
-        appraisal.property_address,
+        propertyAddress,
         propertyId,
         appraisal.suburb || null,
         appraisal.city || null,

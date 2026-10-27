@@ -19,6 +19,8 @@ vi.mock('@/lib/permissions', () => ({
 
 vi.mock('@/lib/lead-property', () => ({
   matchPropertyIdByAddress: mockMatchProperty,
+  normalizePropertyStreetAddress: (address: string | null | undefined) =>
+    address?.split(',')[0].trim().replace(/\s+/g, ' ') ?? '',
 }));
 
 import { POST } from '../../../app/api/admin/appraisal-alerts/[id]/convert/route';
@@ -78,7 +80,9 @@ describe('POST /api/admin/appraisal-alerts/[id]/convert — priority', () => {
 
     expect(res.status).toBe(200);
     expect(body.leadId).toBe('lead-1');
-    // params: address, propertyId, suburb, city, region, name, email, phone, priority, summary, notes
+    // The lead stores the street address; suburb/city/region remain separate fields.
+    expect(insertCall?.[1][0]).toBe('4 Carnmore Place');
+    // params: street address, propertyId, suburb, city, region, name, email, phone, priority, summary, notes
     expect(insertCall?.[1][8]).toBe('low');
     expect(insertCall?.[1][9]).toContain('Just exploring');
   });
