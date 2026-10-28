@@ -4492,7 +4492,6 @@ export default function OutreachPage() {
           showNotification('success', 'Report dispatch logged successfully');
           clearSelected();
           cacheRef.current.clear();
-          window.scrollTo(0, 0);
         }}
         onConfirmed={() => {
           if (!mapSendRef.current) {

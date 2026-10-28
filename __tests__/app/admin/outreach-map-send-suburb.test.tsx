@@ -122,7 +122,10 @@ describe('Outreach map Sent modal suburb', () => {
     expect(pdfCalls.some((u) => u.includes('suburb=Fairview+Heights'))).toBe(false);
   });
 
-  it('does not reload the map after dispatching an address from map mode', async () => {
+  it('does not reload or scroll the map after dispatching an address from map mode', async () => {
+    const scrollToSpy = vi.fn();
+    vi.stubGlobal('scrollTo', scrollToSpy);
+
     render(<OutreachPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
@@ -148,5 +151,6 @@ describe('Outreach map Sent modal suburb', () => {
 
     expect(screen.queryByRole('button', { name: 'Confirm Dispatch Log' })).toBeNull();
     expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+    expect(scrollToSpy).not.toHaveBeenCalled();
   });
 });
