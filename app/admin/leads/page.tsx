@@ -1,7 +1,6 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { isAdmin } from '@/lib/permissions';
@@ -235,7 +234,6 @@ function buildLeadAiData(lead: Lead): string {
 
 export default function LeadsPage() {
   const { data: session } = useSession();
-  const router = useRouter();
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
@@ -348,17 +346,54 @@ export default function LeadsPage() {
 
     setPdfBusy(true);
     const uploaded: LeadPdfDocument[] = [];
+    const documentsUrl = `/api/admin/leads/${lead.id}/documents`;
+    const maxPdfBytes = 25 * 1024 * 1024;
 
     try {
       for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch(`/api/admin/leads/${lead.id}/documents`, {
+        if (file.size > maxPdfBytes) {
+          throw new Error(`${file.name} is larger than 25MB`);
+        }
+
+        // Upload straight to R2 with a presigned URL. Going through this API
+        // route would hit Vercel's ~4.5MB request-body limit and return 413.
+        const presignRes = await fetch(documentsUrl, {
           method: 'POST',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'presign',
+            fileName: file.name,
+            fileSize: file.size,
+            contentType: file.type || 'application/pdf',
+          }),
         });
-        const json = await res.json();
-        if (!res.ok) {
+        const presign = await presignRes.json();
+        if (!presignRes.ok || !presign.uploadUrl) {
+          throw new Error(presign.error || `Failed to prepare upload for ${file.name}`);
+        }
+
+        const uploadRes = await fetch(presign.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'application/pdf' },
+          body: file,
+        });
+        if (!uploadRes.ok) {
+          throw new Error(`Failed to upload ${file.name} to storage (${uploadRes.status})`);
+        }
+
+        const finalizeRes = await fetch(documentsUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'finalize',
+            key: presign.key,
+            fileName: file.name,
+            fileSize: file.size,
+            contentType: file.type || 'application/pdf',
+          }),
+        });
+        const json = await finalizeRes.json();
+        if (!finalizeRes.ok) {
           throw new Error(json.error || `Failed to upload ${file.name}`);
         }
         uploaded.push(json.data as LeadPdfDocument);
