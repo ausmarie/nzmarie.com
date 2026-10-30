@@ -152,7 +152,7 @@ describe('Extra admin pages', () => {
       </QueryClientProvider>
     );
     expect(await screen.findByText('Dashboard')).toBeTruthy();
-    expect(screen.getByText('New Leads')).toBeTruthy();
+    expect(await screen.findByText('New Leads')).toBeTruthy();
     expect(screen.getByText('High Priority')).toBeTruthy();
   });
 

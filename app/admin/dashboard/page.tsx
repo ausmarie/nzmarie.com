@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -142,11 +142,13 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDeferred, setShowDeferred] = useState(false);
   const [suburbFilter, setSuburbFilter] = useState<string>('all');
   const [scanLogDateFilter, setScanLogDateFilter] = useState('');
   const [scanLogCampaign, setScanLogCampaign] = useState('');
+  const deferredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fullStatsResolved = useRef(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -154,60 +156,122 @@ export default function AdminDashboardPage() {
     }
   }, [status, router]);
 
+  useEffect(() => {
+    return () => {
+      if (deferredTimer.current) clearTimeout(deferredTimer.current);
+    };
+  }, []);
+
+  const mergeStats = useCallback((incoming: Partial<DashboardStats> | null | undefined) => {
+    if (!incoming) return;
+    setStats((prev) => ({ ...(prev ?? ({} as DashboardStats)), ...incoming }));
+  }, []);
+
   const fetchDashboardData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const statsParams = new URLSearchParams();
-      if (suburbFilter && suburbFilter !== 'all') {
-        statsParams.set('suburb', suburbFilter);
-      }
-
-      const bookingsParams = new URLSearchParams({ page: '1', limit: '10' });
-      if (suburbFilter && suburbFilter !== 'all') {
-        bookingsParams.set('suburb', suburbFilter);
-      }
-
-      const statsUrl = `/api/admin/dashboard/stats${statsParams.toString() ? `?${statsParams}` : ''}`;
-      const [statsRes, followupsRes] = await Promise.all([
-        fetch(statsUrl),
-        fetch(`/api/admin/bookings?${bookingsParams}`),
-      ]);
-
-      if (!statsRes.ok || !followupsRes.ok) {
-        throw new Error("Failed to fetch dashboard data");
-      }
-
-      const statsData = await statsRes.json();
-      const followupsData = await followupsRes.json();
-
-      if (statsData.success) {
-        setStats(statsData.stats);
-      }
-
-      if (followupsData.data) {
-        const todayFollowups = followupsData.data.filter((lead: FollowUp) => {
-          if (!lead.follow_up_at) return false;
-          const followUpDate = new Date(lead.follow_up_at).toDateString();
-          const today = new Date().toDateString();
-          return (
-            followUpDate === today &&
-            !["converted", "lost"].includes(lead.contact_status)
-          );
-        });
-        setFollowUps(todayFollowups);
-      }
-
-      setLoading(false);
-    } catch (err) {
-      console.error("Error fetching dashboard data:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load dashboard"
-      );
-      setLoading(false);
+    setError(null);
+    setShowDeferred(false);
+    fullStatsResolved.current = false;
+    if (deferredTimer.current) {
+      clearTimeout(deferredTimer.current);
+      deferredTimer.current = null;
     }
-  }, [suburbFilter]);
+
+    const commonParams = new URLSearchParams();
+    if (suburbFilter && suburbFilter !== 'all') {
+      commonParams.set('suburb', suburbFilter);
+    }
+
+    const summaryParams = new URLSearchParams(commonParams);
+    summaryParams.set('part', 'summary');
+
+    const bookingsParams = new URLSearchParams({ page: '1', limit: '10' });
+    if (suburbFilter && suburbFilter !== 'all') {
+      bookingsParams.set('suburb', suburbFilter);
+    }
+
+    // Summary, full stats and follow-ups are independent requests. The summary
+    // response is small, so the Total Sent / Total Appraisals cards can paint
+    // without waiting for the full dashboard aggregation.
+    const summaryPromise = fetch(`/api/admin/dashboard/stats?${summaryParams}`);
+    const fullStatsPromise = fetch(
+      `/api/admin/dashboard/stats${commonParams.toString() ? `?${commonParams}` : ''}`
+    );
+    const bookingsPromise = fetch(`/api/admin/bookings?${bookingsParams}`);
+
+    const scheduleDeferred = (delayMs: number) => {
+      if (deferredTimer.current) clearTimeout(deferredTimer.current);
+      deferredTimer.current = setTimeout(() => {
+        setShowDeferred(true);
+        deferredTimer.current = null;
+      }, delayMs);
+    };
+
+    const loadSummary = async () => {
+      try {
+        const res = await summaryPromise;
+        if (!res?.ok) {
+          throw new Error("Failed to fetch dashboard data");
+        }
+        const data = await res.json();
+        if (data?.stats) mergeStats(data.stats);
+      } catch (err) {
+        console.error("Error fetching dashboard summary:", err);
+        setError((prev) =>
+          prev ?? (err instanceof Error ? err.message : "Failed to load dashboard")
+        );
+      } finally {
+        // Fallback in case the full stats request is slow or never resolves:
+        // still reveal the remaining sections shortly after the priority cards.
+        if (!fullStatsResolved.current) scheduleDeferred(600);
+      }
+    };
+
+    const loadFullStats = async () => {
+      try {
+        const res = await fullStatsPromise;
+        if (!res?.ok) {
+          throw new Error("Failed to fetch dashboard data");
+        }
+        const data = await res.json();
+        if (data?.stats) mergeStats(data.stats);
+      } catch (err) {
+        console.error("Error fetching dashboard stats:", err);
+        setError((prev) =>
+          prev ?? (err instanceof Error ? err.message : "Failed to load dashboard")
+        );
+      } finally {
+        fullStatsResolved.current = true;
+        // Defer the heavy sections to the next task so the dispatch charts
+        // (batch 2) paint before Scan Trends / scan logs / follow-ups mount.
+        scheduleDeferred(0);
+      }
+    };
+
+    const loadFollowUps = async () => {
+      try {
+        const res = await bookingsPromise;
+        if (!res?.ok) return;
+        const data = await res.json();
+        if (data?.data) {
+          const todayFollowups = data.data.filter((lead: FollowUp) => {
+            if (!lead.follow_up_at) return false;
+            const followUpDate = new Date(lead.follow_up_at).toDateString();
+            const today = new Date().toDateString();
+            return (
+              followUpDate === today &&
+              !["converted", "lost"].includes(lead.contact_status)
+            );
+          });
+          setFollowUps(todayFollowups);
+        }
+      } catch (err) {
+        // Follow-ups are ancillary; they must never block the dashboard.
+        console.error("Error fetching dashboard follow-ups:", err);
+      }
+    };
+
+    await Promise.allSettled([loadSummary(), loadFullStats(), loadFollowUps()]);
+  }, [suburbFilter, mergeStats]);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -215,7 +279,7 @@ export default function AdminDashboardPage() {
     }
   }, [status, fetchDashboardData]);
 
-  if (status === "loading" || loading) {
+  if (status === "loading" || status === "unauthenticated") {
     return <SkeletonDashboard />;
   }
 
@@ -286,7 +350,11 @@ export default function AdminDashboardPage() {
               </span>
             </div>
             <div className="text-3xl font-bold text-slate-900 mb-1">
-              {stats?.sentSummary?.total_sent ?? 0}
+              {stats?.sentSummary ? (
+                stats.sentSummary.total_sent ?? 0
+              ) : (
+                <span className="inline-block h-8 w-16 rounded bg-slate-100 animate-pulse align-middle" aria-label="Loading total sent" />
+              )}
             </div>
             <div className="text-sm text-slate-600">Total Sent</div>
           </div>
@@ -364,7 +432,11 @@ export default function AdminDashboardPage() {
               </span>
             </div>
             <div className="text-3xl font-bold text-slate-900 mb-1">
-              {stats?.totalBookings ?? 0}
+              {stats?.totalBookings !== undefined ? (
+                stats.totalBookings ?? 0
+              ) : (
+                <span className="inline-block h-8 w-16 rounded bg-slate-100 animate-pulse align-middle" aria-label="Loading total appraisals" />
+              )}
             </div>
             <div className="text-sm text-slate-600">Total Appraisals</div>
           </div>
@@ -399,6 +471,8 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {showDeferred && (
+          <>
         <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -501,10 +575,14 @@ export default function AdminDashboardPage() {
           </p>
           <p className="text-xs text-slate-400 mt-1">Follow-ups</p>
         </div>
+          </>
+        )}
       </div>
 
       {stats?.dispatchTrend && <DispatchTrendSection trend={stats.dispatchTrend} />}
 
+      {showDeferred && (
+        <>
       <div className="bg-white rounded-lg shadow-sm border border-slate-100">
         <div className="p-6 border-b border-slate-100">
           <h2 className="text-lg font-semibold text-slate-900">Scan Trends</h2>
@@ -740,6 +818,8 @@ export default function AdminDashboardPage() {
             </table>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

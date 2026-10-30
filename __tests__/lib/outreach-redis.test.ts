@@ -24,6 +24,7 @@ import {
   setOutreachCardsInCache,
   invalidateOutreachCardsForSuburb,
   invalidateStreetClustersForSuburb,
+  getDashboardStatsCached,
 } from '@/lib/redis';
 
 describe('Outreach Redis Cache Functions', () => {
@@ -82,5 +83,55 @@ describe('Outreach Redis Cache Functions', () => {
 
     expect(mockRedisInstance.smembers).toHaveBeenCalledWith('outreach_cards_keys:pinehill');
     expect(mockRedisInstance.del).toHaveBeenCalledWith('card-key-1');
+  });
+});
+
+describe('getDashboardStatsCached', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('runs the dashboard aggregation once for overlapping requests', async () => {
+    mockRedisInstance.get.mockResolvedValue(null);
+    let resolveFetch: (value: { total: number }) => void = () => {};
+    const fetchFn = vi.fn(
+      () => new Promise<{ total: number }>((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+
+    const first = getDashboardStatsCached('dashboard:stats:v6:all:all', fetchFn, 600);
+    const second = getDashboardStatsCached('dashboard:stats:v6:all:all', fetchFn, 600);
+
+    await vi.waitFor(() => expect(mockRedisInstance.get).toHaveBeenCalled());
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(mockRedisInstance.get).toHaveBeenCalledTimes(1);
+
+    resolveFetch({ total: 2641 });
+    await expect(first).resolves.toEqual({ total: 2641 });
+    await expect(second).resolves.toEqual({ total: 2641 });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a fresh compute after the previous one settled', async () => {
+    mockRedisInstance.get.mockResolvedValue(null);
+    const fetchFn = vi.fn(async () => ({ total: 1 }));
+
+    await getDashboardStatsCached('dashboard:stats:v6:all:all', fetchFn, 600);
+    await getDashboardStatsCached('dashboard:stats:v6:all:all', fetchFn, 600);
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not share in-flight work between different filter keys', async () => {
+    mockRedisInstance.get.mockResolvedValue(null);
+    const fetchFn = vi.fn(async () => ({ total: 1 }));
+
+    await Promise.all([
+      getDashboardStatsCached('dashboard:stats:v6:all:all', fetchFn, 600),
+      getDashboardStatsCached('dashboard:stats:v6:torbay:all', fetchFn, 600),
+    ]);
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

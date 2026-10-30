@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   campaignMatchesPeriod,
+  latestPeriodKey,
   periodSortValue,
   reportDocumentPeriodKey,
 } from '@/lib/report-period';
@@ -43,5 +44,17 @@ describe('periodSortValue', () => {
     const sorted = [...periods].sort((a, b) => periodSortValue(a) - periodSortValue(b));
 
     expect(sorted).toEqual(['2026-Q2', '2026-08', '2026-Q3', '2026-09']);
+  });
+});
+
+describe('latestPeriodKey', () => {
+  it('picks the newest report period across quarters and years', () => {
+    expect(latestPeriodKey(['2026-Q2', '2026-Q3', '2027-Q1', null, undefined])).toBe('2027-Q1');
+    expect(latestPeriodKey(['2026-Q4', '2027-Q3', '2026-Q3'])).toBe('2027-Q3');
+  });
+
+  it('normalizes separators and ignores invalid values', () => {
+    expect(latestPeriodKey(['2026_Q3', 'favorites', '', null])).toBe('2026-Q3');
+    expect(latestPeriodKey(['favorites', null])).toBeNull();
   });
 });

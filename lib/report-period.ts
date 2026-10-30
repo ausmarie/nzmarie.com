@@ -73,6 +73,26 @@ export function periodSortValue(value?: string | null): number {
   return parts.year * 10000 + endMonth * 100 + (parts.periodType === 'month' ? 1 : 0);
 }
 
+/**
+ * Returns the newest period key from a list of report period keys. Invalid or
+ * empty values are ignored. Used to keep quarter-dependent dashboard data in
+ * sync as new quarters (e.g. 2026-Q4 or 2027-Q3) start being sent.
+ */
+export function latestPeriodKey(values: Array<string | null | undefined>): string | null {
+  let latest: string | null = null;
+  let latestValue = -1;
+  for (const value of values) {
+    const parts = parsePeriodParts(value);
+    if (!parts) continue;
+    const sortValue = periodSortValue(parts.label);
+    if (sortValue > latestValue) {
+      latestValue = sortValue;
+      latest = parts.label;
+    }
+  }
+  return latest;
+}
+
 export function campaignPatternForPeriod(year: number, code: string): string {
   const normalized = (code || '').trim().toUpperCase();
   if (isMonthCode(normalized)) {

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { isAdmin } from '@/lib/permissions';
-import { getCachedOrFetch } from '@/lib/redis';
+import { getDashboardStatsCached } from '@/lib/redis';
 import { db } from '@/lib/drizzle';
 import { ensureCampaignTablesExist } from '@/lib/campaign-tracker';
 import { formatReportKey } from '@/lib/format-report';
-import { campaignMatchesPeriod, periodLabel, periodSortValue } from '@/lib/report-period';
+import { campaignMatchesPeriod, campaignPatternForPeriod, latestPeriodKey, parsePeriodParts, periodLabel, periodSortValue } from '@/lib/report-period';
 import { sql } from 'drizzle-orm';
 
 interface SuburbCountRow {
@@ -142,6 +142,11 @@ interface QuarterlySentSummary {
   suburbs: QuarterlySentSuburb[];
 }
 
+interface QuarterOverviewTotalRow {
+  quarter_key: string;
+  total_sent: string | number;
+}
+
 interface QuarterOverview {
   quarterKey: string;
   quarter: string;
@@ -176,6 +181,33 @@ interface QuarterData {
     totalSendEvents: number;
   };
   suburbs: SuburbQuarterDetail[];
+}
+
+interface OutreachSuburbSummary {
+  suburb: string;
+  pending_count: number;
+  sent_count: number;
+  total_count: number;
+  last_sent_at: string | null;
+}
+
+interface RecentAppraisalSummary {
+  id: string;
+  client_name: string;
+  email: string;
+  phone: string;
+  suburb: string;
+  property_address: string;
+  contact_status: string;
+  created_at: string | null;
+}
+
+interface SentSummaryResult {
+  total_sent: number;
+  suburb_count: number;
+  suburbs: SentSummaryItem[];
+  today: { total_sent: number; suburbs: SentSummaryItem[] };
+  quarterly: QuarterlySentSummary[];
 }
 
 function buildTrend(sentRows: TrendRow[], junkRows: TrendRow[]): BuiltTrend {
@@ -219,6 +251,142 @@ function toTrendRows(value: unknown): TrendRow[] {
   return Array.isArray(value) ? value as TrendRow[] : [];
 }
 
+function mapOutreachBySuburb(value: unknown): OutreachSuburbSummary[] {
+  return (Array.isArray(value) ? value as OutreachSuburbRow[] : []).map((item) => ({
+    suburb: item?.suburb || 'Unknown',
+    pending_count: Number(item?.pending_count) || 0,
+    sent_count: Number(item?.sent_count) || 0,
+    total_count: Number(item?.total_count) || 0,
+    last_sent_at: item?.last_sent_at ? new Date(item.last_sent_at).toISOString() : null,
+  }));
+}
+
+function mapRecentAppraisals(value: unknown): RecentAppraisalSummary[] {
+  return (Array.isArray(value) ? value as RecentAppraisalRow[] : [])
+    .filter((item) => !!item?.id)
+    .map((item) => ({
+      id: item.id as string,
+      client_name: item.client_name || 'Unknown',
+      email: item.email || '',
+      phone: item.phone || '',
+      suburb: item.suburb || '',
+      property_address: item.property_address || '',
+      contact_status: item.contact_status || '',
+      created_at: item.created_at ? new Date(item.created_at).toISOString() : null,
+    }))
+    .sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : Number.NEGATIVE_INFINITY;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : Number.NEGATIVE_INFINITY;
+      return tb - ta;
+    });
+}
+
+function buildReportsMap(rows: unknown): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const r of (Array.isArray(rows) ? rows as ActiveReportRow[] : [])) {
+    if (!r.suburb || !r.quarter || r.year == null) continue;
+    const key = `${r.suburb.trim().toLowerCase()}|${periodLabel(Number(r.year), r.quarter).toUpperCase()}`;
+    if (!map.has(key)) map.set(key, r.file_url || '');
+  }
+  return map;
+}
+
+function buildQuarterlySentSummaries(
+  value: unknown,
+  reportsMap: Map<string, string>
+): QuarterlySentSummary[] {
+  const quarterlyMap = new Map<string, QuarterlySentSuburb[]>();
+  for (const item of (Array.isArray(value) ? value as QuarterlySuburbSentRow[] : [])) {
+    if (!item.quarter_key || !item.suburb) continue;
+    const reportUrl = /^[0-9]{4}-Q[1-4]$/.test(item.quarter_key)
+      ? reportsMap.get(`${item.suburb.trim().toLowerCase()}|${item.quarter_key.toUpperCase()}`) || null
+      : null;
+    let arr = quarterlyMap.get(item.quarter_key);
+    if (!arr) { arr = []; quarterlyMap.set(item.quarter_key, arr); }
+    arr.push({
+      suburb: item.suburb,
+      sent_count: Number(item.sent_count) || 0,
+      last_sent_at: item.last_sent_at ? new Date(item.last_sent_at).toISOString() : null,
+      report_url: reportUrl,
+    });
+  }
+
+  return Array.from(quarterlyMap.entries())
+    .map(([quarterKey, suburbs]) => ({
+      quarter_key: quarterKey,
+      total_sent: suburbs.reduce((sum, s) => sum + s.sent_count, 0),
+      suburbs: suburbs.sort((a, b) => {
+        if (b.sent_count !== a.sent_count) return b.sent_count - a.sent_count;
+        const ta = a.last_sent_at ? new Date(a.last_sent_at).getTime() : Number.NEGATIVE_INFINITY;
+        const tb = b.last_sent_at ? new Date(b.last_sent_at).getTime() : Number.NEGATIVE_INFINITY;
+        return tb - ta;
+      }),
+    }))
+    .sort((a, b) => periodSortValue(b.quarter_key) - periodSortValue(a.quarter_key));
+}
+
+function buildSentSummary(
+  row: Record<string, unknown>,
+  outreachBySuburb: OutreachSuburbSummary[],
+  reportsMap: Map<string, string>,
+  options: { quarterTotals?: boolean } = {}
+): SentSummaryResult {
+  const sentSummarySuburbs: SuburbCountRow[] =
+    Array.isArray(row.sent_summary_suburbs) && (row.sent_summary_suburbs as SuburbCountRow[]).length > 0
+      ? row.sent_summary_suburbs as SuburbCountRow[]
+      : outreachBySuburb.filter((item) => Number(item?.sent_count) > 1);
+
+  const sentSummary: SentSummaryItem[] = sentSummarySuburbs.map((item) => ({
+    suburb: item?.suburb || 'Unknown',
+    sent_count: Number(item?.sent_count) || 0,
+  }));
+
+  const todaySentSuburbs: SentSummaryItem[] = (Array.isArray(row.today_suburb_sent) ? row.today_suburb_sent as TodaySentSuburbRow[] : [])
+    .filter((item) => !!item?.suburb)
+    .map((item) => ({
+      suburb: item.suburb as string,
+      sent_count: Number(item.sent_count) || 0,
+    }))
+    .filter((item) => item.sent_count > 0)
+    .sort((a, b) => b.sent_count - a.sent_count || a.suburb.localeCompare(b.suburb));
+
+  // The single source of truth for "sent" is the quarter materialized view, so
+  // the Total Sent headline can never disagree with the quarter cards below it.
+  const quarterTotals = options.quarterTotals && Array.isArray(row.quarter_overview_totals)
+    ? row.quarter_overview_totals as QuarterOverviewTotalRow[]
+    : [];
+
+  const quarterlySentSummaries = quarterTotals.length > 0
+    ? buildQuarterlySentSummariesFromTotals(quarterTotals)
+    : buildQuarterlySentSummaries(row.quarterly_suburb_sent, reportsMap);
+
+  return {
+    total_sent: quarterTotals.length > 0
+      ? quarterTotals.reduce((sum, q) => sum + (Number(q.total_sent) || 0), 0)
+      : quarterlySentSummaries.length > 0
+        ? quarterlySentSummaries.reduce((sum, q) => sum + q.total_sent, 0)
+        : Number(row.sent_summary_total_sent) || sentSummary.reduce((sum: number, item) => sum + Number(item.sent_count || 0), 0),
+    suburb_count: Number(row.sent_summary_suburb_count) || sentSummary.length,
+    suburbs: sentSummary,
+    today: {
+      total_sent: todaySentSuburbs.reduce((sum, item) => sum + item.sent_count, 0),
+      suburbs: todaySentSuburbs,
+    },
+    quarterly: quarterlySentSummaries,
+  };
+}
+
+function buildQuarterlySentSummariesFromTotals(rows: QuarterOverviewTotalRow[]): QuarterlySentSummary[] {
+  return rows
+    .filter((item) => !!item?.quarter_key && /^[0-9]{4}-(Q[1-4]|M[0-9]{2})$/.test(item.quarter_key))
+    .map((item) => ({
+      quarter_key: item.quarter_key,
+      total_sent: Number(item.total_sent) || 0,
+      suburbs: [],
+    }))
+    .sort((a, b) => periodSortValue(b.quarter_key) - periodSortValue(a.quarter_key));
+}
+
 export async function GET(request: Request) {
   const session = await auth();
 
@@ -229,29 +397,217 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const suburb = searchParams.get('suburb');
   const quarterKey = searchParams.get('quarterKey');
+  const part = searchParams.get('part');
   let targetQuarterKey = quarterKey || '2026-Q2';
+  // Bumped whenever the underlying data changed so two loads triggered in quick
+  // succession (e.g. a React effect firing twice) don't both run the heavy
+  // aggregation and burn Registers twice.
+  const cacheVersion = 6;
 
   try {
     await ensureCampaignTablesExist();
 
-    const cacheKey = `dashboard:stats:v4:${suburb || 'all'}:${quarterKey || 'all'}`;
+    // Lightweight payload used to paint the two priority cards (Total Sent and
+    // Total Appraisals) before the full dashboard query finishes.
+    if (part === 'summary') {
+      const summaryCacheKey = `dashboard:stats:summary:v${cacheVersion}:${suburb || 'all'}:${quarterKey || 'all'}`;
+      const summaryResult = await getDashboardStatsCached(
+        summaryCacheKey,
+        async () => {
+          const suburbFilter = suburb && suburb !== 'all';
+          const suburbSql = suburbFilter ? sql`AND op.suburb = ${suburb}` : sql``;
 
-    const result = await getCachedOrFetch(
+          const summaryRows = await db.execute(sql`
+            WITH
+              outreach_by_suburb_full_cte AS MATERIALIZED (
+                SELECT
+                  op.suburb,
+                  COUNT(*) FILTER (WHERE op.status IN ('pending', 'sent'))::int AS pending_count,
+                  COUNT(*) FILTER (WHERE op.status = 'sent')::int AS sent_count,
+                  COUNT(*)::int AS total_count
+                FROM outreach_properties op
+                WHERE op.suburb IS NOT NULL
+                  ${suburbSql}
+                GROUP BY op.suburb
+              ),
+              sent_summary_cte AS (
+                SELECT suburb, sent_count
+                FROM outreach_by_suburb_full_cte
+                WHERE sent_count > 0
+                ORDER BY sent_count DESC, suburb ASC
+              ),
+              today_sent_cte AS MATERIALIZED (
+                SELECT
+                  sl.suburb,
+                  COUNT(DISTINCT sl.outreach_property_id)::int AS sent_count
+                FROM outreach_send_logs sl
+                WHERE sl.sent_at IS NOT NULL
+                  AND date_trunc('day', sl.sent_at AT TIME ZONE 'Pacific/Auckland')
+                    = date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'Pacific/Auckland')
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM outreach_property_quarter_status returned
+                    WHERE returned.outreach_property_id = sl.outreach_property_id
+                      AND returned.suburb_report_id = sl.suburb_report_id
+                      AND returned.status = 'pending'
+                  )
+                  ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
+                GROUP BY sl.suburb
+              ),
+              quarterly_suburb_sent_cte AS (
+                SELECT
+                  CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
+                    THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-](Q[1-4])')
+                    WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
+                    THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
+                    WHEN sr.quarter ~ '^Q[1-4]$' AND sr.year IS NOT NULL
+                    THEN sr.year || '-' || sr.quarter
+                    WHEN sr.quarter ~ '^M[0-9]{2}$' AND sr.year IS NOT NULL
+                    THEN sr.year || '-' || substring(sr.quarter from 'M([0-9]{2})')
+                  END AS quarter_key,
+                  sl.suburb,
+                  COUNT(DISTINCT sl.outreach_property_id) AS sent_count,
+                  MAX(sl.sent_at) AS last_sent_at
+                FROM outreach_send_logs sl
+                LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
+                WHERE sl.suburb IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM outreach_property_quarter_status returned
+                    WHERE returned.outreach_property_id = sl.outreach_property_id
+                      AND returned.suburb_report_id = sl.suburb_report_id
+                      AND returned.status = 'pending'
+                  )
+                  ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
+                GROUP BY 1, 2
+              )
+            SELECT
+              (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM sent_summary_cte s) as sent_summary_suburbs,
+              (SELECT COUNT(*) FROM sent_summary_cte) as sent_summary_suburb_count,
+              (SELECT COALESCE(SUM(sent_count), 0) FROM sent_summary_cte) as sent_summary_total_sent,
+              (SELECT COALESCE(json_agg(row_to_json(q) ORDER BY q.year DESC, q.quarter DESC), '[]')
+                 FROM mv_quarter_overview q) as quarter_overview_totals,
+              (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
+                SELECT suburb, sent_count FROM today_sent_cte
+                ORDER BY sent_count DESC, suburb ASC
+              ) s) as today_suburb_sent,
+              (SELECT COALESCE(json_agg(row_to_json(q) ORDER BY q.year DESC, q.quarter DESC), '[]')
+                 FROM mv_quarter_overview q) as quarter_overview_totals,
+              (SELECT COUNT(*) FROM appraisal_leads) as total_bookings,
+              (SELECT COALESCE(json_agg(row_to_json(a)), '[]') FROM (
+                SELECT id, client_name, email, phone, suburb, property_address, contact_status, created_at
+                FROM appraisal_leads
+                ORDER BY created_at DESC
+                LIMIT 5
+              ) a) as recent_appraisals
+          `);
+
+          const row = (summaryRows.rows[0] || {}) as Record<string, unknown>;
+          // Summary cards do not render report links, so skip the extra
+          // suburb_reports round trip. The target quarter follows the same
+          // rule as the full payload: the newest quarter present in the view.
+          const summaryTargetQuarterKey = quarterKey
+            || latestPeriodKey((Array.isArray(row.quarter_overview_totals)
+              ? row.quarter_overview_totals as QuarterOverviewTotalRow[]
+              : []).map((item) => item?.quarter_key))
+            || latestPeriodKey((Array.isArray(row.quarterly_suburb_sent)
+              ? row.quarterly_suburb_sent as QuarterlySuburbSentRow[]
+              : []).map((item) => item?.quarter_key))
+            || '2026-Q2';
+
+          return {
+            sentSummary: buildSentSummary(row, [], new Map(), { quarterTotals: true }),
+            totalBookings: Number(row.total_bookings) || 0,
+            recentAppraisals: mapRecentAppraisals(row.recent_appraisals),
+            targetQuarterKey: summaryTargetQuarterKey,
+          };
+        },
+        300
+      );
+
+      return NextResponse.json({
+        success: true,
+        part: 'summary',
+        stats: summaryResult,
+        suburb: suburb || 'all',
+        quarterKey: summaryResult.targetQuarterKey,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const cacheKey = `dashboard:stats:v${cacheVersion}:${suburb || 'all'}:${quarterKey || 'all'}`;
+
+    const result = await getDashboardStatsCached(
       cacheKey,
       async () => {
         const suburbFilter = suburb && suburb !== 'all';
         const suburbCondition = suburbFilter ? sql`AND suburb = ${suburb}` : sql``;
 
-        // Fetch quarter overview from materialized view (all quarters)
+        // Fetch quarter overview from materialized view (all quarters). The
+        // active sending quarter is whatever the view reports as the newest
+        // quarter: the view is refreshed by the cron job and after each send
+        // batch, so keeping it as the single source of truth means the
+        // dashboard never disagrees with the Top Cards. Outside the request,
+        // live data is only used as a fallback while the view is still empty.
         const quarterOverviewResult = await db.execute(sql`
-          SELECT quarter_key, quarter, year, suburbs_count, total_properties, total_sent, total_unsent, total_partial, total_send_events
-          FROM mv_quarter_overview
-          ORDER BY year DESC, quarter DESC
+          WITH
+            latest_live_quarter AS (
+              SELECT quarter_key, quarter_index
+              FROM (
+                SELECT
+                  quarter_key,
+                  substring(quarter_key from '^([0-9]{4})')::int * 4
+                    + (substring(quarter_key from 'Q([1-4])')::int - 1) AS quarter_index
+                FROM outreach_property_quarter_status
+                WHERE quarter_key ~ '^[0-9]{4}-Q[1-4]$'
+                  AND (
+                    status = 'sent'
+                    OR (status = 'partial' AND COALESCE(sent_count, 0) > 0)
+                  )
+              ) sent
+              ORDER BY quarter_index DESC
+              LIMIT 1
+            ),
+            latest_report_quarter AS (
+              SELECT
+                year::text || '-Q' || substring(quarter from 'Q([1-4])') AS quarter_key,
+                year::int * 4 + (substring(quarter from 'Q([1-4])')::int - 1) AS quarter_index
+              FROM suburb_reports
+              WHERE status = 'active'
+                AND year IS NOT NULL
+                AND quarter ~ '^Q[1-4]$'
+              ORDER BY quarter_index DESC
+              LIMIT 1
+            ),
+            latest_mv_quarter AS (
+              SELECT quarter_key
+              FROM mv_quarter_overview
+              WHERE quarter_key ~ '^[0-9]{4}-Q[1-4]$'
+              ORDER BY year DESC, quarter DESC
+              LIMIT 1
+            )
+          SELECT
+            q.quarter_key, q.quarter, q.year, q.suburbs_count, q.total_properties,
+            q.total_sent, q.total_unsent, q.total_partial, q.total_send_events,
+            COALESCE(
+              (SELECT quarter_key FROM latest_mv_quarter),
+              (SELECT quarter_key FROM latest_live_quarter),
+              (SELECT quarter_key FROM latest_report_quarter)
+            ) AS latest_quarter_key
+          FROM mv_quarter_overview q
+          ORDER BY q.year DESC, q.quarter DESC
         `);
 
         // Determine target quarter
-        // Determine target quarter
-        targetQuarterKey = quarterKey || (quarterOverviewResult.rows[0] as unknown as QuarterOverviewRow)?.quarter_key || '2026-Q2';
+        targetQuarterKey = quarterKey
+          || ((quarterOverviewResult.rows[0] as unknown as { latest_quarter_key?: string })?.latest_quarter_key)
+          || (quarterOverviewResult.rows[0] as unknown as QuarterOverviewRow)?.quarter_key
+          || '2026-Q2';
+
+        const targetPeriodParts = parsePeriodParts(targetQuarterKey);
+        const targetCampaignPattern = targetPeriodParts
+          ? campaignPatternForPeriod(targetPeriodParts.year, targetPeriodParts.code)
+          : null;
 
         // Fetch suburb detail for target quarter from materialized view
         const suburbDetailQuery = suburbFilter
@@ -304,16 +660,6 @@ export async function GET(request: Request) {
               WHERE priority = 'high'
               ${suburbCondition}
             ),
-            pending_outreach_cte AS (
-              SELECT COUNT(*) as count FROM outreach_properties
-              WHERE LOWER(status) = 'pending'
-              ${suburbCondition}
-            ),
-            sent_outreach_cte AS (
-              SELECT COUNT(*) as count FROM outreach_properties
-              WHERE LOWER(status) = 'sent'
-              ${suburbCondition}
-            ),
             today_followups_cte AS (
               SELECT COUNT(*) as count FROM appraisal_leads
               WHERE follow_up_at::date = CURRENT_DATE
@@ -326,23 +672,27 @@ export async function GET(request: Request) {
               AND contact_status NOT IN ('converted', 'lost')
               ${suburbCondition}
             ),
-            today_downloads_cte AS (
-              SELECT COUNT(*) as count FROM report_downloads
-              WHERE downloaded_at::date = CURRENT_DATE
+            outreach_status_cte AS (
+              SELECT
+                COUNT(*) FILTER (WHERE status = 'pending') as pending_count,
+                COUNT(*) FILTER (WHERE status = 'sent') as sent_count,
+                COUNT(*) as total_count
+              FROM outreach_properties
+              WHERE status IN ('pending', 'sent', 'partial')
+              ${suburbCondition}
             ),
-            total_downloads_cte AS (
-              SELECT COUNT(*) as count FROM report_downloads
+            downloads_summary_cte AS (
+              SELECT
+                COUNT(*) FILTER (WHERE downloaded_at::date = CURRENT_DATE) as today_count,
+                COUNT(*) as total_count,
+                COUNT(*) FILTER (WHERE downloaded_at >= date_trunc('month', CURRENT_TIMESTAMP)) as month_count
+              FROM report_downloads
             ),
-            month_downloads_cte AS (
-              SELECT COUNT(*) as count FROM report_downloads
-              WHERE downloaded_at >= date_trunc('month', CURRENT_TIMESTAMP)
-            ),
-            total_bookings_cte AS (
-              SELECT COUNT(*) as count FROM appraisal_leads
-            ),
-            month_bookings_cte AS (
-              SELECT COUNT(*) as count FROM appraisal_leads
-              WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)
+            bookings_summary_cte AS (
+              SELECT
+                COUNT(*) as total_count,
+                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)) as month_count
+              FROM appraisal_leads
             ),
             qr_codes_cte AS (
               SELECT COUNT(*) as count FROM suburb_qr_codes
@@ -354,12 +704,16 @@ export async function GET(request: Request) {
             outreach_by_suburb_full_cte AS MATERIALIZED (
               SELECT
                 op.suburb,
-                COUNT(DISTINCT op.id) FILTER (WHERE LOWER(op.status) IN ('pending', 'sent')) as pending_count,
-                COUNT(DISTINCT op.id) FILTER (WHERE LOWER(op.status) = 'sent') as sent_count,
-                COUNT(DISTINCT op.id) as total_count,
-                MAX(sl.sent_at) AS last_sent_at
+                COUNT(*) FILTER (WHERE op.status IN ('pending', 'sent'))::int as pending_count,
+                COUNT(*) FILTER (WHERE op.status = 'sent')::int as sent_count,
+                COUNT(*)::int as total_count,
+                MAX(sl.last_sent_at) AS last_sent_at
               FROM outreach_properties op
-              LEFT JOIN outreach_send_logs sl ON sl.outreach_property_id = op.id
+              LEFT JOIN (
+                SELECT outreach_property_id, MAX(sent_at) AS last_sent_at
+                FROM outreach_send_logs
+                GROUP BY outreach_property_id
+              ) sl ON sl.outreach_property_id = op.id
               WHERE op.suburb IS NOT NULL
               GROUP BY op.suburb
             ),
@@ -416,47 +770,47 @@ export async function GET(request: Request) {
               ORDER BY downloaded_at DESC
               LIMIT 5
             ),
-            sent_logs_buckets AS MATERIALIZED (
+            junk_props_raw AS (
               SELECT
-                sl.suburb,
-                sl.campaign_key,
-                date_trunc('day', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS day_bucket,
-                date_trunc('week', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
-                date_trunc('month', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
-                date_trunc('quarter', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
-                date_trunc('year', sl.sent_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
-                sl.outreach_property_id
-              FROM outreach_send_logs sl
-              WHERE sl.sent_at IS NOT NULL
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM outreach_property_quarter_status returned
-                  WHERE returned.outreach_property_id = sl.outreach_property_id
-                    AND returned.suburb_report_id = sl.suburb_report_id
-                    AND returned.status = 'pending'
-                )
-            ),
-            junk_props_base AS MATERIALIZED (
-              SELECT
+                op.id AS op_id,
                 op.suburb,
-                COALESCE(
-                  (SELECT sr.year::text || '_' || sr.quarter || '_' || sr.suburb
-                   FROM suburb_reports sr
-                   WHERE sr.suburb = op.suburb
-                     AND sr.status = 'active'
-                     AND sr.year IS NOT NULL
-                     AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
-                     AND sr.uploaded_at <= COALESCE(p.no_junk_mail_updated_at, op.created_at AT TIME ZONE 'Pacific/Auckland')
-                   ORDER BY sr.uploaded_at DESC
-                   LIMIT 1),
-                  op.last_campaign,
-                  op.campaign
-                ) AS campaign_key,
+                op.last_campaign,
+                op.campaign,
                 COALESCE(p.no_junk_mail_updated_at, op.created_at AT TIME ZONE 'Pacific/Auckland') AS junk_at,
                 p.id AS property_id
               FROM outreach_properties op
               JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
               WHERE p.no_junk_mail = TRUE
+            ),
+            junk_props_report AS MATERIALIZED (
+              SELECT op_id, campaign_key, uploaded_at
+              FROM (
+                SELECT
+                  j.op_id,
+                  sr.year::text || '_' || sr.quarter || '_' || sr.suburb AS campaign_key,
+                  sr.uploaded_at,
+                  ROW_NUMBER() OVER (PARTITION BY j.op_id ORDER BY sr.uploaded_at DESC) AS rn
+                FROM junk_props_raw j
+                JOIN suburb_reports sr
+                  ON sr.suburb = j.suburb
+                 AND sr.status = 'active'
+                 AND sr.year IS NOT NULL
+                 AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
+              ) matched
+              WHERE matched.rn = 1
+            ),
+            junk_props_base AS MATERIALIZED (
+              SELECT
+                j.suburb,
+                COALESCE(
+                  CASE WHEN r.uploaded_at <= j.junk_at THEN r.campaign_key END,
+                  j.last_campaign,
+                  j.campaign
+                ) AS campaign_key,
+                j.junk_at,
+                j.property_id
+              FROM junk_props_raw j
+              LEFT JOIN junk_props_report r ON r.op_id = j.op_id
             ),
             junk_props_buckets AS MATERIALIZED (
               SELECT
@@ -469,24 +823,29 @@ export async function GET(request: Request) {
                 date_trunc('year', junk_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
                 property_id
               FROM junk_props_base
+              ${targetCampaignPattern ? sql`WHERE campaign_key ~* ${targetCampaignPattern}` : sql``}
             ),
-            quarterly_suburb_sent_cte AS (
+            outreach_canonical AS MATERIALIZED (
               SELECT
+                sl.suburb,
                 CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
-                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-](Q[1-4])')
-                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
+                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-]Q([1-4])')
+                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M([0-9]{2})' AND sr.id IS NOT NULL
                   THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
                   WHEN sr.quarter ~ '^Q[1-4]$' AND sr.year IS NOT NULL
                   THEN sr.year || '-' || sr.quarter
                   WHEN sr.quarter ~ '^M[0-9]{2}$' AND sr.year IS NOT NULL
-                  THEN sr.year || '-' || substring(sr.quarter from 'M([0-9]{2})')
-                END AS quarter_key,
-                sl.suburb,
-                COUNT(DISTINCT sl.outreach_property_id) AS sent_count,
-                MAX(sl.sent_at) AS last_sent_at
+                  THEN sr.year || '-' || sr.quarter
+                END AS period_key,
+                sl.outreach_property_id AS pid,
+                sl.sent_at,
+                sl.campaign_key
               FROM outreach_send_logs sl
               LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
               WHERE sl.suburb IS NOT NULL
+                AND sl.sent_at IS NOT NULL
+                AND sr.id IS NOT NULL
+                ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
                 AND NOT EXISTS (
                   SELECT 1
                   FROM outreach_property_quarter_status returned
@@ -494,7 +853,59 @@ export async function GET(request: Request) {
                     AND returned.suburb_report_id = sl.suburb_report_id
                     AND returned.status = 'pending'
                 )
-                ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
+              UNION ALL
+              SELECT
+                quarter_status_sent.suburb,
+                quarter_status_sent.quarter_key,
+                quarter_status_sent.outreach_property_id,
+                quarter_status_sent.last_sent_at,
+                COALESCE(
+                  quarter_status_sent.campaign_keys[1],
+                  quarter_status_sent.year::text || '_' || quarter_status_sent.quarter || '_' || quarter_status_sent.suburb
+                )
+              FROM outreach_property_quarter_status quarter_status_sent
+              WHERE quarter_status_sent.quarter ~ '^Q[1-4]$'
+                AND (
+                  quarter_status_sent.status = 'sent'
+                  OR (
+                    quarter_status_sent.status = 'partial'
+                    AND COALESCE(quarter_status_sent.sent_count, 0) > 0
+                  )
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM outreach_send_logs sl
+                  WHERE sl.outreach_property_id = quarter_status_sent.outreach_property_id
+                    AND sl.suburb_report_id = quarter_status_sent.suburb_report_id
+                )
+                ${suburbFilter ? sql`AND quarter_status_sent.suburb = ${suburb}` : sql``}
+            ),
+            sent_logs_buckets AS MATERIALIZED (
+              SELECT
+                suburb,
+                campaign_key,
+                period_key,
+                pid,
+                sent_at,
+                date_trunc('day', sent_at AT TIME ZONE 'Pacific/Auckland') AS day_bucket,
+                date_trunc('week', sent_at AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
+                date_trunc('month', sent_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
+                date_trunc('quarter', sent_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
+                date_trunc('year', sent_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket
+              FROM outreach_canonical
+            ),
+            group_names_by_suburb AS MATERIALIZED (
+              SELECT DISTINCT suburb, campaign_key, 0::bigint AS sent_count
+              FROM outreach_canonical
+            ),
+            quarterly_suburb_sent_cte AS (
+              SELECT
+                period_key AS quarter_key,
+                suburb,
+                COUNT(DISTINCT pid) AS sent_count,
+                MAX(sent_at) AS last_sent_at
+              FROM outreach_canonical
+              WHERE period_key IS NOT NULL
               GROUP BY 1, 2
             ),
             dispatch_report_periods AS MATERIALIZED (
@@ -523,67 +934,6 @@ export async function GET(request: Request) {
                 AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
                 ${suburbFilter ? sql`AND sr.suburb = ${suburb}` : sql``}
             ),
-            dispatch_send_logs AS MATERIALIZED (
-              SELECT
-                sl.suburb,
-                CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
-                  THEN substring(sl.campaign_key from '^([0-9]{4})')::int * 4
-                       + (substring(sl.campaign_key from '[_-]Q([1-4])')::int - 1)
-                  WHEN sr.quarter ~ '^Q[1-4]$'
-                  THEN sr.year::int * 4 + (substring(sr.quarter from 'Q([1-4])')::int - 1)
-                END AS q_index,
-                CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
-                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-]Q([1-4])')
-                WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
-                  THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
-                  WHEN sr.quarter ~ '^Q[1-4]$'
-                  THEN sr.year::text || '-Q' || substring(sr.quarter from 'Q([1-4])')
-                  WHEN sr.quarter ~ '^M[0-9]{2}$'
-                  THEN sr.year::text || '-' || substring(sr.quarter from 'M([0-9]{2})')
-                END AS period_key,
-                sl.outreach_property_id AS pid,
-                sl.sent_at,
-                sl.campaign_key
-              FROM outreach_send_logs sl
-              LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
-              WHERE sl.suburb IS NOT NULL
-                ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM outreach_property_quarter_status returned
-                  WHERE returned.outreach_property_id = sl.outreach_property_id
-                    AND returned.suburb_report_id = sl.suburb_report_id
-                    AND returned.status = 'pending'
-                )
-              UNION ALL
-              SELECT
-                quarter_status_sent.suburb,
-                quarter_status_sent.year::int * 4
-                  + (substring(quarter_status_sent.quarter from 'Q([1-4])')::int - 1),
-                quarter_status_sent.quarter_key,
-                quarter_status_sent.outreach_property_id,
-                quarter_status_sent.last_sent_at,
-                COALESCE(
-                  quarter_status_sent.campaign_keys[1],
-                  quarter_status_sent.year::text || '_' || quarter_status_sent.quarter || '_' || quarter_status_sent.suburb
-                )
-              FROM outreach_property_quarter_status quarter_status_sent
-              WHERE quarter_status_sent.quarter ~ '^Q[1-4]$'
-                AND (
-                  quarter_status_sent.status = 'sent'
-                  OR (
-                    quarter_status_sent.status = 'partial'
-                    AND COALESCE(quarter_status_sent.sent_count, 0) > 0
-                  )
-                )
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM outreach_send_logs sl
-                  WHERE sl.outreach_property_id = quarter_status_sent.outreach_property_id
-                    AND sl.suburb_report_id = quarter_status_sent.suburb_report_id
-                )
-                ${suburbFilter ? sql`AND quarter_status_sent.suburb = ${suburb}` : sql``}
-            ),
             dispatch_quarter_sent AS MATERIALIZED (
               SELECT
                 suburb,
@@ -592,9 +942,18 @@ export async function GET(request: Request) {
                 MIN(sent_at) AS first_sent_at,
                 MAX(sent_at) AS last_sent_at,
                 MIN(campaign_key) AS campaign_key
-              FROM dispatch_send_logs
-              WHERE q_index IS NOT NULL
-              GROUP BY suburb, q_index
+              FROM (
+                SELECT
+                  suburb,
+                  (substring(period_key from '^([0-9]{4})')::int * 4
+                    + (substring(period_key from 'Q([1-4])$')::int - 1)) AS q_index,
+                  pid,
+                  sent_at,
+                  campaign_key
+                FROM outreach_canonical
+                WHERE period_key ~ '^[0-9]{4}-Q[1-4]$'
+              ) quarter_sent
+              GROUP BY 1, 2
             ),
             dispatch_month_sent AS MATERIALIZED (
               SELECT
@@ -604,9 +963,20 @@ export async function GET(request: Request) {
                 MIN(sent_at) AS first_sent_at,
                 MAX(sent_at) AS last_sent_at,
                 MIN(campaign_key) AS campaign_key
-              FROM dispatch_send_logs
-              WHERE q_index IS NULL AND period_key IS NOT NULL
+              FROM outreach_canonical
+              WHERE period_key ~ '^[0-9]{4}-[0-9]{2}$'
               GROUP BY suburb, period_key
+            ),
+            dispatch_legacy_sent AS MATERIALIZED (
+              SELECT
+                suburb,
+                campaign_key,
+                COUNT(DISTINCT pid) AS sent_count,
+                MIN(sent_at) AS first_sent_at,
+                MAX(sent_at) AS last_sent_at
+              FROM outreach_canonical
+              WHERE period_key IS NULL
+              GROUP BY suburb, campaign_key
             ),
             dispatch_audience_props AS MATERIALIZED (
               SELECT rq.suburb, rq.period_key, op.id AS pid
@@ -614,7 +984,7 @@ export async function GET(request: Request) {
               LEFT JOIN dispatch_quarter_sent prev
                 ON prev.suburb = rq.suburb AND prev.q_index = rq.q_index - 1
               JOIN outreach_properties op
-                ON op.suburb = rq.suburb AND LOWER(op.status) IN ('pending', 'sent')
+                ON op.suburb = rq.suburb AND op.status IN ('pending', 'sent')
               WHERE rq.period_type = 'quarter'
                 AND prev.suburb IS NULL
                 AND op.created_at < rq.period_end
@@ -627,42 +997,48 @@ export async function GET(request: Request) {
                AND returned.status = 'pending'
               WHERE rq.period_type = 'quarter'
               UNION
-              SELECT rq.suburb, rq.period_key, prevq.pid
+              SELECT rq.suburb, rq.period_key, outreach_canonical.pid
               FROM dispatch_report_periods rq
-              JOIN dispatch_send_logs prevq
-                ON prevq.suburb = rq.suburb AND prevq.q_index = rq.q_index - 1
-              WHERE rq.period_type = 'quarter'
-              UNION
-              SELECT rq.suburb, rq.period_key, cur.pid
-              FROM dispatch_report_periods rq
-              JOIN dispatch_send_logs cur
-                ON cur.suburb = rq.suburb AND cur.q_index = rq.q_index
+              JOIN outreach_canonical
+                ON outreach_canonical.suburb = rq.suburb
+               AND outreach_canonical.period_key = rq.period_key
               WHERE rq.period_type = 'quarter'
               UNION
               SELECT rq.suburb, rq.period_key, op.id
               FROM dispatch_report_periods rq
               JOIN outreach_properties op
-                ON op.suburb = rq.suburb AND LOWER(op.status) IN ('pending', 'sent')
+                ON op.suburb = rq.suburb AND op.status IN ('pending', 'sent')
               WHERE rq.period_type = 'month'
+            ),
+            dispatch_audience_periods AS MATERIALIZED (
+              SELECT DISTINCT suburb, period_key
+              FROM dispatch_audience_props
+            ),
+            dispatch_audience_counts AS MATERIALIZED (
+              SELECT
+                aud.suburb,
+                aud.period_key,
+                COUNT(DISTINCT aud.pid) AS total_count,
+                COUNT(DISTINCT aud.pid) FILTER (WHERE p.no_junk_mail = TRUE) AS junk_count
+              FROM dispatch_audience_props aud
+              LEFT JOIN outreach_properties op ON op.id = aud.pid
+              LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
+              GROUP BY aud.suburb, aud.period_key
             ),
             dispatch_period_aud AS MATERIALIZED (
               SELECT
                 aud.suburb,
                 aud.period_key,
-                COUNT(DISTINCT aud.pid) AS total_count,
-                COUNT(DISTINCT aud.pid) FILTER (
-                  WHERE p.no_junk_mail = TRUE
-                    AND NOT EXISTS (
-                      SELECT 1 FROM dispatch_send_logs sl2
-                      WHERE sl2.suburb = aud.suburb
-                        AND sl2.period_key = aud.period_key
-                        AND sl2.pid = aud.pid
-                    )
+                COALESCE(cnt.total_count, 0) AS total_count,
+                GREATEST(
+                  0,
+                  COALESCE(cnt.junk_count, 0) - COALESCE(sent.sent_count, 0)
                 ) AS junk_count
-              FROM dispatch_audience_props aud
-              LEFT JOIN outreach_properties op ON op.id = aud.pid
-              LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
-              GROUP BY aud.suburb, aud.period_key
+              FROM dispatch_audience_periods aud
+              LEFT JOIN dispatch_audience_counts cnt
+                ON cnt.suburb = aud.suburb AND cnt.period_key = aud.period_key
+              LEFT JOIN group_names_by_suburb sent
+                ON sent.suburb = aud.suburb AND sent.campaign_key = aud.period_key
             ),
             dispatch_by_suburb_cte AS (
               SELECT
@@ -691,30 +1067,20 @@ export async function GET(request: Request) {
                 n.sent_count AS total_count,
                 n.first_sent_at,
                 n.last_sent_at
-              FROM (
-                SELECT
-                  suburb,
-                  campaign_key,
-                  COUNT(DISTINCT pid) AS sent_count,
-                  MIN(sent_at) AS first_sent_at,
-                  MAX(sent_at) AS last_sent_at
-                FROM dispatch_send_logs
-                WHERE period_key IS NULL
-                GROUP BY suburb, campaign_key
-              ) n
+              FROM dispatch_legacy_sent n
             )
           SELECT
             (SELECT count FROM new_leads_cte) as new_leads,
             (SELECT count FROM high_priority_cte) as high_priority_leads,
-            (SELECT count FROM pending_outreach_cte) as pending_outreach,
-            (SELECT count FROM sent_outreach_cte) as sent_outreach,
+            (SELECT pending_count FROM outreach_status_cte) as pending_outreach,
+            (SELECT sent_count FROM outreach_status_cte) as sent_outreach,
             (SELECT count FROM today_followups_cte) as today_followups,
             (SELECT count FROM overdue_followups_cte) as overdue_followups,
-            (SELECT count FROM today_downloads_cte) as today_downloads,
-            (SELECT count FROM total_downloads_cte) as total_downloads,
-            (SELECT count FROM month_downloads_cte) as month_downloads,
-            (SELECT count FROM total_bookings_cte) as total_bookings,
-            (SELECT count FROM month_bookings_cte) as month_bookings,
+            (SELECT today_count FROM downloads_summary_cte) as today_downloads,
+            (SELECT total_count FROM downloads_summary_cte) as total_downloads,
+            (SELECT month_count FROM downloads_summary_cte) as month_downloads,
+            (SELECT total_count FROM bookings_summary_cte) as total_bookings,
+            (SELECT month_count FROM bookings_summary_cte) as month_bookings,
             (SELECT count FROM qr_codes_cte) as qr_codes_total,
             (SELECT count FROM pdf_reports_cte) as pdf_reports_total,
             (SELECT json_agg(row_to_json(s)) FROM outreach_by_suburb_cte s) as outreach_by_suburb,
@@ -727,19 +1093,19 @@ export async function GET(request: Request) {
             (SELECT total_new_devices FROM scans_summary_cte) as total_new_devices,
             (SELECT json_agg(row_to_json(s)) FROM scans_by_campaign_cte s) as scan_campaigns,
             (SELECT json_agg(row_to_json(s)) FROM downloads_by_suburb_cte s) as downloads_by_suburb,
-            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(day_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, day_bucket ORDER BY day_bucket) s) as sent_daily,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(day_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT pid)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, day_bucket ORDER BY day_bucket) s) as sent_daily,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
-              SELECT suburb, COUNT(DISTINCT outreach_property_id)::int AS sent_count
+              SELECT suburb, COUNT(DISTINCT pid)::int AS sent_count
               FROM sent_logs_buckets
               WHERE day_bucket = date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE 'Pacific/Auckland')
                 ${suburbFilter ? sql`AND suburb = ${suburb}` : sql``}
               GROUP BY suburb
               ORDER BY sent_count DESC, suburb ASC
             ) s) as today_suburb_sent,
-            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(week_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, week_bucket ORDER BY week_bucket) s) as sent_weekly,
-            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(month_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, month_bucket ORDER BY month_bucket) s) as sent_monthly,
-            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(quarter_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, quarter_bucket ORDER BY quarter_bucket) s) as sent_quarterly,
-            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(year_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT outreach_property_id)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, year_bucket ORDER BY year_bucket) s) as sent_yearly,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(week_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT pid)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, week_bucket ORDER BY week_bucket) s) as sent_weekly,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(month_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT pid)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, month_bucket ORDER BY month_bucket) s) as sent_monthly,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(quarter_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT pid)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, quarter_bucket ORDER BY quarter_bucket) s) as sent_quarterly,
+            (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(year_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT pid)::int AS sent FROM sent_logs_buckets GROUP BY suburb, campaign_key, year_bucket ORDER BY year_bucket) s) as sent_yearly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(day_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, day_bucket ORDER BY day_bucket) s) as junk_daily,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(week_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, week_bucket ORDER BY week_bucket) s) as junk_weekly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(month_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, month_bucket ORDER BY month_bucket) s) as junk_monthly,
@@ -761,50 +1127,8 @@ export async function GET(request: Request) {
         `);
 
         const row = dbResult.rows[0] as Record<string, unknown>;
-        const outreachBySuburb: Array<{ suburb: string; pending_count: number; sent_count: number; total_count: number; last_sent_at: string | null }> =
-          (Array.isArray(row.outreach_by_suburb) ? row.outreach_by_suburb as OutreachSuburbRow[] : [])
-            .map((item) => ({
-              suburb: item?.suburb || 'Unknown',
-              pending_count: Number(item?.pending_count) || 0,
-              sent_count: Number(item?.sent_count) || 0,
-              total_count: Number(item?.total_count) || 0,
-              last_sent_at: item?.last_sent_at ? new Date(item.last_sent_at).toISOString() : null,
-            }));
-        const sentSummarySuburbs: SuburbCountRow[] = Array.isArray(row.sent_summary_suburbs) && (row.sent_summary_suburbs as SuburbCountRow[]).length > 0
-          ? row.sent_summary_suburbs as SuburbCountRow[]
-          : outreachBySuburb.filter((item) => Number(item?.sent_count) > 1);
-
-        const sentSummary: SentSummaryItem[] = sentSummarySuburbs.map((item) => ({
-          suburb: item?.suburb || 'Unknown',
-          sent_count: Number(item?.sent_count) || 0,
-        }));
-
-        const todaySentSuburbs: SentSummaryItem[] = (Array.isArray(row.today_suburb_sent) ? row.today_suburb_sent as TodaySentSuburbRow[] : [])
-          .filter((item) => !!item?.suburb)
-          .map((item) => ({
-            suburb: item.suburb as string,
-            sent_count: Number(item.sent_count) || 0,
-          }))
-          .filter((item) => item.sent_count > 0)
-          .sort((a, b) => b.sent_count - a.sent_count || a.suburb.localeCompare(b.suburb));
-
-        const recentAppraisals = (Array.isArray(row.recent_appraisals) ? row.recent_appraisals as RecentAppraisalRow[] : [])
-          .filter((item) => !!item?.id)
-          .map((item) => ({
-            id: item.id as string,
-            client_name: item.client_name || 'Unknown',
-            email: item.email || '',
-            phone: item.phone || '',
-            suburb: item.suburb || '',
-            property_address: item.property_address || '',
-            contact_status: item.contact_status || '',
-            created_at: item.created_at ? new Date(item.created_at).toISOString() : null,
-          }))
-          .sort((a, b) => {
-            const ta = a.created_at ? new Date(a.created_at).getTime() : Number.NEGATIVE_INFINITY;
-            const tb = b.created_at ? new Date(b.created_at).getTime() : Number.NEGATIVE_INFINITY;
-            return tb - ta;
-          });
+        const outreachBySuburb = mapOutreachBySuburb(row.outreach_by_suburb);
+        const recentAppraisals = mapRecentAppraisals(row.recent_appraisals);
 
         const reportsResult = await db.execute(sql`
           SELECT suburb, quarter, year, file_url
@@ -813,41 +1137,9 @@ export async function GET(request: Request) {
           ORDER BY uploaded_at DESC
         `);
 
-        const reportsMap = new Map<string, string>();
-        for (const r of (Array.isArray(reportsResult.rows) ? reportsResult.rows as unknown as ActiveReportRow[] : [])) {
-          if (!r.suburb || !r.quarter || r.year == null) continue;
-          const key = `${r.suburb.trim().toLowerCase()}|${periodLabel(Number(r.year), r.quarter).toUpperCase()}`;
-          if (!reportsMap.has(key)) reportsMap.set(key, r.file_url || '');
-        }
+        const reportsMap = buildReportsMap(reportsResult.rows);
 
-        const quarterlyMap = new Map<string, QuarterlySentSuburb[]>();
-        for (const item of (Array.isArray(row.quarterly_suburb_sent) ? row.quarterly_suburb_sent as QuarterlySuburbSentRow[] : [])) {
-          if (!item.quarter_key || !item.suburb) continue;
-          const reportUrl = /^[0-9]{4}-Q[1-4]$/.test(item.quarter_key)
-            ? reportsMap.get(`${item.suburb.trim().toLowerCase()}|${item.quarter_key.toUpperCase()}`) || null
-            : null;
-          let arr = quarterlyMap.get(item.quarter_key);
-          if (!arr) { arr = []; quarterlyMap.set(item.quarter_key, arr); }
-          arr.push({
-            suburb: item.suburb,
-            sent_count: Number(item.sent_count) || 0,
-            last_sent_at: item.last_sent_at ? new Date(item.last_sent_at).toISOString() : null,
-            report_url: reportUrl,
-          });
-        }
-
-        const quarterlySentSummaries: QuarterlySentSummary[] = Array.from(quarterlyMap.entries())
-          .map(([quarterKey, suburbs]) => ({
-            quarter_key: quarterKey,
-            total_sent: suburbs.reduce((sum, s) => sum + s.sent_count, 0),
-            suburbs: suburbs.sort((a, b) => {
-              if (b.sent_count !== a.sent_count) return b.sent_count - a.sent_count;
-              const ta = a.last_sent_at ? new Date(a.last_sent_at).getTime() : Number.NEGATIVE_INFINITY;
-              const tb = b.last_sent_at ? new Date(b.last_sent_at).getTime() : Number.NEGATIVE_INFINITY;
-              return tb - ta;
-            }),
-          }))
-          .sort((a, b) => periodSortValue(b.quarter_key) - periodSortValue(a.quarter_key));
+        const sentSummary = buildSentSummary(row, outreachBySuburb, reportsMap);
 
         const scanCampaigns: ScanCampaignItem[] = Array.isArray(row.scan_campaigns) ? (row.scan_campaigns as ScanCampaignRow[]).map((item) => ({
           campaign_key: item?.campaign_key || '',
@@ -994,18 +1286,7 @@ export async function GET(request: Request) {
           pdfReportsTotal: Number(row.pdf_reports_total) || 0,
           recentAppraisals,
           outreachBySuburb,
-          sentSummary: {
-            total_sent: quarterlySentSummaries.length > 0
-              ? quarterlySentSummaries.reduce((sum, q) => sum + q.total_sent, 0)
-              : Number(row.sent_summary_total_sent) || sentSummary.reduce((sum: number, item) => sum + Number(item.sent_count || 0), 0),
-            suburb_count: Number(row.sent_summary_suburb_count) || sentSummary.length,
-            suburbs: sentSummary,
-            today: {
-              total_sent: todaySentSuburbs.reduce((sum, item) => sum + item.sent_count, 0),
-              suburbs: todaySentSuburbs,
-            },
-            quarterly: quarterlySentSummaries,
-          },
+          sentSummary,
           scanStats: {
             total_scans: Number(row.total_scans) || 0,
             total_unique: Number(row.total_unique_scans) || 0,
@@ -1047,7 +1328,7 @@ export async function GET(request: Request) {
       success: true,
       stats: result,
       suburb: suburb || 'all',
-      quarterKey: targetQuarterKey,
+      quarterKey: result.targetQuarterKey,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

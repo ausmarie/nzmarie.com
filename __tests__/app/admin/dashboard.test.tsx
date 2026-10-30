@@ -653,6 +653,12 @@ describe('Dashboard Stats API', () => {
       expect(screen.getByText('Total Appraisals')).toBeTruthy();
     }, { timeout: 3000 });
 
+    // The remaining cards render in the deferred batch; wait for them so the
+    // card order can be asserted.
+    await waitFor(() => {
+      expect(screen.getByText('Total Scans')).toBeTruthy();
+    }, { timeout: 3000 });
+
     const cards = Array.from(container.querySelectorAll('div.min-h-\\[192px\\]'));
     const labels = cards.map((card) =>
       ['Total Sent', 'Total Appraisals', 'Total Scans', 'Total Downloads']
@@ -841,6 +847,137 @@ describe('Dashboard Stats API', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('campaign-scan-logs-panel')).toBeTruthy();
+    }, { timeout: 3000 });
+  });
+
+  it('paints the priority cards from the summary while full stats is pending', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    let resolveFullStats: ((value: any) => void) | null = null;
+    const fullStatsPromise = new Promise((resolve) => {
+      resolveFullStats = resolve;
+    });
+
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (String(url).includes('part=summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            part: 'summary',
+            stats: {
+              sentSummary: {
+                total_sent: 214,
+                suburb_count: 1,
+                suburbs: [{ suburb: 'Oteha', sent_count: 209 }],
+                today: { total_sent: 0, suburbs: [] },
+                quarterly: [],
+              },
+              totalBookings: 9,
+              recentAppraisals: [
+                {
+                  id: 'appraisal-1',
+                  client_name: 'Vi',
+                  email: 'vipleiku@gmail.com',
+                  phone: '',
+                  suburb: 'Sunnynook',
+                  property_address: '249 Sunset Road',
+                  contact_status: 'not_contacted',
+                  created_at: '2026-10-06T05:30:08.784Z',
+                },
+              ],
+            },
+          }),
+        });
+      }
+      if (String(url).includes('/api/admin/bookings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: [], pagination: { page: 1, limit: 10, total: 0, totalPages: 0 } }),
+        });
+      }
+      return fullStatsPromise;
+    });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Sent')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    expect(screen.getByText('214')).toBeTruthy();
+    expect(screen.getByText('Total Appraisals')).toBeTruthy();
+    expect(screen.getByText('9')).toBeTruthy();
+    expect(screen.getByText('Vi')).toBeTruthy();
+
+    const urls = (global.fetch as any).mock.calls.map((call: any[]) => String(call[0]));
+    expect(urls[0]).toContain('part=summary');
+    expect(urls[1]).toBe('/api/admin/dashboard/stats');
+
+    // Heavy sections stay deferred until the full stats request resolves.
+    expect(screen.queryByText('Scan Trends')).toBeNull();
+
+    resolveFullStats!({
+      ok: true,
+      json: () => Promise.resolve({ success: true, stats: {} }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Scan Trends')).toBeTruthy();
+    }, { timeout: 3000 });
+  });
+
+  it('keeps the priority cards visible when the full stats request fails', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (String(url).includes('part=summary')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            part: 'summary',
+            stats: {
+              sentSummary: {
+                total_sent: 12,
+                suburb_count: 1,
+                suburbs: [{ suburb: 'Torbay', sent_count: 12 }],
+                today: { total_sent: 0, suburbs: [] },
+                quarterly: [],
+              },
+              totalBookings: 3,
+              recentAppraisals: [],
+            },
+          }),
+        });
+      }
+      if (String(url).includes('/api/admin/bookings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: [], pagination: { page: 1, limit: 10, total: 0, totalPages: 0 } }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Sent')).toBeTruthy();
+    }, { timeout: 3000 });
+
+    expect(screen.getByText('12')).toBeTruthy();
+    expect(screen.getByText('Total Appraisals')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to fetch dashboard data/i)).toBeTruthy();
     }, { timeout: 3000 });
   });
 });

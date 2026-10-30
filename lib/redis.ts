@@ -24,6 +24,26 @@ export async function invalidateDashboardStatsCache(): Promise<void> {
   }
 }
 
+// In-flight dashboard computations keyed by cache key. Two overlapping admin
+// loads (double effect, two tabs, a refresh right after load) would otherwise
+// each run the full aggregation and pay for it twice.
+const dashboardStatsInFlight = new Map<string, Promise<unknown>>();
+
+export async function getDashboardStatsCached<T>(
+  key: string,
+  fetchFn: () => Promise<T>,
+  ttlSeconds: number = 600
+): Promise<T> {
+  const pending = dashboardStatsInFlight.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+
+  const promise = getCachedOrFetch(key, fetchFn, ttlSeconds).finally(() => {
+    dashboardStatsInFlight.delete(key);
+  });
+  dashboardStatsInFlight.set(key, promise);
+  return promise;
+}
+
 export async function getCachedOrFetch<T>(
   key: string,
   fetchFn: () => Promise<T>,

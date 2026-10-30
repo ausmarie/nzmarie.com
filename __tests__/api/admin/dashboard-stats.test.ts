@@ -14,6 +14,7 @@ vi.mock('@/lib/drizzle', () => ({
 
 vi.mock('@/lib/redis', () => ({
   getCachedOrFetch: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()),
+  getDashboardStatsCached: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()),
 }));
 
 vi.mock('@/lib/campaign-tracker', () => ({
@@ -85,6 +86,100 @@ describe('GET /api/admin/dashboard/stats', () => {
     });
     expect(body.stats.downloadsBySuburb).toEqual([]);
     expect(body.stats.recentDownloads).toHaveLength(1);
+  });
+
+  it('returns a lightweight summary for progressive loading', async () => {
+    const summaryRow = {
+      sent_summary_suburbs: [
+        { suburb: 'Oteha', sent_count: '5' },
+        { suburb: 'Torbay', sent_count: '3' },
+      ],
+      sent_summary_suburb_count: '2',
+      sent_summary_total_sent: '8',
+      today_suburb_sent: [{ suburb: 'Albany', sent_count: '7' }],
+      quarter_overview_totals: [
+        { quarter_key: '2026-Q3', total_sent: '826' },
+        { quarter_key: '2026-Q2', total_sent: '1815' },
+      ],
+      total_bookings: '9',
+      recent_appraisals: [
+        {
+          id: 'new-1',
+          client_name: 'Latest Lead',
+          email: 'latest@example.com',
+          phone: '021 000 0002',
+          suburb: 'Sunnynook',
+          property_address: '249 Sunset Road, Sunnynook',
+          contact_status: 'not_contacted',
+          created_at: '2026-10-06T05:30:08.784Z',
+        },
+      ],
+    };
+
+    let summarySql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      summarySql = JSON.stringify(sql?.queryChunks ?? []);
+      return { rows: [summaryRow] };
+    }) as any);
+
+    const res = await GET(new Request('http://localhost/api/admin/dashboard/stats?part=summary'));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.part).toBe('summary');
+    expect(body.stats.totalBookings).toBe(9);
+    expect(body.stats.sentSummary).toEqual({
+      total_sent: 2641,
+      suburb_count: 2,
+      suburbs: [
+        { suburb: 'Oteha', sent_count: 5 },
+        { suburb: 'Torbay', sent_count: 3 },
+      ],
+      today: { total_sent: 7, suburbs: [{ suburb: 'Albany', sent_count: 7 }] },
+      quarterly: [
+        { quarter_key: '2026-Q3', total_sent: 826, suburbs: [] },
+        { quarter_key: '2026-Q2', total_sent: 1815, suburbs: [] },
+      ],
+    });
+    expect(body.stats.recentAppraisals).toHaveLength(1);
+    expect(body.stats.recentAppraisals[0].client_name).toBe('Latest Lead');
+    expect(body.stats.targetQuarterKey).toBe('2026-Q3');
+    expect(summarySql).toContain('today_sent_cte');
+    expect(summarySql).toContain('quarter_overview_totals');
+    expect(summarySql).not.toContain('dispatch_by_suburb_cte');
+    expect(summarySql).not.toContain('junk_props_base');
+    expect(summarySql).not.toContain('outreach_send_logs sl ON sl.outreach_property_id');
+    expect(body.stats.dispatchTrend).toBeUndefined();
+    // Summary must stay a single round trip: the report-URL lookup is only
+    // needed by the full payload and would make the priority cards wait.
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the summary Total Sent identical to the quarter overview totals', async () => {
+    // Guard against the headline drifting away from the quarter cards again.
+    const summaryRow = {
+      sent_summary_suburbs: [{ suburb: 'Oteha', sent_count: '9000' }],
+      sent_summary_suburb_count: '1',
+      sent_summary_total_sent: '9000',
+      quarterly_suburb_sent: [{ quarter_key: '2026-Q3', suburb: 'Oteha', sent_count: '9000' }],
+      quarter_overview_totals: [
+        { quarter_key: '2026-Q3', total_sent: '826' },
+        { quarter_key: '2026-Q2', total_sent: '1815' },
+      ],
+      today_suburb_sent: [],
+      total_bookings: '0',
+      recent_appraisals: [],
+    };
+
+    vi.mocked(db.execute).mockResolvedValue({ rows: [summaryRow] } as any);
+
+    const res = await GET(new Request('http://localhost/api/admin/dashboard/stats?part=summary'));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stats.sentSummary.total_sent).toBe(2641);
+    expect(body.stats.sentSummary.quarterly.map((q: { total_sent: number }) => q.total_sent)).toEqual([826, 1815]);
+    expect(body.quarterKey).toBe('2026-Q3');
   });
 
   it('returns 401 when not authenticated', async () => {
@@ -173,7 +268,7 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(capturedSql).toContain('FROM outreach_properties');
-    expect(capturedSql).toContain('WHERE LOWER(status) = \'sent\'');
+    expect(capturedSql).toContain("WHERE status = 'sent'");
     expect(capturedSql).toContain('FROM campaign_analytics');
     expect(capturedSql).not.toContain('outreach_selected_properties');
     expect(body.stats.sentSummary).toEqual({
@@ -568,12 +663,19 @@ describe('GET /api/admin/dashboard/stats', () => {
       dispatch_by_suburb: [],
     };
 
-    vi.mocked(db.execute).mockResolvedValue({ rows: [mockRow] } as any);
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      capturedSql += JSON.stringify(sql?.queryChunks ?? []);
+      return { rows: [mockRow] };
+    }) as any);
 
     const res = await GET(makeRequest());
     const body = await res.json();
 
     expect(res.status).toBe(200);
+    // Junk is also filtered in SQL so older quarters do not have to be
+    // aggregated and shipped to the client on every dashboard load.
+    expect(capturedSql).toContain('^2026[_-]Q3');
     expect(body.stats.dispatchTrend.daily).toEqual([
       { bucket: '2026-08-20', sent: 7, junk: 0 },
       { bucket: '2026-10-20', sent: 5, junk: 2 },
@@ -585,6 +687,88 @@ describe('GET /api/admin/dashboard/stats', () => {
       { bucket: '2026-08-20', sent: 7, junk: 0 },
     ]);
     expect(body.stats.dispatchTrend.seriesBySuburb.daily['Albany-Q3-2026']).toBeUndefined();
+  });
+
+  it('follows the quarter view as the active quarter, like the Top Cards', async () => {
+    for (const target of ['2026-Q4', '2027-Q3']) {
+      vi.clearAllMocks();
+      vi.mocked(auth).mockResolvedValue({ user: { email: 'admin@test.com' } } as any);
+      vi.mocked(isAdmin).mockReturnValue(true);
+
+      const [year, quarter] = target.split('-');
+      const targetCampaign = `${year}_${quarter}_Torbay`;
+      const baseRow = {
+        quarter_key: target,
+        quarter,
+        year: Number(year),
+        new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+        sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+        today_downloads: '0', total_downloads: '0', month_downloads: '0',
+        total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+        pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+        junk_daily: [
+          { suburb: 'Torbay', campaign_key: targetCampaign, bucket: `${year}-10-20`, junk: '4' },
+          { suburb: 'Torbay', campaign_key: '2026_Q3_Torbay', bucket: '2026-10-01', junk: '9' },
+          { suburb: 'Albany', campaign_key: 'favorites', bucket: '2026-10-01', junk: '50' },
+        ],
+        sent_daily: [], sent_weekly: [], junk_weekly: [],
+        sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+        sent_yearly: [], junk_yearly: [], dispatch_by_suburb: [],
+      };
+
+      let capturedSql = '';
+      vi.mocked(db.execute).mockImplementation(((sql: any) => {
+        const text = JSON.stringify(sql?.queryChunks ?? []);
+        capturedSql += text;
+        if (text.includes('latest_quarter_key')) {
+          return { rows: [{ quarter_key: target, latest_quarter_key: target }] };
+        }
+        return { rows: [baseRow] };
+      }) as any);
+
+      const res = await GET(makeRequest());
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.stats.targetQuarterKey).toBe(target);
+      expect(capturedSql).toContain(`^${year}[_-]${quarter}`);
+      expect(body.stats.dispatchTrend.seriesBySuburb.daily[`Torbay-${quarter}-${year}`]).toEqual([
+        { bucket: `${year}-10-20`, sent: 0, junk: 4 },
+      ]);
+      expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q3-2026']).toBeUndefined();
+      expect(body.stats.dispatchTrend.seriesBySuburb.daily['Albany-Q3-2026']).toBeUndefined();
+    }
+  });
+
+  it('falls back to live send activity while the quarter view is still empty', async () => {
+    const baseRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [], dispatch_by_suburb: [],
+    };
+
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      capturedSql += text;
+      if (text.includes('latest_quarter_key')) {
+        return { rows: [{ latest_quarter_key: '2026-Q4' }] };
+      }
+      return { rows: [baseRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stats.targetQuarterKey).toBe('2026-Q4');
+    expect(capturedSql).toContain('latest_live_quarter');
+    expect(capturedSql).toContain('^2026[_-]Q4');
   });
 
   it('filters dispatch trend by selected suburb', async () => {
@@ -754,20 +938,29 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(res.status).toBe(200);
     expect(allSql).toContain('quarterly_suburb_sent_cte');
     expect(allSql).toContain('substring(sl.campaign_key');
-    expect(allSql).toContain('COUNT(DISTINCT op.id)');
+    expect(allSql).toContain('outreach_by_suburb_full_cte');
+    expect(allSql).toContain("COUNT(*) FILTER (WHERE op.status = 'sent')");
     expect(allSql).toContain('[0-9]{4}');
     expect(allSql).toContain('[_-]Q([1-4])');
-    expect(allSql).toContain('cur.q_index = rq.q_index');
+    expect(allSql).toContain('outreach_canonical.period_key = rq.period_key');
     expect(allSql).toContain('returned.suburb_report_id = sl.suburb_report_id');
     expect(allSql).toContain("returned.status = 'pending'");
-    expect(allSql.match(/returned\.outreach_property_id = sl\.outreach_property_id/g)).toHaveLength(3);
+    expect(allSql.match(/returned\.outreach_property_id = sl\.outreach_property_id/g)).toHaveLength(1);
+    // The send log scan is now shared by the timeline, quarterly summary and
+    // dispatch aggregates instead of being repeated (and billed) three times.
+    expect((allSql.match(/FROM outreach_send_logs sl/g) || []).length).toBeLessThanOrEqual(3);
     expect(allSql).toContain('returned.quarter_key = rq.period_key');
     expect(allSql).toContain('quarter_status_sent.status = \'sent\'');
     expect(allSql).toContain('quarter_status_sent.outreach_property_id');
     expect(allSql).toContain('op.created_at < rq.period_end');
     expect(allSql).toContain('junk_props_base');
+    expect(allSql).toContain('junk_props_raw');
+    expect(allSql).toContain('junk_props_report');
+    expect(allSql).toContain('ROW_NUMBER() OVER (PARTITION BY j.op_id ORDER BY sr.uploaded_at DESC)');
+    expect(allSql).toContain('LEFT JOIN junk_props_report');
     expect(allSql).toContain('no_junk_mail_updated_at');
-    expect(allSql).toContain('sr.uploaded_at <= COALESCE(p.no_junk_mail_updated_at');
+    expect(allSql).toContain('CASE WHEN r.uploaded_at <= j.junk_at THEN r.campaign_key END');
+    expect(allSql).not.toContain('(SELECT sr.year::text');
     expect(allSql).toContain("op.created_at AT TIME ZONE 'Pacific/Auckland'");
     expect(allSql).not.toContain('dispatched_ids_cte');
     expect(allSql).not.toContain("AND LOWER(op.status) = 'pending'");
