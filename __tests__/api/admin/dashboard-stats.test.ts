@@ -631,7 +631,7 @@ describe('GET /api/admin/dashboard/stats', () => {
     ]);
   });
 
-  it('limits dispatch volume junk to the target report quarter', async () => {
+  it('preserves daily dispatch junk from all report periods', async () => {
     const mockRow = {
       quarter_key: '2026-Q3',
       quarter: 'Q3',
@@ -673,23 +673,23 @@ describe('GET /api/admin/dashboard/stats', () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    // Junk is also filtered in SQL so older quarters do not have to be
-    // aggregated and shipped to the client on every dashboard load.
-    expect(capturedSql).toContain('^2026[_-]Q3');
+    // Keep all dated report campaigns, rather than only the target quarter,
+    // while excluding unrelated keys such as "favorites".
+    expect(capturedSql).toContain('Q[1-4]');
     expect(body.stats.dispatchTrend.daily).toEqual([
-      { bucket: '2026-08-20', sent: 7, junk: 0 },
+      { bucket: '2026-08-20', sent: 7, junk: 9 },
       { bucket: '2026-10-20', sent: 5, junk: 2 },
+    ]);
+    expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q2-2026']).toEqual([
+      { bucket: '2026-08-20', sent: 7, junk: 9 },
     ]);
     expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q3-2026']).toEqual([
       { bucket: '2026-10-20', sent: 5, junk: 2 },
     ]);
-    expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q2-2026']).toEqual([
-      { bucket: '2026-08-20', sent: 7, junk: 0 },
-    ]);
     expect(body.stats.dispatchTrend.seriesBySuburb.daily['Albany-Q3-2026']).toBeUndefined();
   });
 
-  it('follows the quarter view as the active quarter, like the Top Cards', async () => {
+  it('preserves junk data from historical quarters when the active quarter changes', async () => {
     for (const target of ['2026-Q4', '2027-Q3']) {
       vi.clearAllMocks();
       vi.mocked(auth).mockResolvedValue({ user: { email: 'admin@test.com' } } as any);
@@ -731,11 +731,13 @@ describe('GET /api/admin/dashboard/stats', () => {
 
       expect(res.status).toBe(200);
       expect(body.stats.targetQuarterKey).toBe(target);
-      expect(capturedSql).toContain(`^${year}[_-]${quarter}`);
+      expect(capturedSql).toContain('Q[1-4]');
       expect(body.stats.dispatchTrend.seriesBySuburb.daily[`Torbay-${quarter}-${year}`]).toEqual([
         { bucket: `${year}-10-20`, sent: 0, junk: 4 },
       ]);
-      expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q3-2026']).toBeUndefined();
+      expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q3-2026']).toEqual([
+        { bucket: '2026-10-01', sent: 0, junk: 9 },
+      ]);
       expect(body.stats.dispatchTrend.seriesBySuburb.daily['Albany-Q3-2026']).toBeUndefined();
     }
   });
@@ -768,7 +770,7 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(res.status).toBe(200);
     expect(body.stats.targetQuarterKey).toBe('2026-Q4');
     expect(capturedSql).toContain('latest_live_quarter');
-    expect(capturedSql).toContain('^2026[_-]Q4');
+    expect(capturedSql).toContain('Q[1-4]');
   });
 
   it('lists a report period uploaded in Assets before anything was sent', async () => {

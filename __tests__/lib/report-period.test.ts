@@ -1,10 +1,26 @@
 import { describe, it, expect } from 'vitest';
 import {
+  campaignHasReportPeriod,
   campaignMatchesPeriod,
   latestPeriodKey,
   periodSortValue,
   reportDocumentPeriodKey,
 } from '@/lib/report-period';
+
+describe('campaignHasReportPeriod', () => {
+  it('recognizes report campaign keys across quarters and months', () => {
+    expect(campaignHasReportPeriod('2026_Q3_Torbay')).toBe(true);
+    expect(campaignHasReportPeriod('2025-M09-Albany')).toBe(true);
+    expect(campaignHasReportPeriod('2024_12_Browns Bay')).toBe(true);
+  });
+
+  it('rejects campaigns without a valid report period', () => {
+    expect(campaignHasReportPeriod('favorites')).toBe(false);
+    expect(campaignHasReportPeriod('2026_Q5_Torbay')).toBe(false);
+    expect(campaignHasReportPeriod('2026_M13_Torbay')).toBe(false);
+    expect(campaignHasReportPeriod(null)).toBe(false);
+  });
+});
 
 describe('reportDocumentPeriodKey', () => {
   it('stores monthly reports as a year-month key', () => {

@@ -5,7 +5,7 @@ import { getDashboardStatsCached } from '@/lib/redis';
 import { db } from '@/lib/drizzle';
 import { ensureCampaignTablesExist } from '@/lib/campaign-tracker';
 import { formatReportKey } from '@/lib/format-report';
-import { campaignMatchesPeriod, campaignPatternForPeriod, latestPeriodKey, parsePeriodParts, periodLabel, periodSortValue } from '@/lib/report-period';
+import { campaignHasReportPeriod, latestPeriodKey, periodLabel, periodSortValue, REPORT_CAMPAIGN_KEY_PATTERN } from '@/lib/report-period';
 import { sql } from 'drizzle-orm';
 
 interface SuburbCountRow {
@@ -403,7 +403,7 @@ export async function GET(request: Request) {
   // succession (e.g. a React effect firing twice) don't both run the heavy
   // aggregation and burn Registers twice. It also makes a stale cached payload
   // from before a fix impossible to keep serving for the whole TTL.
-  const cacheVersion = 8;
+  const cacheVersion = 9;
 
   try {
     await ensureCampaignTablesExist();
@@ -604,11 +604,6 @@ export async function GET(request: Request) {
           || ((quarterOverviewResult.rows[0] as unknown as { latest_quarter_key?: string })?.latest_quarter_key)
           || (quarterOverviewResult.rows[0] as unknown as QuarterOverviewRow)?.quarter_key
           || '2026-Q2';
-
-        const targetPeriodParts = parsePeriodParts(targetQuarterKey);
-        const targetCampaignPattern = targetPeriodParts
-          ? campaignPatternForPeriod(targetPeriodParts.year, targetPeriodParts.code)
-          : null;
 
         // Fetch suburb detail for target quarter from materialized view
         const suburbDetailQuery = suburbFilter
@@ -821,7 +816,7 @@ export async function GET(request: Request) {
                 date_trunc('year', junk_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
                 property_id
               FROM junk_props_base
-              ${targetCampaignPattern ? sql`WHERE campaign_key ~* ${targetCampaignPattern}` : sql``}
+              WHERE campaign_key ~* ${REPORT_CAMPAIGN_KEY_PATTERN}
             ),
             outreach_canonical AS MATERIALIZED (
               SELECT
@@ -1213,10 +1208,8 @@ export async function GET(request: Request) {
             ? rows.filter((r) => r.suburb === suburb || formatReportKey(r.campaign_key || r.suburb, r.suburb) === suburb)
             : rows;
 
-        // Dispatch Volume junk should only reflect the dashboard's target report
-        // period (e.g. 2026-Q3), not every junk property from older campaigns.
         const filterJunkRows = (rows: TrendRow[]): TrendRow[] =>
-          rows.filter((r) => campaignMatchesPeriod(r.campaign_key, targetQuarterKey));
+          rows.filter((r) => campaignHasReportPeriod(r.campaign_key));
 
         const builtDaily = buildTrend(filterRows(toTrendRows(row.sent_daily)), filterJunkRows(filterRows(toTrendRows(row.junk_daily))));
         const builtWeekly = buildTrend(filterRows(toTrendRows(row.sent_weekly)), filterJunkRows(filterRows(toTrendRows(row.junk_weekly))));

@@ -102,6 +102,13 @@ export function campaignPatternForPeriod(year: number, code: string): string {
   return `^${year}[_-]${normalized}`;
 }
 
+export const REPORT_CAMPAIGN_KEY_PATTERN =
+  '^[0-9]{4}[_-](Q[1-4]|M(0[1-9]|1[0-2])|0[1-9]|1[0-2])([_-]|$)';
+
+export function campaignHasReportPeriod(campaign: string | null | undefined): boolean {
+  return new RegExp(REPORT_CAMPAIGN_KEY_PATTERN, 'i').test((campaign || '').trim());
+}
+
 /**
  * Checks whether a campaign key (e.g. "2026_Q3_Torbay") belongs to a report
  * period key (e.g. "2026-Q3"). Campaign keys without a recognizable period are
