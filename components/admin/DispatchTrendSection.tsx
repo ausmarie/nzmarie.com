@@ -121,7 +121,9 @@ function DispatchVolumeChart({
     : trend[granularity]) ?? [];
   const sentTotal = series.reduce((sum, b) => sum + b.sent, 0);
   const junkTotal = series.reduce((sum, b) => sum + b.junk, 0);
-  const activeSuburbs = trend.bySuburb.filter((b) => b.sent_count > 0 || b.junk_count > 0).length;
+  const activeSuburbs = trend.bySuburb.filter(
+    (b) => b.sent_count > 0 || b.junk_count > 0 || b.total_count > 0
+  ).length;
 
   return (
     <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 sm:p-6">
@@ -382,7 +384,11 @@ function SuburbDispatchTimeline({
                         </td>
                         <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.first_sent_at) : '-'}</td>
                         <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.last_sent_at) : '-'}</td>
-                        <td className="px-3 py-2.5 text-right font-semibold text-slate-900">{s.total_count}</td>
+                        {/* Pending = 整体 audience minus the junk-mail addresses that
+                            cannot receive the letter (sent + unsent = pending). */}
+                        <td className="px-3 py-2.5 text-right font-semibold text-slate-900">
+                          {Math.max(0, s.total_count - s.junk_count)}
+                        </td>
                         <td className="px-3 py-2.5">
                           {s.report_url ? (
                             <a

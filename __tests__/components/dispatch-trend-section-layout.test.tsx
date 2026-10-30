@@ -80,7 +80,8 @@ describe('SuburbDispatchTimeline layout', () => {
     expect(cells[3]).toBe('106 (24%)');
     expect(cells[4]).toBeTruthy();
     expect(cells[5]).toBeTruthy();
-    expect(cells[6]).toBe('437');
+    // Pending = audience minus junk mail addresses (437 - 106).
+    expect(cells[6]).toBe('331');
     expect(cells[7]).toBe('View Report');
     expect(cells[8]).toBe('131/437');
   });

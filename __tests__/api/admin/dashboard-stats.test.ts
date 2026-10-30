@@ -771,6 +771,223 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(capturedSql).toContain('^2026[_-]Q4');
   });
 
+  it('lists a report period uploaded in Assets before anything was sent', async () => {
+    // Regression: Long Bay had a 2026-Q3 report uploaded in Assets, but because
+    // the suburb already sent mail in 2026-Q2 the quarter audience was empty,
+    // so the row came back as 0/0/0/0 and the timeline hid it entirely.
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Long Bay',
+          campaign_key: '2026_Q3_Long Bay',
+          period_key: '2026-Q3',
+          sent_count: '0',
+          junk_count: '24',
+          total_count: '126',
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+    };
+
+    let allSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) {
+        return {
+          rows: [{ suburb: 'Long Bay', quarter: 'Q3', year: 2026, file_url: 'https://example.com/long-bay-q3.pdf' }],
+        };
+      }
+      allSql += text;
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stats.dispatchTrend.bySuburb).toEqual([
+      {
+        suburb: 'Long Bay-Q3-2026',
+        raw_suburb: 'Long Bay',
+        quarter_key: '2026-Q3',
+        report_url: 'https://example.com/long-bay-q3.pdf',
+        sent_count: 0,
+        junk_count: 24,
+        unsent_count: 102,
+        total_count: 126,
+        first_sent_at: null,
+        last_sent_at: null,
+      },
+    ]);
+    // The audience CTE must keep the suburb working set for a period that has
+    // no dispatch activity yet, otherwise the row above is all zeros.
+    expect(allSql).toContain('dispatch_period_activity');
+    expect(allSql).toContain('(prev.suburb IS NULL OR act.suburb IS NULL)');
+  });
+
+  it('reports junk mail per report quarter, not as one running total', async () => {
+    // Torbay: 2026-Q2 was the first campaign for the suburb, so the bulk of the
+    // no-junk-mail addresses were discovered then; 2026-Q3 only has the few new
+    // ones. Each quarter must keep its own figure.
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Torbay',
+          campaign_key: '2026_Q3_Torbay',
+          period_key: '2026-Q3',
+          sent_count: '345',
+          junk_count: '12',
+          total_count: '357',
+          first_sent_at: '2026-10-19T00:00:00.000Z',
+          last_sent_at: '2026-10-26T00:00:00.000Z',
+        },
+        {
+          suburb: 'Torbay',
+          campaign_key: '2026_Q2_Torbay',
+          period_key: '2026-Q2',
+          sent_count: '357',
+          junk_count: '261',
+          total_count: '618',
+          first_sent_at: '2026-07-01T00:00:00.000Z',
+          last_sent_at: '2026-09-14T00:00:00.000Z',
+        },
+      ],
+    };
+
+    let allSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) return { rows: [] };
+      allSql += text;
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    const bySuburb = body.stats.dispatchTrend.bySuburb as Array<{
+      suburb: string;
+      quarter_key: string;
+      sent_count: number;
+      junk_count: number;
+      unsent_count: number;
+      total_count: number;
+    }>;
+    const q2 = bySuburb.find((row) => row.quarter_key === '2026-Q2')!;
+    const q3 = bySuburb.find((row) => row.quarter_key === '2026-Q3')!;
+
+    expect(q2).toMatchObject({ suburb: 'Torbay-Q2-2026', junk_count: 261, sent_count: 357, unsent_count: 0, total_count: 618 });
+    expect(q3).toMatchObject({ suburb: 'Torbay-Q3-2026', junk_count: 12, sent_count: 345, unsent_count: 0, total_count: 357 });
+    // Junk is a slice of the audience, so the progress bar can never overflow.
+    for (const row of bySuburb) {
+      expect(row.sent_count + row.junk_count).toBeLessThanOrEqual(row.total_count);
+    }
+
+    // Junk is attributed to the campaign that was current when the address was
+    // flagged, and those addresses are part of that quarter's audience.
+    expect(allSql).toContain('dispatch_junk_periods');
+    expect(allSql).toContain('dispatch_junk_by_period');
+    expect(allSql).toContain('sr.uploaded_at <= j.junk_at');
+    expect(allSql).toContain('FROM dispatch_junk_periods');
+    // Junk mail only exists for a quarter that actually dispatched something.
+    expect(allSql).toContain('ps.sent_count > 0');
+  });
+
+  it('does not count junk mail for a quarter that was never dispatched', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Castor Bay',
+          campaign_key: '2026_Q2_Castor Bay',
+          period_key: '2026-Q2',
+          sent_count: '0',
+          junk_count: '0',
+          total_count: '171',
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+    };
+
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) return { rows: [] };
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(body.stats.dispatchTrend.bySuburb).toEqual([
+      {
+        suburb: 'Castor Bay-Q2-2026',
+        raw_suburb: 'Castor Bay',
+        quarter_key: '2026-Q2',
+        report_url: null,
+        sent_count: 0,
+        junk_count: 0,
+        unsent_count: 171,
+        total_count: 171,
+        first_sent_at: null,
+        last_sent_at: null,
+      },
+    ]);
+  });
+
+  it('counts send logs that have no report link (legacy campaigns)', async () => {
+    // Regression guard: an inner join on suburb_reports used to drop Q2 logs
+    // whose suburb_report_id was never backfilled, collapsing Q2 sent counts.
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [], dispatch_by_suburb: [],
+    };
+
+    let allSql = '';
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) return { rows: [] };
+      allSql += text;
+      return { rows: [mockRow] };
+    }) as any);
+
+    await GET(makeRequest());
+
+    expect(allSql).toContain('FROM outreach_send_logs sl');
+    expect(allSql).not.toContain('AND sr.id IS NOT NULL');
+  });
+
   it('filters dispatch trend by selected suburb', async () => {
     const mockRow = {
       new_leads: '1', high_priority_leads: '0', pending_outreach: '0',
@@ -952,14 +1169,17 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(allSql).toContain('returned.quarter_key = rq.period_key');
     expect(allSql).toContain('quarter_status_sent.status = \'sent\'');
     expect(allSql).toContain('quarter_status_sent.outreach_property_id');
-    expect(allSql).toContain('op.created_at < rq.period_end');
+    // The audience must not be filtered by outreach_properties.created_at: those
+    // rows are imported after the fact, so for 2026-Q2 that filter emptied the
+    // audience and collapsed junk/unsent to zero.
+    expect(allSql).not.toContain('op.created_at < rq.period_end');
     expect(allSql).toContain('junk_props_base');
     expect(allSql).toContain('junk_props_raw');
     expect(allSql).toContain('junk_props_report');
     expect(allSql).toContain('ROW_NUMBER() OVER (PARTITION BY j.op_id ORDER BY sr.uploaded_at DESC)');
     expect(allSql).toContain('LEFT JOIN junk_props_report');
     expect(allSql).toContain('no_junk_mail_updated_at');
-    expect(allSql).toContain('CASE WHEN r.uploaded_at <= j.junk_at THEN r.campaign_key END');
+    expect(allSql).toContain('sr.uploaded_at <= j.junk_at');
     expect(allSql).not.toContain('(SELECT sr.year::text');
     expect(allSql).toContain("op.created_at AT TIME ZONE 'Pacific/Auckland'");
     expect(allSql).not.toContain('dispatched_ids_cte');

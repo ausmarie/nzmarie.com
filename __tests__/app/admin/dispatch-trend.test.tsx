@@ -170,12 +170,22 @@ describe('DispatchTrendSection', () => {
 
     expect(screen.getByText('Pending')).toBeTruthy();
     expect(screen.getByText('Unsent')).toBeTruthy();
-    expect(screen.getByText('20')).toBeTruthy();
-    expect(screen.getByText('1')).toBeTruthy();
-    expect(screen.getByText('15 (75%)')).toBeTruthy();
-    expect(screen.getByText('2 (10%)')).toBeTruthy();
-    expect(screen.getByText('3 (15%)')).toBeTruthy();
-    expect(screen.getAllByText('0 (0%)')).toHaveLength(2);
+
+    const rows = screen.getAllByRole('row');
+    const torbay = Array.from(rows[2].querySelectorAll('td')).map((cell) => cell.textContent);
+    const albany = Array.from(rows[3].querySelectorAll('td')).map((cell) => cell.textContent);
+
+    // [suburb, sent, unsent, junk, first sent, last sent, pending, report, progress]
+    expect(torbay[1]).toBe('15 (75%)');
+    expect(torbay[2]).toBe('2 (10%)');
+    expect(torbay[3]).toBe('3 (15%)');
+    // Pending is the audience minus junk mail: 20 - 3.
+    expect(torbay[6]).toBe('17');
+
+    expect(albany[1]).toBe('0 (0%)');
+    expect(albany[2]).toBe('0 (0%)');
+    expect(albany[3]).toBe('1 (100%)');
+    expect(albany[6]).toBe('0');
   });
 
   it('shows Junk column header with count and percentage', () => {
@@ -364,6 +374,123 @@ describe('DispatchTrendSection', () => {
     expect(rows[2].textContent).toContain('Oteha');
     expect(rows[4].textContent).toContain('Oteha');
     expect(rows[5].textContent).toContain('Torbay');
+  });
+
+  it('shows a report period that has an audience but no sends yet', () => {
+    // Long Bay 2026-Q3: report uploaded in Assets, nothing dispatched yet.
+    // It must still appear under its quarter instead of being dropped.
+    const trend: DispatchTrend = {
+      ...mockTrend,
+      bySuburb: [
+        {
+          suburb: 'Long Bay-Q3-2026',
+          quarter_key: '2026-Q3',
+          sent_count: 0,
+          junk_count: 0,
+          unsent_count: 126,
+          total_count: 126,
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+    };
+
+    render(<DispatchTrendSection trend={trend} />);
+
+    const rows = screen.getAllByRole('row');
+    expect(rows[1].textContent).toContain('2026-Q3');
+    expect(rows[2].textContent).toContain('Long Bay');
+    expect(rows[2].textContent).not.toContain('Long Bay-Q3-2026');
+    expect(rows[2].textContent).toContain('0 (0%)');
+    expect(rows[2].textContent).toContain('126 (100%)');
+    // Pending column = audience minus junk mail = 126 - 0.
+    expect(rows[2].textContent).toContain('126');
+    expect(screen.getByText('1 report')).toBeTruthy();
+  });
+
+  it('shows Pending as the audience minus junk mail', () => {
+    // Totara Vale 2026-Q2: 158 properties in scope, 30 cannot be mailed because
+    // of a No Junk Mail sign, 128 already sent -> Pending 128, Unsent 0.
+    const trend: DispatchTrend = {
+      ...mockTrend,
+      bySuburb: [
+        {
+          suburb: 'Totara Vale-Q2-2026',
+          quarter_key: '2026-Q2',
+          sent_count: 128,
+          junk_count: 30,
+          unsent_count: 0,
+          total_count: 158,
+          first_sent_at: '2026-09-13T00:00:00.000Z',
+          last_sent_at: '2026-09-16T00:00:00.000Z',
+        },
+      ],
+    };
+
+    render(<DispatchTrendSection trend={trend} />);
+
+    const cells = Array.from(screen.getAllByRole('row')[2].querySelectorAll('td')).map((cell) => cell.textContent);
+    const [, sent, unsent, junk, , , pending] = cells;
+
+    expect(sent).toBe('128 (81%)');
+    expect(unsent).toBe('0 (0%)');
+    expect(junk).toBe('30 (19%)');
+    expect(pending).toBe('128');
+    // The progress bar still tracks the full audience.
+    expect(screen.getAllByRole('row')[2].textContent).toContain('128/158');
+  });
+
+  it('shows the full audience as Pending when a quarter was never dispatched', () => {
+    // Castor Bay 2026-Q2: nothing sent, so there is no junk mail figure and the
+    // whole audience is still to be mailed.
+    const trend: DispatchTrend = {
+      ...mockTrend,
+      bySuburb: [
+        {
+          suburb: 'Castor Bay-Q2-2026',
+          quarter_key: '2026-Q2',
+          sent_count: 0,
+          junk_count: 0,
+          unsent_count: 171,
+          total_count: 171,
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+    };
+
+    render(<DispatchTrendSection trend={trend} />);
+
+    const cells = Array.from(screen.getAllByRole('row')[2].querySelectorAll('td')).map((cell) => cell.textContent);
+    const [, sent, unsent, junk, , , pending] = cells;
+
+    expect(sent).toBe('0 (0%)');
+    expect(unsent).toBe('171 (100%)');
+    expect(junk).toBe('0 (0%)');
+    expect(pending).toBe('171');
+  });
+
+  it('hides rows that have no audience and no activity at all', () => {
+    const trend: DispatchTrend = {
+      ...mockTrend,
+      bySuburb: [
+        {
+          suburb: 'Ghost Suburb-Q3-2026',
+          quarter_key: '2026-Q3',
+          sent_count: 0,
+          junk_count: 0,
+          unsent_count: 0,
+          total_count: 0,
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+    };
+
+    render(<DispatchTrendSection trend={trend} />);
+
+    expect(screen.queryByText('Ghost Suburb')).toBeNull();
+    expect(screen.queryByText('2026-Q3')).toBeNull();
   });
 
   it('makes the volume chart horizontally scrollable when there are many buckets', () => {

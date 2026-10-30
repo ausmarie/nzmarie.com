@@ -253,18 +253,28 @@ describe('Outreach page', () => {
     expect(await screen.findByText('15 Marine Parade')).toBeTruthy();
     expect(await screen.findByText('22 Beach Road')).toBeTruthy();
 
-    const cardCheckboxes = await screen.findAllByRole('checkbox');
-    expect(cardCheckboxes).toHaveLength(2);
-    cardCheckboxes.forEach((checkbox) => fireEvent.click(checkbox));
+    // Tick each card and wait for React to commit it. Clicking every checkbox in
+    // one go races with the list re-render under load, which used to leave the
+    // selection empty and fail intermittently.
+    const tickAllCards = async () => {
+      const total = (await screen.findAllByRole('checkbox')).length;
+      for (let i = 0; i < total; i++) {
+        const boxes = await screen.findAllByRole('checkbox');
+        if (!(boxes[i] as HTMLInputElement).checked) fireEvent.click(boxes[i]);
+        await waitFor(() => {
+          const refreshed = screen.getAllByRole('checkbox') as HTMLInputElement[];
+          expect(refreshed.filter((checkbox) => checkbox.checked)).toHaveLength(i + 1);
+        }, { timeout: 10000 });
+      }
+    };
+
+    await tickAllCards();
 
     // Confirm the selection actually committed before opening the modal, which
     // reads selected.size at click time.
     await waitFor(() => {
-      cardCheckboxes.forEach((checkbox) => {
-        expect((checkbox as HTMLInputElement).checked).toBe(true);
-      });
-      expect(screen.getByText('2 addresses selected')).toBeTruthy();
-    }, { timeout: 5000 });
+      expect(screen.getAllByText(/2 addresses selected/i).length).toBeGreaterThan(0);
+    }, { timeout: 10000 });
 
     const sendButtons = await screen.findAllByRole('button', { name: /Send Report/i });
     fireEvent.click(sendButtons[0]);
@@ -272,7 +282,7 @@ describe('Outreach page', () => {
     expect(
       await screen.findByText(/Selected 2 target addresses/i, {}, { timeout: 5000 })
     ).toBeTruthy();
-  });
+  }, 20000);
 });
 
 describe('Outreach page - Dual Pagination Mode', () => {

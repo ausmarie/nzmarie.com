@@ -401,8 +401,9 @@ export async function GET(request: Request) {
   let targetQuarterKey = quarterKey || '2026-Q2';
   // Bumped whenever the underlying data changed so two loads triggered in quick
   // succession (e.g. a React effect firing twice) don't both run the heavy
-  // aggregation and burn Registers twice.
-  const cacheVersion = 6;
+  // aggregation and burn Registers twice. It also makes a stale cached payload
+  // from before a fix impossible to keep serving for the whole TTL.
+  const cacheVersion = 8;
 
   try {
     await ensureCampaignTablesExist();
@@ -783,12 +784,11 @@ export async function GET(request: Request) {
               WHERE p.no_junk_mail = TRUE
             ),
             junk_props_report AS MATERIALIZED (
-              SELECT op_id, campaign_key, uploaded_at
+              SELECT op_id, campaign_key
               FROM (
                 SELECT
                   j.op_id,
                   sr.year::text || '_' || sr.quarter || '_' || sr.suburb AS campaign_key,
-                  sr.uploaded_at,
                   ROW_NUMBER() OVER (PARTITION BY j.op_id ORDER BY sr.uploaded_at DESC) AS rn
                 FROM junk_props_raw j
                 JOIN suburb_reports sr
@@ -796,19 +796,17 @@ export async function GET(request: Request) {
                  AND sr.status = 'active'
                  AND sr.year IS NOT NULL
                  AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
+                 AND sr.uploaded_at <= j.junk_at
               ) matched
               WHERE matched.rn = 1
             ),
             junk_props_base AS MATERIALIZED (
               SELECT
                 j.suburb,
-                COALESCE(
-                  CASE WHEN r.uploaded_at <= j.junk_at THEN r.campaign_key END,
-                  j.last_campaign,
-                  j.campaign
-                ) AS campaign_key,
+                COALESCE(r.campaign_key, j.last_campaign, j.campaign) AS campaign_key,
                 j.junk_at,
-                j.property_id
+                j.property_id,
+                j.op_id
               FROM junk_props_raw j
               LEFT JOIN junk_props_report r ON r.op_id = j.op_id
             ),
@@ -830,7 +828,7 @@ export async function GET(request: Request) {
                 sl.suburb,
                 CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
                   THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-]Q([1-4])')
-                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M([0-9]{2})' AND sr.id IS NOT NULL
+                  WHEN sl.campaign_key ~ '^[0-9]{4}[_-]M([0-9]{2})'
                   THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-]M([0-9]{2})')
                   WHEN sr.quarter ~ '^Q[1-4]$' AND sr.year IS NOT NULL
                   THEN sr.year || '-' || sr.quarter
@@ -844,7 +842,6 @@ export async function GET(request: Request) {
               LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
               WHERE sl.suburb IS NOT NULL
                 AND sl.sent_at IS NOT NULL
-                AND sr.id IS NOT NULL
                 ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
                 AND NOT EXISTS (
                   SELECT 1
@@ -892,10 +889,6 @@ export async function GET(request: Request) {
                 date_trunc('month', sent_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
                 date_trunc('quarter', sent_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
                 date_trunc('year', sent_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket
-              FROM outreach_canonical
-            ),
-            group_names_by_suburb AS MATERIALIZED (
-              SELECT DISTINCT suburb, campaign_key, 0::bigint AS sent_count
               FROM outreach_canonical
             ),
             quarterly_suburb_sent_cte AS (
@@ -978,16 +971,76 @@ export async function GET(request: Request) {
               WHERE period_key IS NULL
               GROUP BY suburb, campaign_key
             ),
+            dispatch_period_activity AS MATERIALIZED (
+              SELECT DISTINCT suburb, period_key
+              FROM outreach_canonical
+              WHERE period_key IS NOT NULL
+              UNION
+              SELECT DISTINCT suburb, quarter_key
+              FROM outreach_property_quarter_status
+              WHERE quarter_key ~ '^[0-9]{4}-Q[1-4]$'
+            ),
+            -- Junk mail is attributed to the report that was current when the
+            -- property was flagged (same rule as the Dispatch Volume chart), so
+            -- a suburb's first campaign shows the bulk of its junk mail and the
+            -- following campaigns only show newly discovered addresses.
+            dispatch_junk_periods AS MATERIALIZED (
+              SELECT
+                suburb,
+                CASE WHEN campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
+                  THEN substring(campaign_key from '^([0-9]{4})') || '-Q' || substring(campaign_key from '[_-]Q([1-4])')
+                  WHEN campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
+                  THEN substring(campaign_key from '^([0-9]{4})') || '-' || substring(campaign_key from '[_-]M([0-9]{2})')
+                END AS period_key,
+                op_id AS pid
+              FROM junk_props_base
+            ),
+            dispatch_sent_pairs AS MATERIALIZED (
+              SELECT DISTINCT suburb, period_key, pid
+              FROM outreach_canonical
+              WHERE period_key IS NOT NULL
+            ),
+            dispatch_period_sent AS MATERIALIZED (
+              SELECT suburb, period_key, COUNT(DISTINCT pid) AS sent_count
+              FROM outreach_canonical
+              WHERE period_key ~ '^[0-9]{4}-(Q[1-4]|[0-9]{2})$'
+              GROUP BY suburb, period_key
+            ),
+            dispatch_junk_by_period AS MATERIALIZED (
+              SELECT
+                j.suburb,
+                j.period_key,
+                COUNT(DISTINCT j.pid) FILTER (WHERE sent.pid IS NULL) AS junk_count
+              FROM dispatch_junk_periods j
+              -- Junk mail is only ever "produced" by a campaign that actually went
+              -- out: a quarter with no dispatch has no junk mail figure at all.
+              JOIN dispatch_period_sent ps
+                ON ps.suburb = j.suburb
+               AND ps.period_key = j.period_key
+               AND ps.sent_count > 0
+              LEFT JOIN dispatch_sent_pairs sent
+                ON sent.suburb = j.suburb
+               AND sent.period_key = j.period_key
+               AND sent.pid = j.pid
+              WHERE j.period_key IS NOT NULL
+              GROUP BY j.suburb, j.period_key
+            ),
             dispatch_audience_props AS MATERIALIZED (
               SELECT rq.suburb, rq.period_key, op.id AS pid
               FROM dispatch_report_periods rq
               LEFT JOIN dispatch_quarter_sent prev
                 ON prev.suburb = rq.suburb AND prev.q_index = rq.q_index - 1
+              LEFT JOIN dispatch_period_activity act
+                ON act.suburb = rq.suburb AND act.period_key = rq.period_key
               JOIN outreach_properties op
                 ON op.suburb = rq.suburb AND op.status IN ('pending', 'sent')
               WHERE rq.period_type = 'quarter'
-                AND prev.suburb IS NULL
-                AND op.created_at < rq.period_end
+                -- Use the full suburb audience when the previous quarter was not
+                -- sent, and also for a brand new report period that has no
+                -- planned/sent properties yet (report uploaded in Assets but no
+                -- dispatch activity). Otherwise the suburb×period row would be
+                -- all zeros and never show up in the timeline.
+                AND (prev.suburb IS NULL OR act.suburb IS NULL)
               UNION
               SELECT rq.suburb, rq.period_key, returned.outreach_property_id
               FROM dispatch_report_periods rq
@@ -1009,6 +1062,14 @@ export async function GET(request: Request) {
               JOIN outreach_properties op
                 ON op.suburb = rq.suburb AND op.status IN ('pending', 'sent')
               WHERE rq.period_type = 'month'
+              UNION
+              SELECT j.suburb, j.period_key, j.pid
+              FROM dispatch_junk_periods j
+              JOIN dispatch_period_sent ps
+                ON ps.suburb = j.suburb
+               AND ps.period_key = j.period_key
+               AND ps.sent_count > 0
+              WHERE j.period_key IS NOT NULL
             ),
             dispatch_audience_periods AS MATERIALIZED (
               SELECT DISTINCT suburb, period_key
@@ -1018,11 +1079,8 @@ export async function GET(request: Request) {
               SELECT
                 aud.suburb,
                 aud.period_key,
-                COUNT(DISTINCT aud.pid) AS total_count,
-                COUNT(DISTINCT aud.pid) FILTER (WHERE p.no_junk_mail = TRUE) AS junk_count
+                COUNT(DISTINCT aud.pid) AS total_count
               FROM dispatch_audience_props aud
-              LEFT JOIN outreach_properties op ON op.id = aud.pid
-              LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
               GROUP BY aud.suburb, aud.period_key
             ),
             dispatch_period_aud AS MATERIALIZED (
@@ -1030,15 +1088,12 @@ export async function GET(request: Request) {
                 aud.suburb,
                 aud.period_key,
                 COALESCE(cnt.total_count, 0) AS total_count,
-                GREATEST(
-                  0,
-                  COALESCE(cnt.junk_count, 0) - COALESCE(sent.sent_count, 0)
-                ) AS junk_count
+                COALESCE(junk.junk_count, 0) AS junk_count
               FROM dispatch_audience_periods aud
               LEFT JOIN dispatch_audience_counts cnt
                 ON cnt.suburb = aud.suburb AND cnt.period_key = aud.period_key
-              LEFT JOIN group_names_by_suburb sent
-                ON sent.suburb = aud.suburb AND sent.campaign_key = aud.period_key
+              LEFT JOIN dispatch_junk_by_period junk
+                ON junk.suburb = aud.suburb AND junk.period_key = aud.period_key
             ),
             dispatch_by_suburb_cte AS (
               SELECT
