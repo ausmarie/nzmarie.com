@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  campaignMatchesPeriod,
   periodSortValue,
   reportDocumentPeriodKey,
 } from '@/lib/report-period';
@@ -12,6 +13,27 @@ describe('reportDocumentPeriodKey', () => {
 
   it('keeps the quarter key for quarterly reports', () => {
     expect(reportDocumentPeriodKey('quarter', 2026, 9, '2026-Q3')).toBe('2026-Q3');
+  });
+});
+
+describe('campaignMatchesPeriod', () => {
+  it('matches campaign keys that belong to the requested quarter', () => {
+    expect(campaignMatchesPeriod('2026_Q3_Torbay', '2026-Q3')).toBe(true);
+    expect(campaignMatchesPeriod('2026-Q3', '2026-Q3')).toBe(true);
+    expect(campaignMatchesPeriod('2026_Q3_Report', '2026-Q3')).toBe(true);
+  });
+
+  it('rejects junk from other quarters or non-report campaigns', () => {
+    expect(campaignMatchesPeriod('2026_Q2_Torbay', '2026-Q3')).toBe(false);
+    expect(campaignMatchesPeriod('2025_Q3_Torbay', '2026-Q3')).toBe(false);
+    expect(campaignMatchesPeriod('favorites', '2026-Q3')).toBe(false);
+    expect(campaignMatchesPeriod('', '2026-Q3')).toBe(false);
+  });
+
+  it('handles monthly report periods', () => {
+    expect(campaignMatchesPeriod('2026_M09_Torbay', '2026-09')).toBe(true);
+    expect(campaignMatchesPeriod('2026-09', '2026-09')).toBe(true);
+    expect(campaignMatchesPeriod('2026_M08_Torbay', '2026-09')).toBe(false);
   });
 });
 

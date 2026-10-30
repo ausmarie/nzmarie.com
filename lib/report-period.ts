@@ -81,3 +81,19 @@ export function campaignPatternForPeriod(year: number, code: string): string {
   }
   return `^${year}[_-]${normalized}`;
 }
+
+/**
+ * Checks whether a campaign key (e.g. "2026_Q3_Torbay") belongs to a report
+ * period key (e.g. "2026-Q3"). Campaign keys without a recognizable period are
+ * treated as not matching.
+ */
+export function campaignMatchesPeriod(
+  campaign: string | null | undefined,
+  periodKey: string | null | undefined
+): boolean {
+  const parts = parsePeriodParts(periodKey);
+  const value = (campaign || '').trim();
+  if (!parts || !value) return false;
+
+  return new RegExp(campaignPatternForPeriod(parts.year, parts.code), 'i').test(value);
+}

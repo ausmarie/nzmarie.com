@@ -462,20 +462,20 @@ describe('GET /api/admin/dashboard/stats', () => {
         { suburb: 'Albany', bucket: '2026-07-01', sent: '3' },
       ],
       junk_monthly: [
-        { suburb: 'Torbay', bucket: '2026-07-01', junk: '2' },
-        { suburb: 'Albany', bucket: '2026-07-01', junk: '1' },
+        { suburb: 'Torbay', campaign_key: '2026_Q2_Torbay', bucket: '2026-07-01', junk: '2' },
+        { suburb: 'Albany', campaign_key: '2026_Q2_Albany', bucket: '2026-07-01', junk: '1' },
       ],
       sent_quarterly: [
         { suburb: 'Torbay', bucket: '2026-07-01', sent: '15' },
       ],
       junk_quarterly: [
-        { suburb: 'Torbay', bucket: '2026-07-01', junk: '2' },
+        { suburb: 'Torbay', campaign_key: '2026_Q2_Torbay', bucket: '2026-07-01', junk: '2' },
       ],
       sent_yearly: [
         { suburb: 'Torbay', bucket: '2026-01-01', sent: '15' },
       ],
       junk_yearly: [
-        { suburb: 'Torbay', bucket: '2026-01-01', junk: '2' },
+        { suburb: 'Torbay', campaign_key: '2026_Q2_Torbay', bucket: '2026-01-01', junk: '2' },
       ],
       sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
       dispatch_by_suburb: [
@@ -536,6 +536,57 @@ describe('GET /api/admin/dashboard/stats', () => {
     ]);
   });
 
+  it('limits dispatch volume junk to the target report quarter', async () => {
+    const mockRow = {
+      quarter_key: '2026-Q3',
+      quarter: 'Q3',
+      year: 2026,
+      suburbs_count: '6',
+      total_properties: '826',
+      total_sent: '0',
+      total_unsent: '0',
+      total_partial: '0',
+      total_send_events: '0',
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [
+        { suburb: 'Torbay', campaign_key: '2026_Q3_Torbay', bucket: '2026-10-20', sent: '5' },
+        { suburb: 'Torbay', campaign_key: '2026_Q2_Torbay', bucket: '2026-08-20', sent: '7' },
+      ],
+      junk_daily: [
+        { suburb: 'Torbay', campaign_key: '2026_Q3_Torbay', bucket: '2026-10-20', junk: '2' },
+        { suburb: 'Torbay', campaign_key: '2026_Q2_Torbay', bucket: '2026-08-20', junk: '9' },
+        { suburb: 'Albany', campaign_key: 'favorites', bucket: '2026-10-01', junk: '50' },
+      ],
+      sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [],
+      sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [],
+    };
+
+    vi.mocked(db.execute).mockResolvedValue({ rows: [mockRow] } as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stats.dispatchTrend.daily).toEqual([
+      { bucket: '2026-08-20', sent: 7, junk: 0 },
+      { bucket: '2026-10-20', sent: 5, junk: 2 },
+    ]);
+    expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q3-2026']).toEqual([
+      { bucket: '2026-10-20', sent: 5, junk: 2 },
+    ]);
+    expect(body.stats.dispatchTrend.seriesBySuburb.daily['Torbay-Q2-2026']).toEqual([
+      { bucket: '2026-08-20', sent: 7, junk: 0 },
+    ]);
+    expect(body.stats.dispatchTrend.seriesBySuburb.daily['Albany-Q3-2026']).toBeUndefined();
+  });
+
   it('filters dispatch trend by selected suburb', async () => {
     const mockRow = {
       new_leads: '1', high_priority_leads: '0', pending_outreach: '0',
@@ -548,7 +599,7 @@ describe('GET /api/admin/dashboard/stats', () => {
         { suburb: 'Albany', bucket: '2026-07-01', sent: '3' },
       ],
       junk_monthly: [
-        { suburb: 'Torbay', bucket: '2026-07-01', junk: '2' },
+        { suburb: 'Torbay', campaign_key: '2026_Q2_Torbay', bucket: '2026-07-01', junk: '2' },
       ],
       sent_quarterly: [], junk_quarterly: [], sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
       dispatch_by_suburb: [

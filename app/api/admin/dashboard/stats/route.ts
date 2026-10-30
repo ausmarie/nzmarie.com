@@ -5,7 +5,7 @@ import { getCachedOrFetch } from '@/lib/redis';
 import { db } from '@/lib/drizzle';
 import { ensureCampaignTablesExist } from '@/lib/campaign-tracker';
 import { formatReportKey } from '@/lib/format-report';
-import { periodLabel, periodSortValue } from '@/lib/report-period';
+import { campaignMatchesPeriod, periodLabel, periodSortValue } from '@/lib/report-period';
 import { sql } from 'drizzle-orm';
 
 interface SuburbCountRow {
@@ -866,11 +866,16 @@ export async function GET(request: Request) {
             ? rows.filter((r) => r.suburb === suburb || formatReportKey(r.campaign_key || r.suburb, r.suburb) === suburb)
             : rows;
 
-        const builtDaily = buildTrend(filterRows(toTrendRows(row.sent_daily)), filterRows(toTrendRows(row.junk_daily)));
-        const builtWeekly = buildTrend(filterRows(toTrendRows(row.sent_weekly)), filterRows(toTrendRows(row.junk_weekly)));
-        const builtMonthly = buildTrend(filterRows(toTrendRows(row.sent_monthly)), filterRows(toTrendRows(row.junk_monthly)));
-        const builtQuarterly = buildTrend(filterRows(toTrendRows(row.sent_quarterly)), filterRows(toTrendRows(row.junk_quarterly)));
-        const builtYearly = buildTrend(filterRows(toTrendRows(row.sent_yearly)), filterRows(toTrendRows(row.junk_yearly)));
+        // Dispatch Volume junk should only reflect the dashboard's target report
+        // period (e.g. 2026-Q3), not every junk property from older campaigns.
+        const filterJunkRows = (rows: TrendRow[]): TrendRow[] =>
+          rows.filter((r) => campaignMatchesPeriod(r.campaign_key, targetQuarterKey));
+
+        const builtDaily = buildTrend(filterRows(toTrendRows(row.sent_daily)), filterJunkRows(filterRows(toTrendRows(row.junk_daily))));
+        const builtWeekly = buildTrend(filterRows(toTrendRows(row.sent_weekly)), filterJunkRows(filterRows(toTrendRows(row.junk_weekly))));
+        const builtMonthly = buildTrend(filterRows(toTrendRows(row.sent_monthly)), filterJunkRows(filterRows(toTrendRows(row.junk_monthly))));
+        const builtQuarterly = buildTrend(filterRows(toTrendRows(row.sent_quarterly)), filterJunkRows(filterRows(toTrendRows(row.junk_quarterly))));
+        const builtYearly = buildTrend(filterRows(toTrendRows(row.sent_yearly)), filterJunkRows(filterRows(toTrendRows(row.junk_yearly))));
 
         const dispatchMap = new Map<string, {
           suburb: string;
