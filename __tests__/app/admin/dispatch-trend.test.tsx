@@ -364,7 +364,10 @@ describe('DispatchTrendSection', () => {
 
     const rows = screen.getAllByRole('row');
     expect(rows[1].textContent).toContain('2026-Q3');
+    expect(rows[1].textContent).toContain('5 sent');
+    expect(rows[1].querySelector('span:last-child')?.className).toContain('font-bold');
     expect(rows[3].textContent).toContain('2026-Q2');
+    expect(rows[3].textContent).toContain('567 sent');
 
     expect(screen.getAllByText('Oteha')).toHaveLength(2);
     expect(screen.queryByText('Oteha-Q3-2026')).toBeNull();

@@ -294,8 +294,6 @@ export default function AdminDashboardPage() {
     return tb - ta;
   });
 
-  const sentSummarySuburbs = [...(stats?.sentSummary?.suburbs ?? [])].sort((a, b) => b.sent_count - a.sent_count);
-
   return (
     <div className="space-y-6">
       {error && (
@@ -341,7 +339,7 @@ export default function AdminDashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
+        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col min-h-[192px]">
           <div>
             <div className="flex items-center justify-between mb-4">
               <span className="text-2xl">📬</span>
@@ -358,68 +356,26 @@ export default function AdminDashboardPage() {
             </div>
             <div className="text-sm text-slate-600">Total Sent</div>
           </div>
-          <div className="mt-4 pt-3 border-t border-slate-100 space-y-2.5">
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 whitespace-nowrap">
                 <span className="text-xs font-bold text-slate-700">Today</span>
                 <span className="text-xs text-slate-500">
                   {stats?.sentSummary?.today?.total_sent ?? 0} sent
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {stats?.sentSummary?.today?.suburbs && stats.sentSummary.today.suburbs.length > 0 ? (
-                  stats.sentSummary.today.suburbs.map((item) => (
-                    <span
-                      key={item.suburb}
-                      className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md font-medium border border-emerald-100"
-                    >
-                      {item.suburb}: {item.sent_count}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
-                    No sends today
-                  </span>
-                )}
-              </div>
-            </div>
-            {stats?.sentSummary?.quarterly && stats.sentSummary.quarterly.length > 0 ? (
-              stats.sentSummary.quarterly.map((q) => (
-                <div key={q.quarter_key} className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-700">{q.quarter_key}</span>
-                    <span className="text-xs text-slate-500">{q.total_sent} sent</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {q.suburbs.map((s) => (
-                      <span
-                        key={s.suburb}
-                        className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium border border-blue-100"
-                      >
-                        {s.suburb}: {s.sent_count}
-                      </span>
-                    ))}
-                  </div>
+              {(stats?.sentSummary?.today?.total_sent ?? 0) === 0 && (
+                <div className="text-xs text-slate-500">
+                  No sends today
                 </div>
-              ))
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {stats?.sentSummary?.suburbs && sentSummarySuburbs.length > 0 ? (
-                  sentSummarySuburbs.map((item) => (
-                    <span
-                      key={item.suburb}
-                      className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md font-medium border border-blue-100"
-                    >
-                      {item.suburb}: {item.sent_count}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
-                    No suburb with sent &gt; 1
-                  </span>
-                )}
+              )}
+            </div>
+            {stats?.sentSummary?.quarterly?.map((q) => (
+              <div key={q.quarter_key} className="flex items-center gap-2 whitespace-nowrap">
+                <span className="text-xs font-bold text-slate-700">{q.quarter_key}</span>
+                <span className="text-xs text-slate-500">{q.total_sent} sent</span>
               </div>
-            )}
+            ))}
           </div>
         </div>
 

@@ -2736,7 +2736,8 @@ describe('Outreach page - Return to Pending actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '✓ Sent' }));
 
     await waitFor(() => {
-      expect(screen.getByText('1 Main St')).toBeTruthy();
+      expect(screen.getByText('1 Sent Main St')).toBeTruthy();
+      expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy();
     }, { timeout: 3000 });
 
     const checkboxes = screen.getAllByRole('checkbox');
@@ -2745,6 +2746,7 @@ describe('Outreach page - Return to Pending actions', () => {
     fireEvent.click(screen.getByRole('button', { name: /Return to Pending/i }));
 
     await new Promise((r) => setTimeout(r, 300));
+    expect(confirmSpy).toHaveBeenCalled();
     const statusCalls = (global.fetch as any).mock.calls.filter(
       (c: unknown[]) => String(c[0]).includes('/status') && (c[1] as RequestInit)?.method === 'PATCH'
     );

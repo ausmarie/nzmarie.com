@@ -409,7 +409,7 @@ describe('Dashboard Stats API', () => {
     expect(container.querySelectorAll('div.text-sm.font-semibold.text-slate-800').length).toBeGreaterThan(0);
   });
 
-  it('renders Total Sent quarterly breakdown with suburbs sorted by sent count', async () => {
+  it('renders Total Sent totals without suburb details', async () => {
     useSessionMock = vi.fn().mockReturnValue({
       data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
       status: 'authenticated',
@@ -428,25 +428,26 @@ describe('Dashboard Stats API', () => {
             overdueFollowups: 0,
             todayDownloads: 0,
             sentSummary: {
-              total_sent: 214,
+              total_sent: 2641,
               suburb_count: 2,
               suburbs: [
                 { suburb: 'Oteha', sent_count: 209 },
                 { suburb: 'Torbay', sent_count: 5 },
               ],
+              today: { total_sent: 0, suburbs: [] },
               quarterly: [
                 {
                   quarter_key: '2026-Q3',
-                  total_sent: 5,
+                  total_sent: 826,
                   suburbs: [
-                    { suburb: 'Oteha', sent_count: 5, last_sent_at: '2026-10-11T00:00:00.000Z', report_url: 'https://example.com/oteha-q3.pdf' },
+                    { suburb: 'Oteha', sent_count: 826, last_sent_at: '2026-10-11T00:00:00.000Z', report_url: 'https://example.com/oteha-q3.pdf' },
                   ],
                 },
                 {
                   quarter_key: '2026-Q2',
-                  total_sent: 209,
+                  total_sent: 1815,
                   suburbs: [
-                    { suburb: 'Oteha', sent_count: 209, last_sent_at: '2026-10-01T00:00:00.000Z', report_url: 'https://example.com/oteha-q2.pdf' },
+                    { suburb: 'Oteha', sent_count: 1815, last_sent_at: '2026-10-01T00:00:00.000Z', report_url: 'https://example.com/oteha-q2.pdf' },
                   ],
                 },
               ],
@@ -469,16 +470,27 @@ describe('Dashboard Stats API', () => {
       expect(screen.getByText('Total Sent')).toBeTruthy();
     }, { timeout: 3000 });
 
-    expect(screen.getByText('214')).toBeTruthy();
-    expect(screen.getByText('2026-Q3')).toBeTruthy();
-    expect(screen.getByText('2026-Q2')).toBeTruthy();
-    expect(screen.getByText('5 sent')).toBeTruthy();
-    expect(screen.getByText('209 sent')).toBeTruthy();
-    expect(screen.getByText('Oteha: 5')).toBeTruthy();
-    expect(screen.getByText('Oteha: 209')).toBeTruthy();
+    const totalSentCard = screen.getByText('Total Sent').closest('div.bg-white') as HTMLElement;
+    expect(within(totalSentCard).getByText('2641')).toBeTruthy();
+    expect(within(totalSentCard).getByText('Today')).toBeTruthy();
+    expect(within(totalSentCard).getByText('0 sent')).toBeTruthy();
+    expect(within(totalSentCard).getByText('No sends today')).toBeTruthy();
+    expect(within(totalSentCard).getByText('2026-Q3')).toBeTruthy();
+    expect(within(totalSentCard).getByText('2026-Q2')).toBeTruthy();
+    expect(within(totalSentCard).getByText('826 sent')).toBeTruthy();
+    expect(within(totalSentCard).getByText('1815 sent')).toBeTruthy();
+    expect(within(totalSentCard).queryByText('Oteha: 826')).toBeNull();
+    expect(within(totalSentCard).queryByText('Oteha: 1815')).toBeNull();
+    expect(totalSentCard.classList.contains('justify-between')).toBe(false);
+
+    const todayLabel = within(totalSentCard).getByText('Today');
+    const todaySummaryRow = todayLabel.parentElement;
+    expect(todaySummaryRow?.textContent).toContain('Today0 sent');
+    expect(todaySummaryRow?.className).toContain('whitespace-nowrap');
+    expect(todaySummaryRow?.nextElementSibling?.textContent).toContain('No sends today');
   });
 
-  it('renders today sent counts with every suburb under Total Sent', async () => {
+  it('renders today sent total without suburb details', async () => {
     useSessionMock = vi.fn().mockReturnValue({
       data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
       status: 'authenticated',
@@ -533,8 +545,8 @@ describe('Dashboard Stats API', () => {
     const totalSentCard = screen.getByText('Total Sent').closest('div.bg-white') as HTMLElement;
     expect(within(totalSentCard).getByText('Today')).toBeTruthy();
     expect(within(totalSentCard).getByText('19 sent')).toBeTruthy();
-    expect(within(totalSentCard).getByText('Albany: 12')).toBeTruthy();
-    expect(within(totalSentCard).getByText('Torbay: 7')).toBeTruthy();
+    expect(within(totalSentCard).queryByText('Albany: 12')).toBeNull();
+    expect(within(totalSentCard).queryByText('Torbay: 7')).toBeNull();
   });
 
   it('shows an empty today state when nothing was sent today', async () => {

@@ -335,6 +335,7 @@ function SuburbDispatchTimeline({
           </thead>
           <tbody>
             {sortedQuarters.map(([quarterKey, items]) => {
+              const quarterSentTotal = items.reduce((total, item) => total + item.sent_count, 0);
               const sortedItems = [...items].sort((a, b) => {
                 const ta = a.last_sent_at ? new Date(a.last_sent_at).getTime() : 0;
                 const tb = b.last_sent_at ? new Date(b.last_sent_at).getTime() : 0;
@@ -353,6 +354,7 @@ function SuburbDispatchTimeline({
                   <tr className="bg-slate-100/70">
                     <td colSpan={9} className="px-3 py-2">
                       <span className="text-xs font-bold text-slate-700 tracking-wide">{quarterKey}</span>
+                      <span className="ml-2 text-xs font-bold text-slate-700">{quarterSentTotal} sent</span>
                     </td>
                   </tr>
                   {sortedItems.map((s) => {
