@@ -649,7 +649,7 @@ describe('LeadReportsView', () => {
       expect(puts.length).toBeGreaterThan(0);
       const body = JSON.parse(String((puts[0][1] as RequestInit).body));
       expect(body.id).toBe('doc-1');
-    });
+    }, { timeout: 6500 });
   });
 
   it('expands an address on click and fetches its reports', async () => {

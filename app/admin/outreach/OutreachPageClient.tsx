@@ -28,6 +28,7 @@ import { aggregateLikedStreets, filterLikedItemsByStreet, extractStreetFromLiked
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import { openGoogleMaps, buildPropertyAddress } from '@/lib/clipboard';
 import { periodLabel, periodSortValue } from '@/lib/report-period';
+import { getOutreachPageSize } from '@/lib/outreach-pagination';
 
 interface OutreachProperty {
   id: string;
@@ -108,9 +109,6 @@ const STATUS_COLORS: Record<string, string> = {
   interacted: 'bg-orange-50 text-orange-600 border-orange-200',
   converted: 'bg-green-50 text-green-600 border-green-200',
 };
-
-const CARD_PAGE_SIZE = 9;
-const LIST_PAGE_SIZE = 18;
 
 function todayDateKey(): string {
   const t = new Date();
@@ -378,7 +376,8 @@ export default function OutreachPage() {
   }, [availableReports]);
 
   const [viewMode, setViewMode] = useState<'card' | 'list' | 'map'>('card');
-  const pageSize = viewMode === 'list' ? LIST_PAGE_SIZE : CARD_PAGE_SIZE;
+  const isUnsentStreet = activeTab === 'pending' && sentStatusFilter === 'unsent' && Boolean(streetFilter);
+  const pageSize = getOutreachPageSize(viewMode, isUnsentStreet);
   const [collapsedStreets, setCollapsedStreets] = useState<Set<string>>(new Set());
 
   // Map mode state
@@ -723,7 +722,7 @@ export default function OutreachPage() {
   const streetFocusRef = useRef('');
   const streetFocusSuburbRef = useRef('');
   const streetInFlightRef = useRef(false);
-  const fetchStreetDataRef = useRef<((suburb: string, street: string) => void) | null>(null);
+  const fetchStreetDataRef = useRef<((suburb: string, street: string, pageNum?: number) => void) | null>(null);
 
   // Client-side cache: keyed by filter signature + page number so that
   // infinite and classic modes share the same per-page cache. Switching between
@@ -941,7 +940,8 @@ export default function OutreachPage() {
       if (!streetInFlightRef.current) {
         fetchStreetDataRef.current?.(
           streetFocusSuburbRef.current || reportSuburbFilter || suburbFilter,
-          streetFocusRef.current
+          streetFocusRef.current,
+          currentPage
         );
       }
       return;
@@ -986,7 +986,6 @@ export default function OutreachPage() {
   }, [paginationMode, viewMode]);
 
   const loadMore = useCallback(async () => {
-    if (streetFocusRef.current) return;
     if (loadingMoreRef.current || !hasMoreRef.current) return;
     loadingMoreRef.current = true;
     setLoadingMore(true);
@@ -1129,8 +1128,12 @@ export default function OutreachPage() {
 
   // Street selection fetches immediately (bypassing the debounce) so it can
   // never be starved by other state churn (e.g. the default report applying).
-  const fetchStreetData = useCallback(async (suburb: string, street: string) => {
+  const fetchStreetData = useCallback(async (suburb: string, street: string, pageNum = 1) => {
     if (!street) return;
+    const streetPageSize = getOutreachPageSize(
+      viewMode,
+      activeTab === 'pending' && sentStatusFilter === 'unsent',
+    );
     const seq = ++streetSeqRef.current;
     streetAbortRef.current?.abort();
     const controller = new AbortController();
@@ -1141,8 +1144,8 @@ export default function OutreachPage() {
 
     const params = new URLSearchParams({
       status: activeTab,
-      page: '1',
-      limit: String(pageSize),
+      page: String(pageNum),
+      limit: String(streetPageSize),
       sortOrder,
       street,
     });
@@ -1174,8 +1177,8 @@ export default function OutreachPage() {
       } else {
         setItems(list);
         setPagination(data.pagination ?? null);
-        setHasMore(list.length >= pageSize);
-        hasMoreRef.current = list.length >= pageSize;
+        setHasMore(list.length >= streetPageSize);
+        hasMoreRef.current = list.length >= streetPageSize;
         pageRef.current = 1;
       }
     } catch (error) {
@@ -1189,7 +1192,7 @@ export default function OutreachPage() {
         else setLoading(false);
       }
     }
-  }, [activeTab, sentStatusFilter, activeQuarter, pageSize, sortOrder, debouncedSearch, propertyFilter, marketStatus, junkFilter, sortMode, isClassic]);
+  }, [activeTab, sentStatusFilter, activeQuarter, viewMode, sortOrder, debouncedSearch, propertyFilter, marketStatus, junkFilter, sortMode, isClassic]);
 
   fetchStreetDataRef.current = fetchStreetData;
 

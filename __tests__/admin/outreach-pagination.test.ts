@@ -15,6 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { getOutreachPageSize, UNSENT_STREET_LIST_PAGE_SIZE } from '../../lib/outreach-pagination';
 
 // ---------------------------------------------------------------------------
 // Constants (mirrored from page.tsx)
@@ -170,6 +171,24 @@ describe('computeTotalPages — page count with stableTotal', () => {
     expect(computeTotalPages(10, CARD_PAGE_SIZE)).toBe(2);
     expect(computeTotalPages(72, CARD_PAGE_SIZE)).toBe(8);
     expect(computeTotalPages(73, CARD_PAGE_SIZE)).toBe(9);
+  });
+
+  describe('getOutreachPageSize — unsent street completeness and paging', () => {
+    it('keeps cards paged by 9 so scrolling can load subsequent address pages', () => {
+      expect(getOutreachPageSize('card', true)).toBe(CARD_PAGE_SIZE);
+      expect(computeTotalPages(13, getOutreachPageSize('card', true))).toBe(2);
+    });
+
+    it('loads all addresses for an unsent street in list mode', () => {
+      const pageSize = getOutreachPageSize('list', true);
+      expect(pageSize).toBe(UNSENT_STREET_LIST_PAGE_SIZE);
+      expect(pageSize).toBeGreaterThanOrEqual(13);
+      expect(computeTotalPages(13, pageSize)).toBe(1);
+    });
+
+    it('preserves the regular list page size outside unsent street mode', () => {
+      expect(getOutreachPageSize('list', false)).toBe(LIST_PAGE_SIZE);
+    });
   });
 
   it('list mode: 18 items per page', () => {
