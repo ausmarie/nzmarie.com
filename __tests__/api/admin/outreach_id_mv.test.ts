@@ -11,8 +11,10 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/db', () => ({
   marieDB: {
     query: vi.fn().mockResolvedValue({ rows: [] }),
+    connect: vi.fn(),
     ensureOutreachTablesExist: vi.fn(),
   },
+  ensureQuarterDispatchJunkSchema: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/permissions', () => ({
@@ -165,6 +167,152 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
     const propertiesSql = calls[1][0] as string;
     expect(propertiesSql).toContain('UPDATE properties SET no_junk_mail');
     expect(propertiesSql).toContain('id = $2');
+    expect(calls.some(([query]) => String(query).includes('outreach_property_quarter_status'))).toBe(false);
+  });
+
+  it('records Pending junk against the selected active quarter report', async () => {
+    mockAuth();
+    const transactionQuery = vi.fn().mockImplementation((query: string) => ({
+      rows: query.includes('within_send_window') ? [{ within_send_window: true }] : [],
+    }));
+    vi.mocked(marieDB.connect).mockResolvedValueOnce({
+      query: transactionQuery,
+      release: vi.fn(),
+    } as any);
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'test-id',
+          suburb: 'Torbay',
+          property_address: '5 Cliff Road',
+          property_id: '96d479bd-6139-4949-a617-f9f83b7973a0',
+        }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'report-id' }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_junk_mail: true,
+          quarter: 'Q3',
+          year: 2026,
+          suburb_report_id: 'report-id',
+          suburb: 'Torbay',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const calls = vi.mocked(marieDB.query).mock.calls;
+    const reportLookup = calls.find(([query]) => String(query).includes('FROM suburb_reports'));
+    expect(reportLookup?.[0]).toContain("status = 'active'");
+    const transactionCalls = transactionQuery.mock.calls;
+    const sendWindow = transactionCalls.find(([query]) => String(query).includes('within_send_window'));
+    expect(sendWindow?.[0]).toContain('MIN(sent_at)');
+    expect(sendWindow?.[0]).toContain('MAX(sent_at)');
+    expect(sendWindow?.[0]).toContain('campaign_key');
+    expect(sendWindow?.[1]).toEqual(['Torbay', 2026, 'Q3']);
+    const quarterStatus = transactionCalls.find(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'));
+    expect(quarterStatus?.[0]).toContain('is_junk');
+    expect(quarterStatus?.[0]).toContain('junk_at');
+    expect(quarterStatus?.[1]).toEqual(['test-id', 'report-id', 'Torbay', 'Q3', 2026]);
+    expect((await response.json()).quarter_junk_recorded).toBe(true);
+    expect(transactionCalls.some(([query]) => String(query).includes('UPDATE properties SET no_junk_mail'))).toBe(true);
+    expect(transactionCalls[0][0]).toBe('BEGIN');
+    expect(transactionCalls.at(-1)?.[0]).toBe('COMMIT');
+  });
+
+  it('keeps out-of-window Pending junk global and clears any quarterly junk flag', async () => {
+    mockAuth();
+    const transactionQuery = vi.fn().mockImplementation((query: string) => ({
+      rows: query.includes('within_send_window') ? [{ within_send_window: false }] : [],
+    }));
+    vi.mocked(marieDB.connect).mockResolvedValueOnce({
+      query: transactionQuery,
+      release: vi.fn(),
+    } as any);
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'test-id',
+          suburb: 'Torbay',
+          property_address: '5 Cliff Road',
+          property_id: '96d479bd-6139-4949-a617-f9f83b7973a0',
+        }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'report-id' }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_junk_mail: true,
+          quarter: 'Q3',
+          year: 2026,
+          suburb_report_id: 'report-id',
+          suburb: 'Torbay',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).quarter_junk_recorded).toBe(false);
+    const transactionCalls = transactionQuery.mock.calls;
+    expect(transactionCalls.some(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'))).toBe(false);
+    expect(transactionCalls.some(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'))).toBe(true);
+    expect(transactionCalls.some(([query]) => String(query).includes('UPDATE properties SET no_junk_mail'))).toBe(true);
+    expect(transactionCalls.at(-1)?.[0]).toBe('COMMIT');
+  });
+
+  it('clears the selected quarter junk flag when No Junk Mail is removed', async () => {
+    mockAuth();
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
+    vi.mocked(marieDB.connect).mockResolvedValueOnce({
+      query: transactionQuery,
+      release: vi.fn(),
+    } as any);
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'test-id',
+          suburb: 'Torbay',
+          property_address: '5 Cliff Road',
+          property_id: '96d479bd-6139-4949-a617-f9f83b7973a0',
+        }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'report-id' }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_junk_mail: false,
+          quarter: 'Q3',
+          year: 2026,
+          suburb_report_id: 'report-id',
+          suburb: 'Torbay',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).quarter_junk_recorded).toBe(false);
+    expect(transactionQuery.mock.calls.some(([query]) => String(query).includes('within_send_window'))).toBe(false);
+    expect(transactionQuery.mock.calls.some(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'))).toBe(true);
+    expect(transactionQuery.mock.calls.some(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'))).toBe(false);
   });
 
   it('does not include no_junk_mail in the outreach UPDATE when combined with other fields', async () => {

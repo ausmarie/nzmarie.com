@@ -12,6 +12,10 @@ vi.mock('@/lib/drizzle', () => ({
   db: { execute: vi.fn() },
 }));
 
+vi.mock('@/lib/db', () => ({
+  ensureQuarterDispatchJunkSchema: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@/lib/redis', () => ({
   getCachedOrFetch: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()),
   getDashboardStatsCached: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()),
@@ -24,6 +28,8 @@ vi.mock('@/lib/campaign-tracker', () => ({
 import { auth } from '@/lib/auth';
 import { isAdmin } from '@/lib/permissions';
 import { db } from '@/lib/drizzle';
+import { ensureQuarterDispatchJunkSchema } from '@/lib/db';
+import { getDashboardStatsCached } from '@/lib/redis';
 import { GET } from '../../../app/api/admin/dashboard/stats/route';
 
 function makeRequest(suburb?: string) {
@@ -77,6 +83,7 @@ describe('GET /api/admin/dashboard/stats', () => {
       today: { total_sent: 0, suburbs: [] },
       quarterly: [],
     });
+
     expect(body.stats.outreachBySuburb).toHaveLength(1);
     expect(body.stats.scanStats).toEqual({
       total_scans: 0,
@@ -86,6 +93,20 @@ describe('GET /api/admin/dashboard/stats', () => {
     });
     expect(body.stats.downloadsBySuburb).toEqual([]);
     expect(body.stats.recentDownloads).toHaveLength(1);
+    expect(ensureQuarterDispatchJunkSchema).toHaveBeenCalledOnce();
+  });
+
+  it('uses a fresh cache version for the send-window quarterly junk data', async () => {
+    vi.mocked(db.execute).mockResolvedValue({ rows: [{}] } as any);
+
+    const res = await GET(makeRequest());
+
+    expect(res.status).toBe(200);
+    expect(getDashboardStatsCached).toHaveBeenCalledWith(
+      'dashboard:stats:v14:all:all',
+      expect.any(Function),
+      600
+    );
   });
 
   it('returns a lightweight summary for progressive loading', async () => {
@@ -903,17 +924,261 @@ describe('GET /api/admin/dashboard/stats', () => {
       expect(row.sent_count + row.junk_count).toBeLessThanOrEqual(row.total_count);
     }
 
-    // Junk is attributed to the campaign that was current when the address was
-    // flagged, and those addresses are part of that quarter's audience.
     expect(allSql).toContain('dispatch_junk_periods');
     expect(allSql).toContain('dispatch_junk_by_period');
-    expect(allSql).toContain('sr.uploaded_at <= j.junk_at');
+    expect(allSql).toContain('FROM outreach_property_quarter_status');
+    expect(allSql).toContain('WHERE junk.is_junk = TRUE');
+    expect(allSql.indexOf('dispatch_quarter_sent AS MATERIALIZED'))
+      .toBeLessThan(allSql.indexOf('dispatch_junk_periods AS MATERIALIZED'));
+    const dispatchJunkSql = allSql.slice(
+      allSql.indexOf('dispatch_junk_periods AS MATERIALIZED'),
+      allSql.indexOf('dispatch_junk_by_period AS MATERIALIZED')
+    );
+    expect(dispatchJunkSql).toContain('AND junk.junk_at IS NOT NULL');
+    expect(dispatchJunkSql).toContain('JOIN dispatch_quarter_sent sent');
+    expect(dispatchJunkSql).toContain('junk.junk_at BETWEEN sent.first_sent_at AND sent.last_sent_at');
     expect(allSql).toContain('FROM dispatch_junk_periods');
-    // Junk mail only exists for a quarter that actually dispatched something.
-    expect(allSql).toContain('ps.sent_count > 0');
+    expect(allSql).toContain('dispatch_prior_global_junk AS MATERIALIZED');
+    expect(allSql).toContain('AND p.no_junk_mail IS NOT TRUE');
+    expect(allSql).toContain('COALESCE(pj.excluded_count, 0) AS prior_global_junk_count');
+    const dispatchAudienceSql = allSql.slice(
+      allSql.indexOf('dispatch_audience_props AS MATERIALIZED'),
+      allSql.indexOf('dispatch_audience_periods AS MATERIALIZED')
+    );
+    const quarterlyAudienceSql = dispatchAudienceSql.split('UNION')[0];
+    expect(quarterlyAudienceSql).toContain("op.suburb = rq.suburb AND op.status = 'pending'");
+    expect(quarterlyAudienceSql).not.toContain("op.status IN ('pending', 'sent')");
+    expect(allSql).not.toContain('p.no_junk_mail = TRUE');
   });
 
-  it('does not count junk mail for a quarter that was never dispatched', async () => {
+  it('uses the previous quarter sent count as the pending audience for the next quarter', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Browns Bay',
+          campaign_key: '2026_Q2_Browns Bay',
+          period_key: '2026-Q2',
+          sent_count: '250',
+          junk_count: '0',
+          total_count: '250',
+          first_sent_at: null,
+          last_sent_at: '2026-09-20T00:00:00.000Z',
+        },
+        {
+          suburb: 'Browns Bay',
+          campaign_key: '2026_Q3_Browns Bay',
+          period_key: '2026-Q3',
+          sent_count: '215',
+          junk_count: '0',
+          total_count: '215',
+          first_sent_at: null,
+          last_sent_at: '2026-10-20T00:00:00.000Z',
+        },
+        {
+          suburb: 'Castor Bay',
+          campaign_key: '2026_Q3_Castor Bay',
+          period_key: '2026-Q3',
+          sent_count: '0',
+          junk_count: '10',
+          total_count: '100',
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+    };
+
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) return { rows: [] };
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    const bySuburb = body.stats.dispatchTrend.bySuburb;
+
+    expect(res.status).toBe(200);
+    expect(bySuburb.find((item: { quarter_key: string; suburb: string }) => item.quarter_key === '2026-Q3' && item.suburb.startsWith('Browns Bay-')))
+      .toMatchObject({ sent_count: 215, junk_count: 0, unsent_count: 35, total_count: 250 });
+    expect(bySuburb.find((item: { suburb: string }) => item.suburb.startsWith('Castor Bay-')))
+      .toMatchObject({ sent_count: 0, junk_count: 10, unsent_count: 90, total_count: 100 });
+  });
+
+  it('does not report phantom unsent when current-quarter junk explains the audience shortfall', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Oteha',
+          campaign_key: '2026_Q2_Oteha',
+          period_key: '2026-Q2',
+          sent_count: '207',
+          junk_count: '0',
+          total_count: '207',
+          first_sent_at: null,
+          last_sent_at: '2026-09-20T00:00:00.000Z',
+        },
+        {
+          suburb: 'Oteha',
+          campaign_key: '2026_Q3_Oteha',
+          period_key: '2026-Q3',
+          sent_count: '201',
+          junk_count: '3',
+          total_count: '204',
+          first_sent_at: null,
+          last_sent_at: '2026-10-22T00:00:00.000Z',
+        },
+        {
+          suburb: 'Northcross',
+          campaign_key: '2026_Q2_Northcross',
+          period_key: '2026-Q2',
+          sent_count: '103',
+          junk_count: '0',
+          total_count: '103',
+          first_sent_at: null,
+          last_sent_at: '2026-09-20T00:00:00.000Z',
+        },
+        {
+          suburb: 'Northcross',
+          campaign_key: '2026_Q3_Northcross',
+          period_key: '2026-Q3',
+          sent_count: '75',
+          junk_count: '25',
+          total_count: '100',
+          first_sent_at: null,
+          last_sent_at: '2026-10-18T00:00:00.000Z',
+        },
+      ],
+    };
+
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) return { rows: [] };
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    const bySuburb = body.stats.dispatchTrend.bySuburb;
+    const oteha = bySuburb.find((item: { suburb: string }) => item.suburb === 'Oteha-Q3-2026');
+    const northcross = bySuburb.find((item: { suburb: string }) => item.suburb === 'Northcross-Q3-2026');
+
+    expect(res.status).toBe(200);
+    expect(oteha).toMatchObject({ sent_count: 201, junk_count: 3, unsent_count: 0, total_count: 204 });
+    expect(northcross).toMatchObject({ sent_count: 75, junk_count: 25, unsent_count: 0, total_count: 100 });
+  });
+
+  it('excludes globally junk prior-quarter addresses from current-quarter unsent counts', async () => {
+    const mockRow = {
+      new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
+      sent_outreach: '0', today_followups: '0', overdue_followups: '0',
+      today_downloads: '0', total_downloads: '0', month_downloads: '0',
+      total_bookings: '0', month_bookings: '0', qr_codes_total: '0',
+      pdf_reports_total: '0', outreach_by_suburb: null, recent_downloads: null,
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Oteha',
+          campaign_key: '2026_Q2_Oteha',
+          period_key: '2026-Q2',
+          sent_count: '207',
+          junk_count: '0',
+          total_count: '207',
+          prior_global_junk_count: '0',
+          first_sent_at: null,
+          last_sent_at: '2026-08-25T00:00:00.000Z',
+        },
+        {
+          suburb: 'Oteha',
+          campaign_key: '2026_Q3_Oteha',
+          period_key: '2026-Q3',
+          sent_count: '201',
+          junk_count: '1',
+          total_count: '202',
+          prior_global_junk_count: '7',
+          first_sent_at: '2026-10-18T01:49:27.291Z',
+          last_sent_at: '2026-10-22T00:25:26.446Z',
+        },
+        {
+          suburb: 'Northcross',
+          campaign_key: '2026_Q3_Northcross',
+          period_key: '2026-Q3',
+          sent_count: '75',
+          junk_count: '24',
+          total_count: '99',
+          prior_global_junk_count: '0',
+          first_sent_at: '2026-10-17T00:08:08.971Z',
+          last_sent_at: '2026-10-18T02:50:24.678Z',
+        },
+        {
+          suburb: 'Browns Bay',
+          campaign_key: '2026_Q2_Browns Bay',
+          period_key: '2026-Q2',
+          sent_count: '259',
+          junk_count: '0',
+          total_count: '259',
+          prior_global_junk_count: '0',
+          first_sent_at: null,
+          last_sent_at: '2026-09-10T00:00:00.000Z',
+        },
+        {
+          suburb: 'Browns Bay',
+          campaign_key: '2026_Q3_Browns Bay',
+          period_key: '2026-Q3',
+          sent_count: '215',
+          junk_count: '7',
+          total_count: '222',
+          prior_global_junk_count: '2',
+          first_sent_at: '2026-10-29T00:09:56.685Z',
+          last_sent_at: '2026-11-01T03:17:29.094Z',
+        },
+      ],
+    };
+
+    vi.mocked(db.execute).mockImplementation(((sql: any) => {
+      const text = JSON.stringify(sql?.queryChunks ?? []);
+      if (text.includes('file_url')) return { rows: [] };
+      return { rows: [mockRow] };
+    }) as any);
+
+    const response = await GET(makeRequest());
+    const body = await response.json();
+    const rows = body.stats.dispatchTrend.bySuburb as Array<{
+      suburb: string;
+      quarter_key: string;
+      sent_count: number;
+      junk_count: number;
+      unsent_count: number;
+      total_count: number;
+    }>;
+
+    expect(response.status).toBe(200);
+    expect(rows.find((row) => row.suburb === 'Oteha-Q3-2026'))
+      .toMatchObject({ sent_count: 201, junk_count: 1, unsent_count: 0, total_count: 202 });
+    expect(rows.find((row) => row.suburb === 'Northcross-Q3-2026'))
+      .toMatchObject({ sent_count: 75, junk_count: 24, unsent_count: 0, total_count: 99 });
+    expect(rows.find((row) => row.suburb === 'Browns Bay-Q3-2026'))
+      .toMatchObject({ sent_count: 215, junk_count: 7, unsent_count: 35, total_count: 257 });
+  });
+
+  it('keeps quarter-scoped junk visible even before the first send', async () => {
     const mockRow = {
       new_leads: '0', high_priority_leads: '0', pending_outreach: '0',
       sent_outreach: '0', today_followups: '0', overdue_followups: '0',
@@ -929,8 +1194,8 @@ describe('GET /api/admin/dashboard/stats', () => {
           campaign_key: '2026_Q2_Castor Bay',
           period_key: '2026-Q2',
           sent_count: '0',
-          junk_count: '0',
-          total_count: '171',
+          junk_count: '4',
+          total_count: '175',
           first_sent_at: null,
           last_sent_at: null,
         },
@@ -953,9 +1218,9 @@ describe('GET /api/admin/dashboard/stats', () => {
         quarter_key: '2026-Q2',
         report_url: null,
         sent_count: 0,
-        junk_count: 0,
+        junk_count: 4,
         unsent_count: 171,
-        total_count: 171,
+        total_count: 175,
         first_sent_at: null,
         last_sent_at: null,
       },
@@ -1175,15 +1440,12 @@ describe('GET /api/admin/dashboard/stats', () => {
     // rows are imported after the fact, so for 2026-Q2 that filter emptied the
     // audience and collapsed junk/unsent to zero.
     expect(allSql).not.toContain('op.created_at < rq.period_end');
-    expect(allSql).toContain('junk_props_base');
-    expect(allSql).toContain('junk_props_raw');
-    expect(allSql).toContain('junk_props_report');
-    expect(allSql).toContain('ROW_NUMBER() OVER (PARTITION BY j.op_id ORDER BY sr.uploaded_at DESC)');
-    expect(allSql).toContain('LEFT JOIN junk_props_report');
-    expect(allSql).toContain('no_junk_mail_updated_at');
-    expect(allSql).toContain('sr.uploaded_at <= j.junk_at');
+    expect(allSql).toContain('is_junk = TRUE');
+    expect(allSql).toContain('quarter_key AS period_key');
+    expect(allSql).toContain('junk_at IS NOT NULL');
+    expect(allSql).not.toContain('junk_props_raw');
+    expect(allSql).not.toContain('p.no_junk_mail = TRUE');
     expect(allSql).not.toContain('(SELECT sr.year::text');
-    expect(allSql).toContain("op.created_at AT TIME ZONE 'Pacific/Auckland'");
     expect(allSql).not.toContain('dispatched_ids_cte');
     expect(allSql).not.toContain("AND LOWER(op.status) = 'pending'");
     expect(allSql).not.toContain('^d{4}');

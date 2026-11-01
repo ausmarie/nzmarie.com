@@ -15,6 +15,7 @@ vi.mock('@/lib/db', () => ({
     query: vi.fn(),
     ensureOutreachTablesExist: vi.fn(),
   },
+  ensureQuarterDispatchJunkSchema: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/permissions', () => ({

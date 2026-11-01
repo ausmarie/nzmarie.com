@@ -21,6 +21,40 @@ export const marieDB: MarieDBPool = mariePool as MarieDBPool;
 export const pool = mariePool;
 
 let _outreachTableEnsured = false;
+let _quarterDispatchJunkSchemaEnsured = false;
+let _quarterDispatchJunkSchemaPromise: Promise<void> | null = null;
+
+export async function ensureQuarterDispatchJunkSchema(): Promise<void> {
+  if (_quarterDispatchJunkSchemaEnsured) return;
+  if (_quarterDispatchJunkSchemaPromise) return _quarterDispatchJunkSchemaPromise;
+
+  _quarterDispatchJunkSchemaPromise = (async () => {
+    await mariePool.query(`
+      ALTER TABLE outreach_property_quarter_status
+        ADD COLUMN IF NOT EXISTS is_junk BOOLEAN,
+        ADD COLUMN IF NOT EXISTS junk_at TIMESTAMPTZ
+    `);
+    await mariePool.query(`
+      ALTER TABLE outreach_property_quarter_status
+        ALTER COLUMN is_junk SET DEFAULT FALSE
+    `);
+    await mariePool.query(`
+      CREATE INDEX IF NOT EXISTS idx_opqs_quarter_suburb_junk
+      ON outreach_property_quarter_status (quarter_key, suburb, is_junk)
+      WHERE is_junk = TRUE
+    `);
+    await mariePool.query(`
+      CREATE INDEX IF NOT EXISTS idx_opqs_is_junk_junk_at
+      ON outreach_property_quarter_status (is_junk, junk_at)
+      WHERE is_junk = TRUE
+    `);
+    _quarterDispatchJunkSchemaEnsured = true;
+  })().finally(() => {
+    _quarterDispatchJunkSchemaPromise = null;
+  });
+
+  return _quarterDispatchJunkSchemaPromise;
+}
 
 export async function ensureOutreachTablesExist(): Promise<void> {
   if (_outreachTableEnsured) return;

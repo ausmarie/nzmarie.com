@@ -77,6 +77,7 @@ describe.skipIf(!hasDb)('dashboard stats against the live database', () => {
   }, 60000);
 
   it('keeps junk mail accurate per report quarter', async () => {
+    const { marieDB } = await import('@/lib/db');
     const res = await GET(
       new Request('http://localhost/api/admin/dashboard/stats?quarterKey=2026-Q3')
     );
@@ -96,52 +97,33 @@ describe.skipIf(!hasDb)('dashboard stats against the live database', () => {
     for (const row of rows) {
       expect(row.sent_count + row.junk_count).toBeLessThanOrEqual(row.total_count);
       expect(row.unsent_count).toBeGreaterThanOrEqual(0);
-      // sent + unsent + junk == total (unsent is clamped, so never negative).
       expect(row.sent_count + row.unsent_count + row.junk_count).toBeLessThanOrEqual(row.total_count);
     }
 
-    // A quarter that was never dispatched has no junk mail figure at all, and
-    // its whole audience is still "unsent".
-    const neverDispatched = rows.filter((row) => row.sent_count === 0 && row.total_count > 0);
-    for (const row of neverDispatched) {
-      expect(row.junk_count).toBe(0);
-      expect(row.unsent_count).toBe(row.total_count);
+    const expected = await marieDB.query<{
+      suburb: string;
+      quarter_key: string;
+      junk_count: string;
+    }>(`
+      SELECT suburb, quarter_key, COUNT(DISTINCT outreach_property_id)::text AS junk_count
+      FROM outreach_property_quarter_status
+      WHERE is_junk = TRUE
+      GROUP BY suburb, quarter_key
+    `);
+    for (const record of expected.rows) {
+      const actual = rows.find(
+        (row) => row.raw_suburb === record.suburb && row.quarter_key === record.quarter_key
+      );
+      expect(actual?.junk_count).toBe(Number(record.junk_count));
     }
 
-    const junkTotal = (quarter: string) =>
-      rows.filter((row) => row.quarter_key === quarter).reduce((sum, row) => sum + row.junk_count, 0);
-
-    // The first campaign surfaces most no-junk-mail addresses; the next one only
-    // the newly discovered ones, so Q2 must carry far more junk than Q3.
-    expect(junkTotal('2026-Q2')).toBeGreaterThan(junkTotal('2026-Q3'));
-
-    // Concrete regression from the screenshots: these suburbs sent their first
-    // campaign in 2026-Q2 and used to report 0-1 junk mail for it.
-    const firstCampaignSuburbs = [
-      'Totara Vale',
-      'Greenhithe',
-      'Schnapper Rock',
-      'Unsworth Heights',
-      'Sunnynook',
-      'Campbells Bay',
-      'Mairangi Bay',
-      'Torbay',
-    ];
-    const zeroed = firstCampaignSuburbs.filter((name) => {
-      const row = rows.find(
-        (item) => item.raw_suburb === name && item.quarter_key === '2026-Q2'
+    const actualJunkRows = rows.filter((row) => row.junk_count > 0);
+    for (const row of actualJunkRows) {
+      const record = expected.rows.find(
+        (item) => item.suburb === row.raw_suburb && item.quarter_key === row.quarter_key
       );
-      return row ? row.junk_count === 0 : false;
-    });
-    expect(zeroed).toEqual([]);
-
-    // And the second campaign for the same suburb must show fewer junk addresses.
-    const notShrinking = firstCampaignSuburbs.filter((name) => {
-      const q2 = rows.find((item) => item.raw_suburb === name && item.quarter_key === '2026-Q2');
-      const q3 = rows.find((item) => item.raw_suburb === name && item.quarter_key === '2026-Q3');
-      return Boolean(q2 && q3 && q2.junk_count <= q3.junk_count);
-    });
-    expect(notShrinking).toEqual([]);
+      expect(row.junk_count).toBe(Number(record?.junk_count || 0));
+    }
   }, 60000);
 
   it('counts dispatch per quarter even when the send log has no report link', async () => {

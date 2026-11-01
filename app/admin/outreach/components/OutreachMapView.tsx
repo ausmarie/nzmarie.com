@@ -8,6 +8,7 @@ import {
   haversineMeters,
   type AddressStatus,
 } from '@/lib/outreach-map';
+import { parseReportQuarter } from '@/lib/outreach-quarter';
 
 interface AddressCoord {
   id?: string | null;
@@ -625,13 +626,17 @@ export default function OutreachMapView({
     }
   }, [suburb, sentStatus, reportQuarter, refreshKey]);
 
-  const handleMarkAsJunk = useCallback(async (id: string) => {
+  const handleMarkAsJunk = useCallback(async (id: string, addressSuburb: string) => {
     if (!id) return;
     try {
+      const quarter = parseReportQuarter(reportQuarter);
       const res = await fetch(`/api/admin/outreach/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ no_junk_mail: true }),
+        body: JSON.stringify({
+          no_junk_mail: true,
+          ...(quarter ? { quarter: quarter.quarter, year: quarter.year, suburb: addressSuburb } : {}),
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Unknown error' }));
@@ -642,7 +647,7 @@ export default function OutreachMapView({
     } catch (err) {
       console.error('Mark as junk failed:', err);
     }
-  }, [loadCoords]);
+  }, [loadCoords, reportQuarter]);
 
   const handleMarkAsSent = useCallback(async (id: string) => {
     try {

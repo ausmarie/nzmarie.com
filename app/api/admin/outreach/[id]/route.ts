@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { marieDB } from '@/lib/db';
+import { ensureQuarterDispatchJunkSchema, marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
-import { invalidateStreetClustersForSuburb } from '@/lib/redis';
+import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
 
 export async function PATCH(
   request: Request,
@@ -16,11 +16,18 @@ export async function PATCH(
 
   try {
     await marieDB.ensureOutreachTablesExist?.();
+    await ensureQuarterDispatchJunkSchema();
     const body = await request.json();
     const { id } = await params;
 
     const noJunkMailValue = body.no_junk_mail;
     const hasNoJunkMail = noJunkMailValue !== undefined;
+    const hasQuarterContext =
+      body.quarter !== undefined || body.year !== undefined || body.suburb_report_id !== undefined;
+
+    if (hasNoJunkMail && typeof noJunkMailValue !== 'boolean') {
+      return NextResponse.json({ error: 'no_junk_mail must be a boolean' }, { status: 400 });
+    }
 
     const updates: string[] = [];
     const values: unknown[] = [];
@@ -88,19 +95,139 @@ export async function PATCH(
 
     const updatedProperty = result.rows[0];
 
+    let quarterReportId: string | null = null;
+    let quarterContext: { quarter: string; year: number; suburb: string } | null = null;
+    let quarterJunkRecorded: boolean | null = null;
+
     if (hasNoJunkMail) {
-      if (updatedProperty.property_id) {
-        const pid = String(updatedProperty.property_id).replace(/-/g, '');
-        await marieDB.query(
-          `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE id = $2`,
-          [noJunkMailValue, pid]
-        );
+      if (hasQuarterContext) {
+        const quarter = typeof body.quarter === 'string' ? body.quarter.toUpperCase() : '';
+        const year = Number(body.year);
+        const suburb = typeof body.suburb === 'string' && body.suburb.trim()
+          ? body.suburb.trim()
+          : updatedProperty.suburb;
+
+        if (!/^Q[1-4]$/.test(quarter) || !Number.isInteger(year) || year < 2000 || !suburb) {
+          return NextResponse.json({ error: 'A valid quarter, year, and suburb are required' }, { status: 400 });
+        }
+
+        const reportResult = body.suburb_report_id
+          ? await marieDB.query(
+            `SELECT id
+             FROM suburb_reports
+             WHERE id = $1 AND suburb = $2 AND year = $3 AND quarter = $4 AND status = 'active'
+             LIMIT 1`,
+            [body.suburb_report_id, suburb, year, quarter]
+          )
+          : await marieDB.query(
+            `SELECT id
+             FROM suburb_reports
+             WHERE suburb = $1 AND year = $2 AND quarter = $3 AND status = 'active'
+             ORDER BY uploaded_at DESC
+             LIMIT 1`,
+            [suburb, year, quarter]
+          );
+        quarterReportId = reportResult.rows[0]?.id ? String(reportResult.rows[0].id) : null;
+
+        if (!quarterReportId) {
+          return NextResponse.json({ error: 'Active report not found for the selected quarter' }, { status: 404 });
+        }
+        quarterContext = { quarter, year, suburb };
       }
-      if (updatedProperty.property_address && updatedProperty.suburb) {
-        await marieDB.query(
-          `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE LOWER(TRIM(address)) = LOWER(TRIM($2)) AND LOWER(TRIM(suburb)) = LOWER(TRIM($3))`,
-          [noJunkMailValue, updatedProperty.property_address, updatedProperty.suburb]
-        );
+
+      if (quarterContext && quarterReportId) {
+        const client = await marieDB.connect();
+        try {
+          await client.query('BEGIN');
+          const sendWindowResult = noJunkMailValue
+            ? await client.query(
+              `SELECT CASE
+                 WHEN COUNT(*) = 0 THEN FALSE
+                 ELSE NOW() BETWEEN MIN(sent_at) AND MAX(sent_at)
+               END AS within_send_window
+               FROM (
+                 SELECT sl.sent_at
+                 FROM outreach_send_logs sl
+                 LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
+                 WHERE sl.suburb = $1
+                   AND sl.sent_at IS NOT NULL
+                   AND CASE
+                     WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
+                       THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-]Q([1-4])')
+                     WHEN sr.quarter ~ '^Q[1-4]$' AND sr.year IS NOT NULL
+                       THEN sr.year || '-' || sr.quarter
+                   END = $2::text || '-' || $3
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM outreach_property_quarter_status returned
+                     WHERE returned.outreach_property_id = sl.outreach_property_id
+                       AND returned.suburb_report_id = sl.suburb_report_id
+                       AND returned.status = 'pending'
+                   )
+               ) quarter_sends`,
+              [quarterContext.suburb, quarterContext.year, quarterContext.quarter]
+            )
+            : null;
+          const withinSendWindow = sendWindowResult?.rows[0]?.within_send_window;
+          quarterJunkRecorded = noJunkMailValue && (
+            withinSendWindow === true || withinSendWindow === 't' || withinSendWindow === 'true'
+          );
+
+          if (updatedProperty.property_id) {
+            const pid = String(updatedProperty.property_id).replace(/-/g, '');
+            await client.query(
+              `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE id = $2`,
+              [noJunkMailValue, pid]
+            );
+          }
+          if (updatedProperty.property_address && updatedProperty.suburb) {
+            await client.query(
+              `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE LOWER(TRIM(address)) = LOWER(TRIM($2)) AND LOWER(TRIM(suburb)) = LOWER(TRIM($3))`,
+              [noJunkMailValue, updatedProperty.property_address, updatedProperty.suburb]
+            );
+          }
+          if (quarterJunkRecorded) {
+            await client.query(
+              `INSERT INTO outreach_property_quarter_status
+                (outreach_property_id, suburb_report_id, suburb, quarter, year, is_junk, junk_at)
+               VALUES ($1, $2, $3, $4, $5, TRUE, NOW())
+               ON CONFLICT (outreach_property_id, suburb_report_id) DO UPDATE SET
+                 is_junk = TRUE,
+                 junk_at = NOW(),
+                 updated_at = NOW()`,
+              [id, quarterReportId, quarterContext.suburb, quarterContext.quarter, quarterContext.year]
+            );
+          } else {
+            await client.query(
+              `UPDATE outreach_property_quarter_status
+               SET is_junk = FALSE, junk_at = NULL, updated_at = NOW()
+               WHERE outreach_property_id = $1 AND suburb_report_id = $2`,
+              [id, quarterReportId]
+            );
+          }
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+        await invalidateDashboardStatsCache();
+      } else {
+        if (updatedProperty.property_id) {
+          const pid = String(updatedProperty.property_id).replace(/-/g, '');
+          await marieDB.query(
+            `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE id = $2`,
+            [noJunkMailValue, pid]
+          );
+        }
+        if (updatedProperty.property_address && updatedProperty.suburb) {
+          await marieDB.query(
+            `UPDATE properties SET no_junk_mail = $1, no_junk_mail_updated_at = NOW() WHERE LOWER(TRIM(address)) = LOWER(TRIM($2)) AND LOWER(TRIM(suburb)) = LOWER(TRIM($3))`,
+            [noJunkMailValue, updatedProperty.property_address, updatedProperty.suburb]
+          );
+        }
+        await invalidateDashboardStatsCache();
       }
     }
 
@@ -116,6 +243,7 @@ export async function PATCH(
     return NextResponse.json({
       success: true,
       data: { ...result.rows[0], no_junk_mail: hasNoJunkMail ? noJunkMailValue : result.rows[0].no_junk_mail },
+      ...(quarterJunkRecorded !== null ? { quarter_junk_recorded: quarterJunkRecorded } : {}),
     });
   } catch (error) {
     console.error('Error updating outreach property:', error);

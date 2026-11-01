@@ -1072,6 +1072,53 @@ export default function OutreachPage() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  const updateNoJunkMail = async (prop: OutreachProperty, newValue: boolean) => {
+    const previousItems = items;
+    const previousClassicItems = classicItems;
+    let endpoint = `/api/admin/properties/${prop.joined_property_id}`;
+    let payload: Record<string, string | number | boolean> = { no_junk_mail: newValue };
+
+    if (activeTab === 'pending') {
+      const report = availableReports
+        .filter((item) => item.label === activeQuarter && item.suburb.toLowerCase() === prop.suburb.toLowerCase())
+        .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0];
+      if (!report) {
+        showNotification('error', 'No active report found for this suburb and quarter');
+        return;
+      }
+      endpoint = `/api/admin/outreach/${prop.id}`;
+      payload = {
+        no_junk_mail: newValue,
+        quarter: report.quarter,
+        year: report.year,
+        suburb_report_id: report.id,
+        suburb: prop.suburb,
+      };
+    }
+
+    cacheRef.current.clear();
+    setItems((prev) => prev.map((item) => item.id === prop.id ? { ...item, no_junk_mail: newValue } : item));
+    setClassicItems((prev) => prev.map((item) => item.id === prop.id ? { ...item, no_junk_mail: newValue } : item));
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error('Failed to update No Junk Mail status');
+      const result = await response.json();
+      if (newValue && result.quarter_junk_recorded === false) {
+        showNotification('success', 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window');
+      }
+    } catch {
+      cacheRef.current.clear();
+      setItems(previousItems);
+      setClassicItems(previousClassicItems);
+      showNotification('error', 'Failed to update No Junk Mail status');
+    }
+  };
+
   const normalizeStatus = (status?: unknown) => {
     const value = String(status ?? '').toLowerCase();
     if (value === 'liked' || value === 'pending' || value === 'sent' || value === 'interacted' || value === 'converted') {
@@ -3222,21 +3269,8 @@ export default function OutreachPage() {
                         onClick={(e) => {
                           e.stopPropagation();
                           e.preventDefault();
-                          const pid = prop.joined_property_id;
-                          if (!pid) return;
-                          const newVal = !prop.no_junk_mail;
-                          cacheRef.current.clear();
-                          setItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: newVal } : item));
-                          setClassicItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: newVal } : item));
-                          fetch(`/api/admin/properties/${pid}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ no_junk_mail: newVal }),
-                          }).catch(() => {
-                            cacheRef.current.clear();
-                            setItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: !newVal } : item));
-                            setClassicItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: !newVal } : item));
-                          });
+                          if (!prop.joined_property_id && activeTab !== 'pending') return;
+                          void updateNoJunkMail(prop, !prop.no_junk_mail);
                         }}
                         style={{
                           width: '36px', height: '36px',
@@ -3866,20 +3900,36 @@ export default function OutreachPage() {
                 setActiveMapStreet(street);
                 setReportSuburbFilter(suburb);
               }}
-              onMarkAsJunk={async (id: string) => {
+              onMarkAsJunk={async (id: string, addressSuburb: string) => {
                 if (!id) {
                   showNotification('error', 'Invalid address ID');
                   return;
                 }
                 try {
+                  const suburb = addressSuburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb;
+                  const report = availableReports
+                    .filter((item) => item.label === activeQuarter && item.suburb.toLowerCase() === suburb.toLowerCase())
+                    .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0];
+                  if (!report) throw new Error('No active report found for this suburb and quarter');
                   const res = await fetch(`/api/admin/outreach/${id}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ no_junk_mail: true }),
+                    body: JSON.stringify({
+                      no_junk_mail: true,
+                      quarter: report.quarter,
+                      year: report.year,
+                      suburb_report_id: report.id,
+                      suburb,
+                    }),
                   });
                   if (!res.ok) throw new Error('Failed to mark as junk');
-                  await res.json();
-                  showNotification('success', 'Marked as junk');
+                  const result = await res.json();
+                  showNotification(
+                    'success',
+                    result.quarter_junk_recorded === false
+                      ? 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window'
+                      : 'Marked as junk for this quarter'
+                  );
                   setTodayRunRefreshKey((k) => k + 1);
                 } catch {
                   showNotification('error', 'Failed to mark as junk');
@@ -4130,21 +4180,8 @@ export default function OutreachPage() {
                                             type="button"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              const pid = prop.joined_property_id;
-                                              if (!pid) return;
-                                              const newVal = !prop.no_junk_mail;
-                                              cacheRef.current.clear();
-                                              setItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: newVal } : item));
-                                              setClassicItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: newVal } : item));
-                                              fetch(`/api/admin/properties/${pid}`, {
-                                                method: 'PATCH',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ no_junk_mail: newVal }),
-                                              }).catch(() => {
-                                                cacheRef.current.clear();
-                                                setItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: !newVal } : item));
-                                                setClassicItems(prev => prev.map(item => item.id === prop.id ? { ...item, no_junk_mail: !newVal } : item));
-                                              });
+                                              if (!prop.joined_property_id && activeTab !== 'pending') return;
+                                              void updateNoJunkMail(prop, !prop.no_junk_mail);
                                             }}
                                             className={`w-7 h-7 rounded-full flex items-center justify-center text-sm shrink-0 transition-colors ${prop.no_junk_mail
                                               ? 'bg-red-500 text-white'

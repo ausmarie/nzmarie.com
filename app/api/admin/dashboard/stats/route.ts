@@ -3,9 +3,10 @@ import { auth } from '@/lib/auth';
 import { isAdmin } from '@/lib/permissions';
 import { getDashboardStatsCached } from '@/lib/redis';
 import { db } from '@/lib/drizzle';
+import { ensureQuarterDispatchJunkSchema } from '@/lib/db';
 import { ensureCampaignTablesExist } from '@/lib/campaign-tracker';
 import { formatReportKey } from '@/lib/format-report';
-import { campaignHasReportPeriod, latestPeriodKey, periodLabel, periodSortValue, REPORT_CAMPAIGN_KEY_PATTERN } from '@/lib/report-period';
+import { campaignHasReportPeriod, latestPeriodKey, periodLabel, periodSortValue } from '@/lib/report-period';
 import { sql } from 'drizzle-orm';
 
 interface SuburbCountRow {
@@ -77,10 +78,25 @@ interface SuburbDispatchRow {
   period_key?: string | null;
   sent_count?: string | number;
   junk_count?: string | number;
+  prior_global_junk_count?: string | number;
   total_count?: string | number;
   unsent_count?: string | number;
   first_sent_at?: string | Date | null;
   last_sent_at?: string | Date | null;
+}
+
+function getDispatchQuarterKey(item: SuburbDispatchRow): string | null {
+  const match = (item.period_key || item.campaign_key || '').match(/^(\d{4})[-_](Q[1-4])(?:$|[_-])/i);
+  return match ? `${match[1]}-${match[2].toUpperCase()}` : null;
+}
+
+function getPreviousQuarterKey(quarterKey: string): string | null {
+  const match = quarterKey.match(/^(\d{4})-Q([1-4])$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  return quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
 }
 
 interface TrendBucket {
@@ -403,7 +419,7 @@ export async function GET(request: Request) {
   // succession (e.g. a React effect firing twice) don't both run the heavy
   // aggregation and burn Registers twice. It also makes a stale cached payload
   // from before a fix impossible to keep serving for the whole TTL.
-  const cacheVersion = 9;
+  const cacheVersion = 14;
 
   try {
     await ensureCampaignTablesExist();
@@ -535,6 +551,8 @@ export async function GET(request: Request) {
         timestamp: new Date().toISOString(),
       });
     }
+
+    await ensureQuarterDispatchJunkSchema();
 
     const cacheKey = `dashboard:stats:v${cacheVersion}:${suburb || 'all'}:${quarterKey || 'all'}`;
 
@@ -766,58 +784,6 @@ export async function GET(request: Request) {
               ORDER BY downloaded_at DESC
               LIMIT 5
             ),
-            junk_props_raw AS (
-              SELECT
-                op.id AS op_id,
-                op.suburb,
-                op.last_campaign,
-                op.campaign,
-                COALESCE(p.no_junk_mail_updated_at, op.created_at AT TIME ZONE 'Pacific/Auckland') AS junk_at,
-                p.id AS property_id
-              FROM outreach_properties op
-              JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
-              WHERE p.no_junk_mail = TRUE
-            ),
-            junk_props_report AS MATERIALIZED (
-              SELECT op_id, campaign_key
-              FROM (
-                SELECT
-                  j.op_id,
-                  sr.year::text || '_' || sr.quarter || '_' || sr.suburb AS campaign_key,
-                  ROW_NUMBER() OVER (PARTITION BY j.op_id ORDER BY sr.uploaded_at DESC) AS rn
-                FROM junk_props_raw j
-                JOIN suburb_reports sr
-                  ON sr.suburb = j.suburb
-                 AND sr.status = 'active'
-                 AND sr.year IS NOT NULL
-                 AND (sr.quarter ~ '^Q[1-4]$' OR sr.quarter ~ '^M[0-9]{2}$')
-                 AND sr.uploaded_at <= j.junk_at
-              ) matched
-              WHERE matched.rn = 1
-            ),
-            junk_props_base AS MATERIALIZED (
-              SELECT
-                j.suburb,
-                COALESCE(r.campaign_key, j.last_campaign, j.campaign) AS campaign_key,
-                j.junk_at,
-                j.property_id,
-                j.op_id
-              FROM junk_props_raw j
-              LEFT JOIN junk_props_report r ON r.op_id = j.op_id
-            ),
-            junk_props_buckets AS MATERIALIZED (
-              SELECT
-                suburb,
-                campaign_key,
-                date_trunc('day', junk_at AT TIME ZONE 'Pacific/Auckland') AS day_bucket,
-                date_trunc('week', junk_at AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
-                date_trunc('month', junk_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
-                date_trunc('quarter', junk_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
-                date_trunc('year', junk_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
-                property_id
-              FROM junk_props_base
-              WHERE campaign_key ~* ${REPORT_CAMPAIGN_KEY_PATTERN}
-            ),
             outreach_canonical AS MATERIALIZED (
               SELECT
                 sl.suburb,
@@ -943,6 +909,66 @@ export async function GET(request: Request) {
               ) quarter_sent
               GROUP BY 1, 2
             ),
+            dispatch_junk_periods AS MATERIALIZED (
+              SELECT
+                junk.suburb,
+                junk.quarter_key AS period_key,
+                junk.year::text || '_' || junk.quarter || '_' || junk.suburb AS campaign_key,
+                junk.outreach_property_id AS pid,
+                junk.junk_at
+              FROM outreach_property_quarter_status junk
+              JOIN dispatch_quarter_sent sent
+                ON sent.suburb = junk.suburb
+               AND sent.q_index = junk.year::int * 4 + substring(junk.quarter from 'Q([1-4])')::int - 1
+              WHERE junk.is_junk = TRUE
+                AND junk.junk_at IS NOT NULL
+                AND junk.quarter_key ~ '^[0-9]{4}-Q[1-4]$'
+                AND junk.junk_at BETWEEN sent.first_sent_at AND sent.last_sent_at
+            ),
+            dispatch_prior_global_junk AS MATERIALIZED (
+              SELECT
+                rq.suburb,
+                rq.period_key,
+                COUNT(DISTINCT prior.pid) AS excluded_count
+              FROM dispatch_report_periods rq
+              JOIN outreach_canonical prior
+                ON prior.suburb = rq.suburb
+               AND prior.period_key ~ '^[0-9]{4}-Q[1-4]$'
+               AND substring(prior.period_key from '^([0-9]{4})')::int * 4
+                 + substring(prior.period_key from 'Q([1-4])$')::int = rq.q_index
+              JOIN outreach_properties op ON op.id = prior.pid
+              JOIN properties p
+                ON REPLACE(op.property_id::text, '-', '') = p.id
+               AND p.no_junk_mail IS TRUE
+              WHERE rq.period_type = 'quarter'
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM outreach_canonical current_period
+                  WHERE current_period.suburb = rq.suburb
+                    AND current_period.pid = prior.pid
+                    AND current_period.period_key = rq.period_key
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM dispatch_junk_periods current_junk
+                  WHERE current_junk.suburb = rq.suburb
+                    AND current_junk.pid = prior.pid
+                    AND current_junk.period_key = rq.period_key
+                )
+              GROUP BY rq.suburb, rq.period_key
+            ),
+            junk_props_buckets AS MATERIALIZED (
+              SELECT
+                suburb,
+                campaign_key,
+                date_trunc('day', junk_at AT TIME ZONE 'Pacific/Auckland') AS day_bucket,
+                date_trunc('week', junk_at AT TIME ZONE 'Pacific/Auckland') AS week_bucket,
+                date_trunc('month', junk_at AT TIME ZONE 'Pacific/Auckland') AS month_bucket,
+                date_trunc('quarter', junk_at AT TIME ZONE 'Pacific/Auckland') AS quarter_bucket,
+                date_trunc('year', junk_at AT TIME ZONE 'Pacific/Auckland') AS year_bucket,
+                pid AS property_id
+              FROM dispatch_junk_periods
+            ),
             dispatch_month_sent AS MATERIALIZED (
               SELECT
                 suburb,
@@ -975,50 +1001,13 @@ export async function GET(request: Request) {
               FROM outreach_property_quarter_status
               WHERE quarter_key ~ '^[0-9]{4}-Q[1-4]$'
             ),
-            -- Junk mail is attributed to the report that was current when the
-            -- property was flagged (same rule as the Dispatch Volume chart), so
-            -- a suburb's first campaign shows the bulk of its junk mail and the
-            -- following campaigns only show newly discovered addresses.
-            dispatch_junk_periods AS MATERIALIZED (
-              SELECT
-                suburb,
-                CASE WHEN campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
-                  THEN substring(campaign_key from '^([0-9]{4})') || '-Q' || substring(campaign_key from '[_-]Q([1-4])')
-                  WHEN campaign_key ~ '^[0-9]{4}[_-]M[0-9]{2}'
-                  THEN substring(campaign_key from '^([0-9]{4})') || '-' || substring(campaign_key from '[_-]M([0-9]{2})')
-                END AS period_key,
-                op_id AS pid
-              FROM junk_props_base
-            ),
-            dispatch_sent_pairs AS MATERIALIZED (
-              SELECT DISTINCT suburb, period_key, pid
-              FROM outreach_canonical
-              WHERE period_key IS NOT NULL
-            ),
-            dispatch_period_sent AS MATERIALIZED (
-              SELECT suburb, period_key, COUNT(DISTINCT pid) AS sent_count
-              FROM outreach_canonical
-              WHERE period_key ~ '^[0-9]{4}-(Q[1-4]|[0-9]{2})$'
-              GROUP BY suburb, period_key
-            ),
             dispatch_junk_by_period AS MATERIALIZED (
               SELECT
-                j.suburb,
-                j.period_key,
-                COUNT(DISTINCT j.pid) FILTER (WHERE sent.pid IS NULL) AS junk_count
-              FROM dispatch_junk_periods j
-              -- Junk mail is only ever "produced" by a campaign that actually went
-              -- out: a quarter with no dispatch has no junk mail figure at all.
-              JOIN dispatch_period_sent ps
-                ON ps.suburb = j.suburb
-               AND ps.period_key = j.period_key
-               AND ps.sent_count > 0
-              LEFT JOIN dispatch_sent_pairs sent
-                ON sent.suburb = j.suburb
-               AND sent.period_key = j.period_key
-               AND sent.pid = j.pid
-              WHERE j.period_key IS NOT NULL
-              GROUP BY j.suburb, j.period_key
+                suburb,
+                period_key,
+                COUNT(DISTINCT pid) AS junk_count
+              FROM dispatch_junk_periods
+              GROUP BY suburb, period_key
             ),
             dispatch_audience_props AS MATERIALIZED (
               SELECT rq.suburb, rq.period_key, op.id AS pid
@@ -1028,8 +1017,11 @@ export async function GET(request: Request) {
               LEFT JOIN dispatch_period_activity act
                 ON act.suburb = rq.suburb AND act.period_key = rq.period_key
               JOIN outreach_properties op
-                ON op.suburb = rq.suburb AND op.status IN ('pending', 'sent')
+                ON op.suburb = rq.suburb AND op.status = 'pending'
+              LEFT JOIN properties p
+                ON REPLACE(op.property_id::text, '-', '') = p.id
               WHERE rq.period_type = 'quarter'
+                AND p.no_junk_mail IS NOT TRUE
                 -- Use the full suburb audience when the previous quarter was not
                 -- sent, and also for a brand new report period that has no
                 -- planned/sent properties yet (report uploaded in Assets but no
@@ -1060,10 +1052,6 @@ export async function GET(request: Request) {
               UNION
               SELECT j.suburb, j.period_key, j.pid
               FROM dispatch_junk_periods j
-              JOIN dispatch_period_sent ps
-                ON ps.suburb = j.suburb
-               AND ps.period_key = j.period_key
-               AND ps.sent_count > 0
               WHERE j.period_key IS NOT NULL
             ),
             dispatch_audience_periods AS MATERIALIZED (
@@ -1098,6 +1086,7 @@ export async function GET(request: Request) {
                 COALESCE(s.sent_count, ms.sent_count, 0) AS sent_count,
                 COALESCE(a.junk_count, 0) AS junk_count,
                 COALESCE(a.total_count, 0) AS total_count,
+                COALESCE(pj.excluded_count, 0) AS prior_global_junk_count,
                 COALESCE(s.first_sent_at, ms.first_sent_at) AS first_sent_at,
                 COALESCE(s.last_sent_at, ms.last_sent_at) AS last_sent_at
               FROM dispatch_report_periods rq
@@ -1107,6 +1096,8 @@ export async function GET(request: Request) {
                 ON s.suburb = rq.suburb AND s.q_index = rq.q_index
               LEFT JOIN dispatch_month_sent ms
                 ON ms.suburb = rq.suburb AND ms.period_key = rq.period_key
+              LEFT JOIN dispatch_prior_global_junk pj
+                ON pj.suburb = rq.suburb AND pj.period_key = rq.period_key
               UNION ALL
               SELECT
                 n.suburb,
@@ -1115,6 +1106,7 @@ export async function GET(request: Request) {
                 n.sent_count,
                 0::bigint AS junk_count,
                 n.sent_count AS total_count,
+                0::bigint AS prior_global_junk_count,
                 n.first_sent_at,
                 n.last_sent_at
               FROM dispatch_legacy_sent n
@@ -1163,6 +1155,7 @@ export async function GET(request: Request) {
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(year_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, year_bucket ORDER BY year_bucket) s) as junk_yearly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
               SELECT d.suburb, d.campaign_key, d.sent_count, COALESCE(d.junk_count, 0) AS junk_count,
+                     COALESCE(d.prior_global_junk_count, 0) AS prior_global_junk_count,
                      GREATEST(0, d.total_count - d.sent_count - COALESCE(d.junk_count, 0)) AS unsent_count,
                      d.total_count, d.first_sent_at, d.last_sent_at
               FROM dispatch_by_suburb_cte d
@@ -1230,12 +1223,26 @@ export async function GET(request: Request) {
           last_sent_at: string | null;
         }>();
 
-        for (const item of (Array.isArray(row.dispatch_by_suburb) ? row.dispatch_by_suburb as SuburbDispatchRow[] : [])) {
+        const dispatchItems = Array.isArray(row.dispatch_by_suburb)
+          ? row.dispatch_by_suburb as SuburbDispatchRow[]
+          : [];
+        const sentBySuburbQuarter = new Map<string, number>();
+
+        for (const item of dispatchItems) {
+          if (!item?.suburb) continue;
+          const quarterKey = getDispatchQuarterKey(item);
+          if (!quarterKey) continue;
+
+          const key = `${item.suburb.trim().toLowerCase()}|${quarterKey}`;
+          sentBySuburbQuarter.set(key, (sentBySuburbQuarter.get(key) || 0) + (Number(item.sent_count) || 0));
+        }
+
+        for (const item of dispatchItems) {
           if (!item?.suburb) continue;
           const sent = Number(item.sent_count) || 0;
           const junk = Number(item.junk_count) || 0;
-          const total = Number(item.total_count) || 0;
-          const unsent = Number.isFinite(Number(item.unsent_count)) ? Number(item.unsent_count) : Math.max(0, total - sent - junk);
+          const priorGlobalJunk = Number(item.prior_global_junk_count) || 0;
+          const reportedTotal = Number(item.total_count) || 0;
           const periodKey = item.period_key || null;
           const periodCampaignKey = periodKey
             ? (/^[0-9]{4}-[0-9]{2}$/.test(periodKey)
@@ -1253,6 +1260,21 @@ export async function GET(request: Request) {
           const reportUrl = quarterKey && /^[0-9]{4}-Q[1-4]$/.test(quarterKey)
             ? reportsMap.get(`${(item.suburb as string).trim().toLowerCase()}|${quarterKey.toUpperCase()}`) || null
             : null;
+          const previousQuarterKey = quarterKey ? getPreviousQuarterKey(quarterKey) : null;
+          const previousQuarterSent = previousQuarterKey
+            ? sentBySuburbQuarter.get(`${item.suburb.trim().toLowerCase()}|${previousQuarterKey}`)
+            : undefined;
+          // Extend the current audience with last quarter's sent count only
+          // when its shortfall is larger than this quarter's junk count. If
+          // junk explains the difference, the current-period audience is
+          // already represented and the historical baseline overstates unsent.
+          const needsPreviousQuarterAudience =
+            previousQuarterSent !== undefined &&
+            previousQuarterSent > reportedTotal + junk + priorGlobalJunk;
+          const total = needsPreviousQuarterAudience
+            ? Math.max(0, previousQuarterSent - priorGlobalJunk)
+            : reportedTotal;
+          const unsent = Math.max(0, total - sent - junk);
 
           const existing = dispatchMap.get(reportKey);
           if (!existing) {
