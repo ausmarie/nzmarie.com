@@ -165,7 +165,7 @@ describe('DispatchTrendSection', () => {
     expect(unsent?.className).toContain('bg-red-500');
   });
 
-  it('shows Pending, Sent, and Unsent columns with correct values', () => {
+  it('shows Pending as sent plus unsent plus junk', () => {
     render(<DispatchTrendSection trend={mockTrend} />);
 
     expect(screen.getByText('Pending')).toBeTruthy();
@@ -179,13 +179,18 @@ describe('DispatchTrendSection', () => {
     expect(torbay[1]).toBe('15 (75%)');
     expect(torbay[2]).toBe('2 (10%)');
     expect(torbay[3]).toBe('3 (15%)');
-    // Pending is the audience minus junk mail: 20 - 3.
-    expect(torbay[6]).toBe('17');
+    // Pending is sent + unsent + junk.
+    expect(torbay[6]).toBe('20');
+    expect(Number(torbay[6])).toBe(
+      Number(torbay[1].split(' ')[0]) +
+        Number(torbay[2].split(' ')[0]) +
+        Number(torbay[3].split(' ')[0])
+    );
 
     expect(albany[1]).toBe('0 (0%)');
     expect(albany[2]).toBe('0 (0%)');
     expect(albany[3]).toBe('1 (100%)');
-    expect(albany[6]).toBe('0');
+    expect(albany[6]).toBe('1');
   });
 
   it('shows Junk column header with count and percentage', () => {
@@ -238,7 +243,7 @@ describe('DispatchTrendSection', () => {
     expect(screen.queryByText('NORTH CROSS')).toBeNull();
   });
 
-  it('orders columns as Suburb, Report, Sent, Unsent, Pending', () => {
+  it('orders columns with Pending after the send dates', () => {
     render(<DispatchTrendSection trend={mockTrend} />);
 
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
@@ -406,14 +411,14 @@ describe('DispatchTrendSection', () => {
     expect(rows[2].textContent).not.toContain('Long Bay-Q3-2026');
     expect(rows[2].textContent).toContain('0 (0%)');
     expect(rows[2].textContent).toContain('126 (100%)');
-    // Pending column = audience minus junk mail = 126 - 0.
+    // Pending = sent + unsent + junk = 126.
     expect(rows[2].textContent).toContain('126');
     expect(screen.getByText('1 report')).toBeTruthy();
   });
 
-  it('shows Pending as the audience minus junk mail', () => {
+  it('shows Pending as sent plus unsent plus junk', () => {
     // Totara Vale 2026-Q2: 158 properties in scope, 30 cannot be mailed because
-    // of a No Junk Mail sign, 128 already sent -> Pending 128, Unsent 0.
+    // of a No Junk Mail sign, 128 already sent -> Pending 158, Unsent 0.
     const trend: DispatchTrend = {
       ...mockTrend,
       bySuburb: [
@@ -438,7 +443,7 @@ describe('DispatchTrendSection', () => {
     expect(sent).toBe('128 (81%)');
     expect(unsent).toBe('0 (0%)');
     expect(junk).toBe('30 (19%)');
-    expect(pending).toBe('128');
+    expect(pending).toBe('158');
     // The progress bar still tracks the full audience.
     expect(screen.getAllByRole('row')[2].textContent).toContain('128/158');
   });

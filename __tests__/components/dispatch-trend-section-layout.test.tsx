@@ -67,7 +67,7 @@ describe('SuburbDispatchTimeline layout', () => {
     ]);
   });
 
-  it('shows each status count with its percentage of pending', () => {
+  it('shows status counts with sent and unsent percentages based on audience and junk based on pending', () => {
     render(<DispatchTrendSection trend={trend} />);
 
     const row = screen.getByText('Torbay').closest('tr');
@@ -80,15 +80,41 @@ describe('SuburbDispatchTimeline layout', () => {
     expect(cells[3]).toBe('106 (24%)');
     expect(cells[4]).toBeTruthy();
     expect(cells[5]).toBeTruthy();
-    // Pending = audience minus junk mail addresses (437 - 106).
-    expect(cells[6]).toBe('331');
+    // Pending = sent + unsent + junk = 437.
+    expect(cells[6]).toBe('437');
+    expect(Number(cells[6])).toBe(
+      Number(cells[1].split(' ')[0]) +
+        Number(cells[2].split(' ')[0]) +
+        Number(cells[3].split(' ')[0])
+    );
     expect(cells[7]).toBe('View Report');
     expect(cells[8]).toBe('131/437');
+  });
+
+  it('calculates junk percentage from Pending while keeping sent and unsent percentages based on total', () => {
+    const trendWithDifferentAudienceTotal = {
+      ...trend,
+      bySuburb: [{
+        ...trend.bySuburb[0],
+        sent_count: 40,
+        unsent_count: 20,
+        junk_count: 10,
+        total_count: 100,
+      }],
+    };
+    render(<DispatchTrendSection trend={trendWithDifferentAudienceTotal} />);
+
+    const row = screen.getByText('Torbay').closest('tr');
+    const cells = Array.from(row!.querySelectorAll('td')).map((cell) => cell.textContent?.trim());
+    expect(cells[1]).toBe('40 (40%)');
+    expect(cells[2]).toBe('20 (20%)');
+    expect(cells[3]).toBe('10 (14%)');
+    expect(cells[6]).toBe('70');
   });
 });
 
 describe('formatDispatchCount', () => {
-  it('rounds the percentage of pending', () => {
+  it('rounds the percentage of the full audience', () => {
     expect(formatDispatchCount(131, 437)).toBe('131 (30%)');
     expect(formatDispatchCount(1, 3)).toBe('1 (33%)');
   });

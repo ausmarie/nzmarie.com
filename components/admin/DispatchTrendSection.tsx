@@ -360,9 +360,10 @@ function SuburbDispatchTimeline({
                   {sortedItems.map((s) => {
                     const active = selectedSuburb === s.suburb;
                     const sentPct = s.total_count > 0 ? (s.sent_count / s.total_count) * 100 : 0;
-                    const junkPct = s.total_count > 0 ? (s.junk_count / s.total_count) * 100 : 0;
                     const unsentCount = s.unsent_count ?? Math.max(0, s.total_count - s.sent_count - s.junk_count);
                     const unsentPct = s.total_count > 0 ? (unsentCount / s.total_count) * 100 : 0;
+                    const pendingCount = s.sent_count + unsentCount + s.junk_count;
+                    const junkPct = pendingCount > 0 ? (s.junk_count / pendingCount) * 100 : 0;
                     const hasActivity = s.sent_count > 0 || s.junk_count > 0;
                     return (
                       <tr
@@ -382,14 +383,13 @@ function SuburbDispatchTimeline({
                           {formatDispatchCount(unsentCount, s.total_count)}
                         </td>
                         <td className="px-3 py-2.5 text-right font-semibold text-amber-600">
-                          {formatDispatchCount(s.junk_count, s.total_count)}
+                          {formatDispatchCount(s.junk_count, pendingCount)}
                         </td>
                         <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.first_sent_at) : '-'}</td>
                         <td className="px-3 py-2.5 text-slate-600">{hasActivity ? formatDate(s.last_sent_at) : '-'}</td>
-                        {/* Pending = 整体 audience minus the junk-mail addresses that
-                            cannot receive the letter (sent + unsent = pending). */}
+                        {/* Pending is the total of sent, unsent, and junk addresses. */}
                         <td className="px-3 py-2.5 text-right font-semibold text-slate-900">
-                          {Math.max(0, s.total_count - s.junk_count)}
+                          {pendingCount}
                         </td>
                         <td className="px-3 py-2.5">
                           {s.report_url ? (
