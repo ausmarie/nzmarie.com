@@ -12,6 +12,7 @@ vi.mock('@vis.gl/react-google-maps', () => {
     fitBounds: vi.fn(),
     setZoom: vi.fn(),
     setCenter: vi.fn(),
+    getCenter: vi.fn(() => ({ lat: -36.69, lng: 174.74 })),
     getZoom: vi.fn(() => 14),
     addListener: vi.fn(() => () => {}),
     setMap: vi.fn(),
@@ -54,7 +55,7 @@ function coordsPayload(runs: Array<{ runId: number; totalPending: number }>) {
             pendingCount: 12,
             runId: 1,
             addressCoords: [
-              { address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
+              { id: 'out-1', address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
             ],
           },
         ],
@@ -74,6 +75,7 @@ function installMockMap() {
     fitBounds: mockFitBounds,
     setZoom: vi.fn(),
     setCenter: vi.fn(),
+    getCenter: vi.fn(() => ({ lat: -36.69, lng: 174.74 })),
     getZoom: vi.fn(() => 12),
     addListener: vi.fn(() => () => {}),
     setMap: vi.fn(),
@@ -121,7 +123,7 @@ function installMockMap() {
         constructor() {}
         setMap() {}
       },
-      event: { removeListener: vi.fn(), addListenerOnce: vi.fn() },
+      event: { removeListener: vi.fn(), addListenerOnce: vi.fn(), trigger: vi.fn() },
     },
   };
   return map;
@@ -195,6 +197,32 @@ describe('OutreachMapView', () => {
       expect(url).toContain('suburb=Torbay');
       expect(url).toContain('sent_status=unsent');
       expect(url).toContain('address_coords=true');
+    });
+  });
+
+  it('resizes the existing map when it becomes visible again', async () => {
+    installMockMap();
+    const triggerResize = vi.spyOn((globalThis.google as any).maps.event, 'trigger');
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => coordsPayload([{ runId: 1, totalPending: 12 }]),
+    }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const props = {
+      suburb: 'Torbay',
+      activeRunId: null,
+      sentStatus: 'all' as const,
+      onRunSelect: vi.fn(),
+      onStreetSelect: vi.fn(),
+    };
+    const { rerender } = render(<OutreachMapView {...props} isVisible={false} />);
+    expect(await screen.findByTestId('map-canvas')).toBeTruthy();
+
+    rerender(<OutreachMapView {...props} isVisible />);
+
+    await waitFor(() => {
+      expect(triggerResize).toHaveBeenCalledWith(expect.anything(), 'resize');
     });
   });
 
@@ -502,6 +530,77 @@ describe('OutreachMapView', () => {
     expect(addressLink?.getAttribute('target')).toBe('_blank');
     expect(addressLink?.getAttribute('rel')).toContain('noopener');
     expect((InfoWindowMock as unknown as { instances: unknown[] }).instances.length).toBe(1);
+  });
+
+  it('refetches coordinates after marking an address as sent', async () => {
+    installMockMap();
+    const markerClicks: Array<() => void> = [];
+    const OriginalMarker = (globalThis.google as any).maps.Marker;
+    (globalThis.google as any).maps.Marker = class extends OriginalMarker {
+      constructor(options: { title?: string }) {
+        super(options);
+        if (options.title?.includes('Unsent')) {
+          markerClicks.push(() => this.listeners.click?.());
+        }
+      }
+    };
+
+    let openedContent: HTMLElement | null = null;
+    (globalThis.google as any).maps.InfoWindow = class {
+      setContent(content: HTMLElement) {
+        openedContent = content;
+      }
+      setPosition() {}
+      open() {}
+      close() {}
+    };
+
+    const makePayload = (status: 'unsent' | 'sent') => {
+      const payload = coordsPayload([{ runId: 1, totalPending: 1 }]);
+      const address = payload.groups[0].streets[0].addressCoords![0];
+      address.id = 'out-1';
+      address.status = status;
+      address.sent = status === 'sent';
+      return payload;
+    };
+    const fetchMock = vi.fn(async (url: RequestInfo, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      const clusterRequestCount = fetchMock.mock.calls.filter(([requestUrl]) =>
+        String(requestUrl).includes('/api/admin/outreach/street-clusters')
+      ).length;
+      return {
+        ok: true,
+        json: async () => makePayload(clusterRequestCount > 1 ? 'sent' : 'unsent'),
+      };
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(
+      <OutreachMapView
+        suburb="Torbay"
+        activeRunId={null}
+        selectedStreet="Glamorgan Drive"
+        sentStatus="all"
+        onRunSelect={vi.fn()}
+        onStreetSelect={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(markerClicks.length).toBeGreaterThan(0));
+    markerClicks[0]();
+    expect(openedContent).toBeTruthy();
+    const sentButton = Array.from(openedContent!.querySelectorAll('button')).find((button) => button.textContent === 'Sent');
+    expect(sentButton).toBeTruthy();
+    fireEvent.click(sentButton!);
+
+    await waitFor(() => {
+      const clusterRequests = fetchMock.mock.calls.filter(([requestUrl]) =>
+        String(requestUrl).includes('/api/admin/outreach/street-clusters')
+      );
+      expect(clusterRequests).toHaveLength(2);
+    });
   });
 
   it('shows the nearest unsent address after locating', async () => {

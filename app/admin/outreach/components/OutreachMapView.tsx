@@ -58,7 +58,8 @@ export interface OutreachMapViewProps {
   onStatusFilterChange?: (status: 'all' | 'unsent' | 'sent' | 'junk') => void;
   onMarkAsJunk?: (id: string, suburb: string) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
-  refreshKey?: number;
+  refreshKey?: number | string;
+  isVisible?: boolean;
 }
 
 const MAX_BOUNDS_ZOOM = 16;
@@ -459,6 +460,7 @@ export default function OutreachMapView({
   onMarkAsJunk,
   onMarkAsSent,
   refreshKey,
+  isVisible = true,
 }: OutreachMapViewProps) {
   const [coordsData, setCoordsData] = useState<ClusterPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -567,10 +569,10 @@ export default function OutreachMapView({
   const coordsDataRef = useRef(coordsData);
   coordsDataRef.current = coordsData;
 
-  const loadCoords = useCallback(async () => {
+  const loadCoords = useCallback(async (force = false) => {
     if (!suburb) return;
     const fetchKey = `${suburb}|${sentStatus}|${reportQuarter ?? ''}|${refreshKey ?? 0}`;
-    if (lastFetchParamsRef.current === fetchKey && coordsDataRef.current) return;
+    if (!force && lastFetchParamsRef.current === fetchKey && coordsDataRef.current) return;
     lastFetchParamsRef.current = fetchKey;
     setError(null);
     try {
@@ -643,7 +645,7 @@ export default function OutreachMapView({
         throw new Error(err.error || 'Failed to mark as junk');
       }
       await res.json();
-      loadCoords();
+      await loadCoords(true);
     } catch (err) {
       console.error('Mark as junk failed:', err);
     }
@@ -656,9 +658,9 @@ export default function OutreachMapView({
       });
       if (!res.ok) throw new Error('Failed to mark as sent');
       await res.json();
-      loadCoords();
-    } catch {
-      // silently ignore
+      await loadCoords(true);
+    } catch (error) {
+      console.error('Mark as sent failed:', error);
     }
   }, [loadCoords]);
 
@@ -742,6 +744,14 @@ export default function OutreachMapView({
       fitToBounds(allPoints);
     }
   }, [allPoints, fitToBounds]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!isVisible || !map) return;
+    const center = map.getCenter();
+    google.maps.event.trigger(map, 'resize');
+    if (center) map.setCenter(center);
+  }, [isVisible]);
 
   useEffect(() => {
     if (mapRef.current && allPoints.length > 0) fitToBounds(allPoints);

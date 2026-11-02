@@ -28,13 +28,24 @@ vi.mock('@/lib/geo-data', () => ({
 }));
 
 vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
-  default: (props: { onMarkAsSent?: (id: string, suburb: string) => void; refreshKey?: number }) => (
-    <div data-testid="map-stub" data-refresh-key={props.refreshKey}>
+  default: (props: {
+    onMarkAsSent?: (id: string, suburb: string) => void;
+    onMarkAsJunk?: (id: string, suburb: string) => void | Promise<void>;
+    refreshKey?: number | string;
+    isVisible?: boolean;
+  }) => (
+    <div data-testid="map-stub" data-refresh-key={props.refreshKey} data-visible={String(props.isVisible)}>
       <button
         type="button"
         onClick={() => props.onMarkAsSent?.('map-address-1', 'Torbay')}
       >
         Map Sent
+      </button>
+      <button
+        type="button"
+        onClick={() => { void props.onMarkAsJunk?.('junk-address-1', 'Torbay'); }}
+      >
+        Map Junk
       </button>
     </div>
   ),
@@ -122,7 +133,7 @@ describe('Outreach map Sent modal suburb', () => {
     expect(pdfCalls.some((u) => u.includes('suburb=Fairview+Heights'))).toBe(false);
   });
 
-  it('does not reload or scroll the map after dispatching an address from map mode', async () => {
+  it('refreshes map data only after returning from cards following a map dispatch', async () => {
     const scrollToSpy = vi.fn();
     vi.stubGlobal('scrollTo', scrollToSpy);
 
@@ -150,7 +161,49 @@ describe('Outreach map Sent modal suburb', () => {
     });
 
     expect(screen.queryByRole('button', { name: 'Confirm Dispatch Log' })).toBeNull();
+    expect(screen.getByTestId('map-stub')).toBe(map);
     expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+
+    fireEvent.click(screen.getByTitle('Card View'));
+    expect(map.getAttribute('data-visible')).toBe('false');
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+
+    fireEvent.click(screen.getByTitle('Map View'));
+    expect(screen.getByTestId('map-stub')).toBe(map);
+    expect(map.getAttribute('data-visible')).toBe('true');
+    expect(map.getAttribute('data-refresh-key')).not.toBe(initialRefreshKey);
     expect(scrollToSpy).not.toHaveBeenCalled();
+  });
+
+  it('batches multiple junk updates into one refresh when returning from cards', async () => {
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /2026-Q3/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Map$/ }));
+
+    const map = screen.getByTestId('map-stub');
+    const initialRefreshKey = map.getAttribute('data-refresh-key');
+    fireEvent.click(screen.getByRole('button', { name: 'Map Junk' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Map Junk' }));
+
+    await waitFor(() => {
+      const junkRequests = vi.mocked(global.fetch).mock.calls.filter(([url, init]) =>
+        String(url).includes('/api/admin/outreach/junk-address-1') && init?.method === 'PATCH'
+      );
+      expect(junkRequests).toHaveLength(2);
+    });
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+
+    fireEvent.click(screen.getByTitle('Card View'));
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+    fireEvent.click(screen.getByTitle('Map View'));
+
+    expect(screen.getByTestId('map-stub')).toBe(map);
+    expect(map.getAttribute('data-refresh-key')).not.toBe(initialRefreshKey);
+    const refreshKeyAfterReturn = map.getAttribute('data-refresh-key');
+
+    fireEvent.click(screen.getByTitle('Card View'));
+    fireEvent.click(screen.getByTitle('Map View'));
+    expect(map.getAttribute('data-refresh-key')).toBe(refreshKeyAfterReturn);
   });
 });

@@ -270,6 +270,7 @@ export default function OutreachPage() {
   const [todayRunLoading, setTodayRunLoading] = useState(false);
   const [todayRunError, setTodayRunError] = useState<string | null>(null);
   const [todayRunRefreshKey, setTodayRunRefreshKey] = useState(0);
+  const [mapRefreshKey, setMapRefreshKey] = useState(0);
   const [todayRunStartStreet, setTodayRunStartStreet] = useState<string>('');
   const todayRunStartStreetRef = useRef(todayRunStartStreet);
   useEffect(() => {
@@ -376,6 +377,7 @@ export default function OutreachPage() {
   }, [availableReports]);
 
   const [viewMode, setViewMode] = useState<'card' | 'list' | 'map'>('card');
+  const [mapInitialized, setMapInitialized] = useState(false);
   const isUnsentStreet = activeTab === 'pending' && sentStatusFilter === 'unsent' && Boolean(streetFilter);
   const pageSize = getOutreachPageSize(viewMode, isUnsentStreet);
   const [collapsedStreets, setCollapsedStreets] = useState<Set<string>>(new Set());
@@ -399,7 +401,12 @@ export default function OutreachPage() {
   }, [mapSidebarHidden]);
   // Reset to card view when leaving pending tab
   useEffect(() => {
-    if (activeTab !== 'pending') setViewMode((v) => (v === 'map' ? 'card' : v));
+    if (activeTab !== 'pending') {
+      setViewMode((v) => (v === 'map' ? 'card' : v));
+      setMapInitialized(false);
+      mapDataChangedRef.current = false;
+      mapDataCardsReturnRef.current = false;
+    }
   }, [activeTab]);
   const [selectedByTab, setSelectedByTab] = useState<Record<string, Set<string>>>({
     liked: new Set(),
@@ -413,6 +420,8 @@ export default function OutreachPage() {
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const mapSendRef = useRef(false);
   const mapSendSubmittedRef = useRef(false);
+  const mapDataChangedRef = useRef(false);
+  const mapDataCardsReturnRef = useRef(false);
   const [sendTargetIds, setSendTargetIds] = useState<string[]>([]);
   const [sendTargetSuburb, setSendTargetSuburb] = useState('');
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
@@ -1833,6 +1842,152 @@ export default function OutreachPage() {
     }
   }, [isClassic, classicItems.length, currentPage, buildCacheKey]);
 
+  const mapWorkspace = (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: isMobile ? '1fr' : mapSidebarHidden ? '48px 1fr' : '30% 1fr',
+        gap: 12,
+        alignItems: 'flex-start',
+        position: 'relative',
+      }}
+    >
+      {!isMobile && (
+        <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, background: '#fff', overflow: 'hidden', minWidth: 0 }}>
+          <OutreachMapSidebar
+            data={effectiveTodayRunData}
+            loading={todayRunLoading}
+            error={todayRunError}
+            activeRunId={activeMapRunId}
+            collapsedStreets={collapsedStreets}
+            onToggleStreet={toggleStreet}
+            onStreetSelect={(suburb, street) => {
+              setActiveMapStreet(street);
+              setReportSuburbFilter(suburb);
+            }}
+            onRunSelect={(runId) => {
+              setActiveMapRunId(runId);
+              setActiveMapStreet(null);
+            }}
+            hidden={mapSidebarHidden}
+            onToggleHidden={() => setMapSidebarHidden((h) => !h)}
+            streetStatusMap={mapStreetStatusMap}
+            addressCounts={mapAddressCounts}
+            statusFilter={mapStatusFilter}
+            onStatusFilterChange={setMapStatusFilter}
+            onSuburbClick={(suburb) => {
+              setMapStatusFilter('all');
+              setActiveMapStreet(null);
+              setActiveMapRunId(null);
+              setReportSuburbFilter(suburb);
+            }}
+          />
+        </div>
+      )}
+
+      {isMobile && (
+        <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 60 }}>
+          <OutreachMapSidebar
+            data={effectiveTodayRunData}
+            loading={todayRunLoading}
+            error={todayRunError}
+            activeRunId={activeMapRunId}
+            collapsedStreets={collapsedStreets}
+            onToggleStreet={toggleStreet}
+            onStreetSelect={(suburb, street) => {
+              setActiveMapStreet(street);
+              setReportSuburbFilter(suburb);
+            }}
+            onRunSelect={(runId) => {
+              setActiveMapRunId(runId);
+              setActiveMapStreet(null);
+            }}
+            hidden={mapSidebarHidden}
+            onToggleHidden={() => setMapSidebarHidden((h) => !h)}
+            streetStatusMap={mapStreetStatusMap}
+            addressCounts={mapAddressCounts}
+            statusFilter={mapStatusFilter}
+            onStatusFilterChange={setMapStatusFilter}
+            onSuburbClick={(suburb) => {
+              setMapStatusFilter('all');
+              setActiveMapStreet(null);
+              setActiveMapRunId(null);
+              setReportSuburbFilter(suburb);
+            }}
+          />
+        </div>
+      )}
+
+      <div style={{ height: 600, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+        <DynamicMapView
+          suburb={reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb}
+          activeRunId={activeMapRunId}
+          selectedStreet={activeMapStreet}
+          sentStatus="all"
+          reportQuarter={activeQuarter || undefined}
+          onCoordsLoaded={handleMapCoordsLoaded}
+          statusFilter={mapStatusFilter}
+          onStatusFilterChange={setMapStatusFilter}
+          refreshKey={`${todayRunRefreshKey}:${mapRefreshKey}`}
+          isVisible={viewMode === 'map'}
+          onRunSelect={(runId) => {
+            setActiveMapRunId(runId);
+            setActiveMapStreet(null);
+          }}
+          onStreetSelect={(suburb, street) => {
+            setActiveMapStreet(street);
+            setReportSuburbFilter(suburb);
+          }}
+          onMarkAsJunk={async (id: string, addressSuburb: string) => {
+            if (!id) {
+              showNotification('error', 'Invalid address ID');
+              return;
+            }
+            try {
+              const suburb = addressSuburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb;
+              const report = availableReports
+                .filter((item) => item.label === activeQuarter && item.suburb.toLowerCase() === suburb.toLowerCase())
+                .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0];
+              if (!report) throw new Error('No active report found for this suburb and quarter');
+              const res = await fetch(`/api/admin/outreach/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  no_junk_mail: true,
+                  quarter: report.quarter,
+                  year: report.year,
+                  suburb_report_id: report.id,
+                  suburb,
+                }),
+              });
+              if (!res.ok) throw new Error('Failed to mark as junk');
+              const result = await res.json();
+              mapDataChangedRef.current = true;
+              mapDataCardsReturnRef.current = false;
+              showNotification(
+                'success',
+                result.quarter_junk_recorded === false
+                  ? 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window'
+                  : 'Marked as junk for this quarter'
+              );
+            } catch {
+              showNotification('error', 'Failed to mark as junk');
+            }
+          }}
+          onMarkAsSent={(id: string, suburb: string) => {
+            const mapSuburb = suburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb || suburbFilter;
+            const prop = items.find((p) => p.id === id);
+            mapSendRef.current = true;
+            mapSendSubmittedRef.current = false;
+            setSendTargetSuburb(mapSuburb || prop?.suburb || '');
+            setSendTargetIds([id]);
+            setSendModalOpen(true);
+          }}
+        />
+      </div>
+    </div>
+  );
+
   if (status === 'loading') return <SkeletonOutreach />;
 
   return (
@@ -2879,7 +3034,12 @@ export default function OutreachPage() {
       <div style={{ display: "flex", justifyContent: isMobile ? "flex-start" : "flex-end", marginTop: "12px" }}>
         <div className="flex bg-slate-100 rounded-lg p-0.5">
           <button
-            onClick={() => setViewMode('card')}
+            onClick={() => {
+              if (viewMode === 'map' && mapDataChangedRef.current) {
+                mapDataCardsReturnRef.current = true;
+              }
+              setViewMode('card');
+            }}
             className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'card' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             title="Card View"
           >
@@ -2894,7 +3054,15 @@ export default function OutreachPage() {
           </button>
           {activeTab === 'pending' && (
             <button
-              onClick={() => setViewMode('map')}
+              onClick={() => {
+                setMapInitialized(true);
+                if (mapDataCardsReturnRef.current) {
+                  setMapRefreshKey((k) => k + 1);
+                  mapDataChangedRef.current = false;
+                  mapDataCardsReturnRef.current = false;
+                }
+                setViewMode('map');
+              }}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'map' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               title="Map View"
             >
@@ -3086,7 +3254,16 @@ export default function OutreachPage() {
 
       {/* Content */}
 
-      {(loading || (isClassic && classicLoading)) ? (
+      {activeTab === 'pending' && mapInitialized && (
+        <div
+          data-testid="outreach-map-workspace"
+          style={{ display: viewMode === 'map' ? 'block' : 'none' }}
+        >
+          {mapWorkspace}
+        </div>
+      )}
+
+      {activeTab === 'pending' && viewMode === 'map' ? null : (loading || (isClassic && classicLoading)) ? (
         <SkeletonOutreach />
       ) : displayItems.length === 0 && !loadingMore ? (
         <div className="p-12 text-center">
@@ -3806,150 +3983,6 @@ export default function OutreachPage() {
             ))}
           </div>
         </>
-      ) : viewMode === 'map' ? (
-        /* ── MAP VIEW: sidebar 30% + Google Map 70% ── */
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr' : mapSidebarHidden ? '48px 1fr' : '30% 1fr',
-            gap: 12,
-            alignItems: 'flex-start',
-            position: 'relative',
-          }}
-        >
-          {/* Desktop: regular sidebar column. Mobile: render a compact, absolute-positioned sidebar (icon-only when hidden). */}
-          {!isMobile && (
-            <div style={{ border: '1px solid #e2e8f0', borderRadius: 12, background: '#fff', overflow: 'hidden', minWidth: 0 }}>
-              <OutreachMapSidebar
-                data={effectiveTodayRunData}
-                loading={todayRunLoading}
-                error={todayRunError}
-                activeRunId={activeMapRunId}
-                collapsedStreets={collapsedStreets}
-                onToggleStreet={toggleStreet}
-                onStreetSelect={(suburb, street) => {
-                  setActiveMapStreet(street);
-                  setReportSuburbFilter(suburb);
-                }}
-                onRunSelect={(runId) => {
-                  setActiveMapRunId(runId);
-                  setActiveMapStreet(null);
-                }}
-                hidden={mapSidebarHidden}
-                onToggleHidden={() => setMapSidebarHidden((h) => !h)}
-                streetStatusMap={mapStreetStatusMap}
-                addressCounts={mapAddressCounts}
-                statusFilter={mapStatusFilter}
-                onStatusFilterChange={setMapStatusFilter}
-                onSuburbClick={(suburb) => {
-                  setMapStatusFilter('all');
-                  setActiveMapStreet(null);
-                  setActiveMapRunId(null);
-                  setReportSuburbFilter(suburb);
-                }}
-              />
-            </div>
-          )}
-
-          {isMobile && (
-            <div style={{ position: 'absolute', left: 12, top: 12, zIndex: 60 }}>
-              <OutreachMapSidebar
-                data={effectiveTodayRunData}
-                loading={todayRunLoading}
-                error={todayRunError}
-                activeRunId={activeMapRunId}
-                collapsedStreets={collapsedStreets}
-                onToggleStreet={toggleStreet}
-                onStreetSelect={(suburb, street) => {
-                  setActiveMapStreet(street);
-                  setReportSuburbFilter(suburb);
-                }}
-                onRunSelect={(runId) => {
-                  setActiveMapRunId(runId);
-                  setActiveMapStreet(null);
-                }}
-                hidden={mapSidebarHidden}
-                onToggleHidden={() => setMapSidebarHidden((h) => !h)}
-                streetStatusMap={mapStreetStatusMap}
-                addressCounts={mapAddressCounts}
-                statusFilter={mapStatusFilter}
-                onStatusFilterChange={setMapStatusFilter}
-                onSuburbClick={(suburb) => {
-                  setMapStatusFilter('all');
-                  setActiveMapStreet(null);
-                  setActiveMapRunId(null);
-                  setReportSuburbFilter(suburb);
-                }}
-              />
-            </div>
-          )}
-
-          <div style={{ height: 600, borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
-            <DynamicMapView
-              suburb={reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb}
-              activeRunId={activeMapRunId}
-              selectedStreet={activeMapStreet}
-              sentStatus="all"
-              reportQuarter={activeQuarter || undefined}
-              onCoordsLoaded={handleMapCoordsLoaded}
-              statusFilter={mapStatusFilter}
-              onStatusFilterChange={setMapStatusFilter}
-              refreshKey={todayRunRefreshKey}
-              onRunSelect={(runId) => {
-                setActiveMapRunId(runId);
-                setActiveMapStreet(null);
-              }}
-              onStreetSelect={(suburb, street) => {
-                setActiveMapStreet(street);
-                setReportSuburbFilter(suburb);
-              }}
-              onMarkAsJunk={async (id: string, addressSuburb: string) => {
-                if (!id) {
-                  showNotification('error', 'Invalid address ID');
-                  return;
-                }
-                try {
-                  const suburb = addressSuburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb;
-                  const report = availableReports
-                    .filter((item) => item.label === activeQuarter && item.suburb.toLowerCase() === suburb.toLowerCase())
-                    .sort((a, b) => (b.uploaded_at || '').localeCompare(a.uploaded_at || ''))[0];
-                  if (!report) throw new Error('No active report found for this suburb and quarter');
-                  const res = await fetch(`/api/admin/outreach/${id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      no_junk_mail: true,
-                      quarter: report.quarter,
-                      year: report.year,
-                      suburb_report_id: report.id,
-                      suburb,
-                    }),
-                  });
-                  if (!res.ok) throw new Error('Failed to mark as junk');
-                  const result = await res.json();
-                  showNotification(
-                    'success',
-                    result.quarter_junk_recorded === false
-                      ? 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window'
-                      : 'Marked as junk for this quarter'
-                  );
-                  setTodayRunRefreshKey((k) => k + 1);
-                } catch {
-                  showNotification('error', 'Failed to mark as junk');
-                }
-              }}
-              onMarkAsSent={(id: string, suburb: string) => {
-                const mapSuburb = suburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb || suburbFilter;
-                const prop = items.find((p) => p.id === id);
-                mapSendRef.current = true;
-                mapSendSubmittedRef.current = false;
-                setSendTargetSuburb(mapSuburb || prop?.suburb || '');
-                setSendTargetIds([id]);
-                setSendModalOpen(true);
-              }}
-            />
-          </div>
-        </div>
       ) : (
         <div className="space-y-3">
           {groupedBySuburb.map(({ suburb, streets, totalCount }) => {
@@ -4534,7 +4567,10 @@ export default function OutreachPage() {
           cacheRef.current.clear();
         }}
         onConfirmed={() => {
-          if (!mapSendRef.current) {
+          if (mapSendRef.current) {
+            mapDataChangedRef.current = true;
+            mapDataCardsReturnRef.current = false;
+          } else {
             setTodayRunRefreshKey((k) => k + 1);
           }
           mapSendRef.current = false;

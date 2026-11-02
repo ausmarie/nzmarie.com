@@ -35,6 +35,19 @@ vi.mock('@/components/property/AddressAutocomplete', () => ({
   ),
 }));
 
+vi.mock('../../../app/admin/outreach/components/DynamicMapView', async () => {
+  const React = await import('react');
+  return {
+    __esModule: true,
+    default: ({ isVisible, refreshKey }: { isVisible?: boolean; refreshKey?: number }) =>
+      React.createElement('div', {
+        'data-testid': 'outreach-map-mock',
+        'data-visible': String(isVisible),
+        'data-refresh-key': String(refreshKey),
+      }),
+  };
+});
+
 vi.mock('@/lib/geo-data', () => ({
   getAllSuburbs: () => ['Takapuna'],
 }));
@@ -121,6 +134,58 @@ describe('Outreach page', () => {
 
     expect(await screen.findByText('15 Marine Parade')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: /✓ Sent/i }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps the map mounted when switching between map and cards', async () => {
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const requestUrl = String(url || '');
+      if (requestUrl.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, reports: [] }) });
+      }
+      if (requestUrl.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (requestUrl.includes('/api/admin/outreach?') && requestUrl.includes('status=pending')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: [{
+              id: 'out-1',
+              property_address: '15 Marine Parade',
+              suburb: 'Takapuna',
+              city: 'Auckland',
+              region: 'North Shore',
+              status: 'PENDING',
+              created_at: '2026-07-01T10:00:00Z',
+            }],
+            pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ success: true, data: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } }),
+      });
+    });
+
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByTitle('Map View'));
+
+    const map = await screen.findByTestId('outreach-map-mock');
+    expect(map.getAttribute('data-visible')).toBe('true');
+    const initialRefreshKey = map.getAttribute('data-refresh-key');
+
+    fireEvent.click(screen.getByRole('button', { name: /⊞ Cards/i }));
+    expect(screen.getByTestId('outreach-map-mock')).toBe(map);
+    expect(map.getAttribute('data-visible')).toBe('false');
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+
+    fireEvent.click(screen.getByTitle('Map View'));
+    expect(screen.getByTestId('outreach-map-mock')).toBe(map);
+    expect(map.getAttribute('data-visible')).toBe('true');
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
   });
 
   it('marks a pending address as sent when row button clicked', async () => {
