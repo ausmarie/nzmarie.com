@@ -544,7 +544,9 @@ describe('Dashboard Stats API', () => {
 
     const totalSentCard = screen.getByText('Total Sent').closest('div.bg-white') as HTMLElement;
     expect(within(totalSentCard).getByText('Today')).toBeTruthy();
-    expect(within(totalSentCard).getByText('19 sent')).toBeTruthy();
+    const todaySentCount = within(totalSentCard).getByText('19 sent');
+    expect(todaySentCount.className).toContain('font-semibold');
+    expect(todaySentCount.className).toContain('text-purple-700');
     expect(within(totalSentCard).queryByText('Albany: 12')).toBeNull();
     expect(within(totalSentCard).queryByText('Torbay: 7')).toBeNull();
   });

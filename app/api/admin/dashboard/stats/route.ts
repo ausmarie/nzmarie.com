@@ -419,7 +419,7 @@ export async function GET(request: Request) {
   // succession (e.g. a React effect firing twice) don't both run the heavy
   // aggregation and burn Registers twice. It also makes a stale cached payload
   // from before a fix impossible to keep serving for the whole TTL.
-  const cacheVersion = 14;
+  const cacheVersion = 15;
 
   try {
     await ensureCampaignTablesExist();
@@ -471,7 +471,7 @@ export async function GET(request: Request) {
                   ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
                 GROUP BY sl.suburb
               ),
-              quarterly_suburb_sent_cte AS (
+              quarterly_sent_records_cte AS (
                 SELECT
                   CASE WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
                     THEN substring(sl.campaign_key from '^([0-9]{4})') || '-' || substring(sl.campaign_key from '[_-](Q[1-4])')
@@ -483,11 +483,12 @@ export async function GET(request: Request) {
                     THEN sr.year || '-' || substring(sr.quarter from 'M([0-9]{2})')
                   END AS quarter_key,
                   sl.suburb,
-                  COUNT(DISTINCT sl.outreach_property_id) AS sent_count,
-                  MAX(sl.sent_at) AS last_sent_at
+                  sl.outreach_property_id AS pid,
+                  sl.sent_at
                 FROM outreach_send_logs sl
                 LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
                 WHERE sl.suburb IS NOT NULL
+                  AND sl.sent_at IS NOT NULL
                   AND NOT EXISTS (
                     SELECT 1
                     FROM outreach_property_quarter_status returned
@@ -496,20 +497,52 @@ export async function GET(request: Request) {
                       AND returned.status = 'pending'
                   )
                   ${suburbFilter ? sql`AND sl.suburb = ${suburb}` : sql``}
-                GROUP BY 1, 2
+                UNION ALL
+                SELECT
+                  sent.quarter_key,
+                  sent.suburb,
+                  sent.outreach_property_id AS pid,
+                  sent.last_sent_at AS sent_at
+                FROM outreach_property_quarter_status sent
+                WHERE sent.quarter ~ '^Q[1-4]$'
+                  AND (
+                    sent.status = 'sent'
+                    OR (sent.status = 'partial' AND COALESCE(sent.sent_count, 0) > 0)
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM outreach_send_logs sl
+                    WHERE sl.outreach_property_id = sent.outreach_property_id
+                      AND sl.suburb_report_id = sent.suburb_report_id
+                  )
+                  ${suburbFilter ? sql`AND sent.suburb = ${suburb}` : sql``}
+              ),
+              quarterly_suburb_sent_cte AS (
+                SELECT
+                  quarter_key,
+                  suburb,
+                  COUNT(DISTINCT pid)::int AS sent_count,
+                  MAX(sent_at) AS last_sent_at
+                FROM quarterly_sent_records_cte
+                WHERE quarter_key IS NOT NULL
+                GROUP BY quarter_key, suburb
+              ),
+              quarter_overview_totals_cte AS (
+                SELECT quarter_key, SUM(sent_count)::int AS total_sent
+                FROM quarterly_suburb_sent_cte
+                WHERE quarter_key ~ '^[0-9]{4}-Q[1-4]$'
+                GROUP BY quarter_key
               )
             SELECT
               (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM sent_summary_cte s) as sent_summary_suburbs,
               (SELECT COUNT(*) FROM sent_summary_cte) as sent_summary_suburb_count,
               (SELECT COALESCE(SUM(sent_count), 0) FROM sent_summary_cte) as sent_summary_total_sent,
-              (SELECT COALESCE(json_agg(row_to_json(q) ORDER BY q.year DESC, q.quarter DESC), '[]')
-                 FROM mv_quarter_overview q) as quarter_overview_totals,
+              (SELECT COALESCE(json_agg(row_to_json(q) ORDER BY q.quarter_key DESC), '[]')
+                 FROM quarter_overview_totals_cte q) as quarter_overview_totals,
               (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
                 SELECT suburb, sent_count FROM today_sent_cte
                 ORDER BY sent_count DESC, suburb ASC
               ) s) as today_suburb_sent,
-              (SELECT COALESCE(json_agg(row_to_json(q) ORDER BY q.year DESC, q.quarter DESC), '[]')
-                 FROM mv_quarter_overview q) as quarter_overview_totals,
               (SELECT COUNT(*) FROM appraisal_leads) as total_bookings,
               (SELECT COALESCE(json_agg(row_to_json(a)), '[]') FROM (
                 SELECT id, client_name, email, phone, suburb, property_address, contact_status, created_at
@@ -522,7 +555,7 @@ export async function GET(request: Request) {
           const row = (summaryRows.rows[0] || {}) as Record<string, unknown>;
           // Summary cards do not render report links, so skip the extra
           // suburb_reports round trip. The target quarter follows the same
-          // rule as the full payload: the newest quarter present in the view.
+          // rule as the full payload: the newest quarter with dispatch activity.
           const summaryTargetQuarterKey = quarterKey
             || latestPeriodKey((Array.isArray(row.quarter_overview_totals)
               ? row.quarter_overview_totals as QuarterOverviewTotalRow[]

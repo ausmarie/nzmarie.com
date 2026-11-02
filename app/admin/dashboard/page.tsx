@@ -360,7 +360,7 @@ export default function AdminDashboardPage() {
             <div className="space-y-1">
               <div className="flex items-center gap-2 whitespace-nowrap">
                 <span className="text-xs font-bold text-slate-700">Today</span>
-                <span className="text-xs text-slate-500">
+                <span className="text-xs font-semibold text-purple-700">
                   {stats?.sentSummary?.today?.total_sent ?? 0} sent
                 </span>
               </div>

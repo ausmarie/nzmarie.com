@@ -103,7 +103,7 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(getDashboardStatsCached).toHaveBeenCalledWith(
-      'dashboard:stats:v14:all:all',
+      'dashboard:stats:v15:all:all',
       expect.any(Function),
       600
     );
@@ -120,7 +120,7 @@ describe('GET /api/admin/dashboard/stats', () => {
       today_suburb_sent: [{ suburb: 'Albany', sent_count: '7' }],
       quarter_overview_totals: [
         { quarter_key: '2026-Q3', total_sent: '826' },
-        { quarter_key: '2026-Q2', total_sent: '1815' },
+        { quarter_key: '2026-Q2', total_sent: '2700' },
       ],
       total_bookings: '9',
       recent_appraisals: [
@@ -150,7 +150,7 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(body.part).toBe('summary');
     expect(body.stats.totalBookings).toBe(9);
     expect(body.stats.sentSummary).toEqual({
-      total_sent: 2641,
+      total_sent: 3526,
       suburb_count: 2,
       suburbs: [
         { suburb: 'Oteha', sent_count: 5 },
@@ -159,14 +159,17 @@ describe('GET /api/admin/dashboard/stats', () => {
       today: { total_sent: 7, suburbs: [{ suburb: 'Albany', sent_count: 7 }] },
       quarterly: [
         { quarter_key: '2026-Q3', total_sent: 826, suburbs: [] },
-        { quarter_key: '2026-Q2', total_sent: 1815, suburbs: [] },
+        { quarter_key: '2026-Q2', total_sent: 2700, suburbs: [] },
       ],
     });
     expect(body.stats.recentAppraisals).toHaveLength(1);
     expect(body.stats.recentAppraisals[0].client_name).toBe('Latest Lead');
     expect(body.stats.targetQuarterKey).toBe('2026-Q3');
     expect(summarySql).toContain('today_sent_cte');
-    expect(summarySql).toContain('quarter_overview_totals');
+    expect(summarySql).toContain('quarter_overview_totals_cte');
+    expect(summarySql).toContain('quarterly_sent_records_cte');
+    expect(summarySql).toContain('outreach_property_quarter_status sent');
+    expect(summarySql).toContain("sent.status = 'partial'");
     expect(summarySql).not.toContain('dispatch_by_suburb_cte');
     expect(summarySql).not.toContain('junk_props_base');
     expect(summarySql).not.toContain('outreach_send_logs sl ON sl.outreach_property_id');
@@ -176,7 +179,7 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(db.execute).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the summary Total Sent identical to the quarter overview totals', async () => {
+  it('keeps the summary Total Sent based on canonical quarter dispatch totals', async () => {
     // Guard against the headline drifting away from the quarter cards again.
     const summaryRow = {
       sent_summary_suburbs: [{ suburb: 'Oteha', sent_count: '9000' }],
@@ -185,7 +188,7 @@ describe('GET /api/admin/dashboard/stats', () => {
       quarterly_suburb_sent: [{ quarter_key: '2026-Q3', suburb: 'Oteha', sent_count: '9000' }],
       quarter_overview_totals: [
         { quarter_key: '2026-Q3', total_sent: '826' },
-        { quarter_key: '2026-Q2', total_sent: '1815' },
+        { quarter_key: '2026-Q2', total_sent: '2700' },
       ],
       today_suburb_sent: [],
       total_bookings: '0',
@@ -198,8 +201,8 @@ describe('GET /api/admin/dashboard/stats', () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.stats.sentSummary.total_sent).toBe(2641);
-    expect(body.stats.sentSummary.quarterly.map((q: { total_sent: number }) => q.total_sent)).toEqual([826, 1815]);
+    expect(body.stats.sentSummary.total_sent).toBe(3526);
+    expect(body.stats.sentSummary.quarterly.map((q: { total_sent: number }) => q.total_sent)).toEqual([826, 2700]);
     expect(body.quarterKey).toBe('2026-Q3');
   });
 

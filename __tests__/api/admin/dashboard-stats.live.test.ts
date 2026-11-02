@@ -18,27 +18,30 @@ describe.skipIf(!hasDb)('dashboard stats against the live database', () => {
     vi.mocked(isAdmin).mockReturnValue(true);
   });
 
-  it('keeps Total Sent identical to the quarter overview totals', async () => {
-    const { marieDB } = await import('@/lib/db');
-
-    const overview = await marieDB.query<{ total_sent: string }>(
-      'SELECT total_sent FROM mv_quarter_overview'
-    );
-    const expectedTotal = overview.rows.reduce((sum, row) => sum + Number(row.total_sent || 0), 0);
-
+  it('keeps the summary quarter total identical to the suburb dispatch timeline', async () => {
     const res = await GET(new Request('http://localhost/api/admin/dashboard/stats?part=summary'));
     const body = await res.json();
+    const timelineRes = await GET(
+      new Request('http://localhost/api/admin/dashboard/stats?quarterKey=2026-Q2')
+    );
+    const timelineBody = await timelineRes.json();
+    const timelineTotal = timelineBody.stats.dispatchTrend.bySuburb
+      .filter((row: { quarter_key: string | null }) => row.quarter_key === '2026-Q2')
+      .reduce((sum: number, row: { sent_count: number }) => sum + row.sent_count, 0);
+    const summaryQuarterTotal = body.stats.sentSummary.quarterly.find(
+      (row: { quarter_key: string }) => row.quarter_key === '2026-Q2'
+    )?.total_sent;
 
     expect(res.status).toBe(200);
+    expect(timelineRes.status).toBe(200);
     expect(body.part).toBe('summary');
-    // The headline number must never disagree with the quarter cards.
-    expect(body.stats.sentSummary.total_sent).toBe(expectedTotal);
+    expect(summaryQuarterTotal).toBe(timelineTotal);
     const quarterlyTotal = body.stats.sentSummary.quarterly.reduce(
       (sum: number, q: { total_sent: number }) => sum + q.total_sent,
       0
     );
-    expect(quarterlyTotal).toBe(expectedTotal);
-  }, 30000);
+    expect(body.stats.sentSummary.total_sent).toBe(quarterlyTotal);
+  }, 60000);
 
   it('shows report periods uploaded in Assets before any send happens', async () => {
     const { marieDB } = await import('@/lib/db');
