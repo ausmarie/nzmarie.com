@@ -160,6 +160,26 @@ describe('LeadsPage refresh behavior', () => {
     expect(screen.queryByRole('link', { name: '11 Honour Avenue' })).toBeNull();
   });
 
+  it('renders only one lead card when the API returns duplicate addresses', async () => {
+    const duplicateLead = { ...mockLeads[0], id: 'lead-duplicate' };
+    (global.fetch as any).mockImplementationOnce(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            data: [mockLeads[0], duplicateLead],
+            pagination: { page: 1, limit: 50, total: 2, totalPages: 1 },
+          }),
+      })
+    );
+
+    render(<LeadsPage />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('heading', { name: '249 Sunset Road' })).toHaveLength(1);
+    });
+  });
+
   it('renders all lead, property, PDF and timeline data in each AI data chamber', async () => {
     render(<LeadsPage />);
 

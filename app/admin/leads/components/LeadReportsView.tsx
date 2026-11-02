@@ -7,6 +7,7 @@ import GenerateReportModal from '@/app/admin/reports/components/GenerateReportMo
 import { useReportStore } from '@/app/admin/reports/stores/report-store';
 import { useCtrlS } from '@/app/admin/reports/hooks/useCtrlS';
 import type { ReportDocument, ReportEditorContent } from '@/types/report';
+import { dedupeLeadsByAddress } from '@/lib/dedupe-leads-by-address';
 
 interface LeadOption {
   id: string;
@@ -104,9 +105,11 @@ export default function LeadReportsView({ onSwitchToLeads, onLeadChange, initial
         const data = await res.json();
         if (cancelled) return;
         if (data.success) {
-          const rows: LeadOption[] = (data.leads || []).slice().sort(
-            (a: LeadOption, b: LeadOption) =>
-              new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+          const rows: LeadOption[] = dedupeLeadsByAddress<LeadOption>(
+            (data.leads || []).slice().sort(
+              (a: LeadOption, b: LeadOption) =>
+                new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+            )
           );
           setLeads(rows);
           if (!autoSelectedRef.current && initialLeadId) {

@@ -13,6 +13,7 @@ import { PropertyHistoryView } from '@/components/admin/PropertyHistoryView';
 import { SendHistoryTable } from '@/components/admin/SendHistoryTable';
 import LeadPdfSection, { type LeadPdfDocument } from '@/components/admin/LeadPdfSection';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
+import { dedupeLeadsByAddress } from '@/lib/dedupe-leads-by-address';
 import LeadReportsView from './components/LeadReportsView';
 
 interface Lead {
@@ -259,7 +260,7 @@ export default function LeadsPage() {
 
   const isClassic = paginationMode === 'classic';
   const PAGE_SIZE = 18;
-  const displayLeads = isClassic ? leads : allLeads;
+  const displayLeads = dedupeLeadsByAddress(isClassic ? leads : allLeads);
   const totalLeads = pagination?.total || 0;
   const totalPages = Math.max(1, Math.ceil(totalLeads / PAGE_SIZE));
 
