@@ -185,7 +185,7 @@ describe('Outreach page', () => {
     fireEvent.click(screen.getByTitle('Map View'));
     expect(screen.getByTestId('outreach-map-mock')).toBe(map);
     expect(map.getAttribute('data-visible')).toBe('true');
-    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+    expect(map.getAttribute('data-refresh-key')).not.toBe(initialRefreshKey);
   });
 
   it('marks a pending address as sent when row button clicked', async () => {
@@ -1522,6 +1522,10 @@ describe('Outreach page - Card view run ordering', () => {
     // The liked tab is the default and infinite scroll is the default mode.
     await waitFor(() => {
       expect(screen.getAllByText(/Displaying 1 to 9 of 134 properties/).length).toBeGreaterThanOrEqual(1);
+    }, { timeout: 3000 });
+
+    await waitFor(() => {
+      expect(ioCallback).toBeTypeOf('function');
     }, { timeout: 3000 });
 
     act(() => {

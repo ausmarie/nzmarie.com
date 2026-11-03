@@ -3056,11 +3056,10 @@ export default function OutreachPage() {
             <button
               onClick={() => {
                 setMapInitialized(true);
-                if (mapDataCardsReturnRef.current) {
-                  setMapRefreshKey((k) => k + 1);
-                  mapDataChangedRef.current = false;
-                  mapDataCardsReturnRef.current = false;
-                }
+                setMapRefreshKey((k) => k + 1);
+                if (sentStatusFilter === 'unsent') setMapStatusFilter('unsent');
+                mapDataChangedRef.current = false;
+                mapDataCardsReturnRef.current = false;
                 setViewMode('map');
               }}
               className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${viewMode === 'map' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}

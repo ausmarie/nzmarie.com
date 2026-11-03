@@ -33,8 +33,14 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
     onMarkAsJunk?: (id: string, suburb: string) => void | Promise<void>;
     refreshKey?: number | string;
     isVisible?: boolean;
+    statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   }) => (
-    <div data-testid="map-stub" data-refresh-key={props.refreshKey} data-visible={String(props.isVisible)}>
+    <div
+      data-testid="map-stub"
+      data-refresh-key={props.refreshKey}
+      data-visible={String(props.isVisible)}
+      data-status-filter={props.statusFilter}
+    >
       <button
         type="button"
         onClick={() => props.onMarkAsSent?.('map-address-1', 'Torbay')}
@@ -79,6 +85,19 @@ describe('Outreach map Sent modal suburb', () => {
       }
       if (s.includes('/api/admin/outreach/suburb-sent-stats')) {
         return Promise.resolve({ ok: true, json: async () => ({ success: true, stats: {} }) });
+      }
+      if (s.includes('/api/admin/outreach/street-clusters')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            suburb: 'Torbay',
+            groups: [],
+            allStreets: [],
+            runs: [],
+            unclusteredStreets: [],
+          }),
+        });
       }
       if (s.includes('/api/admin/outreach?')) {
         return Promise.resolve({
@@ -131,6 +150,28 @@ describe('Outreach map Sent modal suburb', () => {
       .filter((u) => u.includes('/api/admin/pdf/reports'));
     expect(pdfCalls.some((u) => u.includes('suburb=Torbay'))).toBe(true);
     expect(pdfCalls.some((u) => u.includes('suburb=Fairview+Heights'))).toBe(false);
+  });
+
+  it('refreshes the map whenever it is selected and preserves the Pending Unsent filter', async () => {
+    render(<OutreachPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unsent' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Map$/ }));
+
+    const map = screen.getByTestId('map-stub');
+    expect(map.getAttribute('data-status-filter')).toBe('unsent');
+    const initialRefreshKey = map.getAttribute('data-refresh-key');
+
+    fireEvent.click(screen.getByTitle('Card View'));
+    fireEvent.click(screen.getByTitle('Map View'));
+
+    expect(map.getAttribute('data-status-filter')).toBe('unsent');
+    expect(map.getAttribute('data-refresh-key')).not.toBe(initialRefreshKey);
+    const refreshedKey = map.getAttribute('data-refresh-key');
+
+    fireEvent.click(screen.getByTitle('Map View'));
+    expect(map.getAttribute('data-refresh-key')).not.toBe(refreshedKey);
   });
 
   it('refreshes map data only after returning from cards following a map dispatch', async () => {
@@ -204,6 +245,6 @@ describe('Outreach map Sent modal suburb', () => {
 
     fireEvent.click(screen.getByTitle('Card View'));
     fireEvent.click(screen.getByTitle('Map View'));
-    expect(map.getAttribute('data-refresh-key')).toBe(refreshKeyAfterReturn);
+    expect(map.getAttribute('data-refresh-key')).not.toBe(refreshKeyAfterReturn);
   });
 });
