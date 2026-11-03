@@ -3522,7 +3522,13 @@ export default function OutreachPage() {
                     })()}
                   </div></a>
                 <div style={{ padding: '16px', display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: activeTab === 'liked' ? 'column' : 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    marginBottom: '4px',
+                  }}>
                     <h3 style={{
                       margin: 0,
                       fontSize: '1.15rem',
@@ -3530,10 +3536,20 @@ export default function OutreachPage() {
                       color: '#2D3748',
                       lineHeight: '1.3',
                       flex: 1,
+                      width: activeTab === 'liked' ? '100%' : undefined,
                     }}>
                       {prop.property_address}
                     </h3>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", marginLeft: "12px" }}>
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: activeTab === 'liked' ? 'row' : 'column',
+                      alignItems: 'flex-end',
+                      justifyContent: activeTab === 'liked' ? 'flex-end' : undefined,
+                      gap: '4px',
+                      marginLeft: activeTab === 'liked' ? 0 : '12px',
+                      marginTop: activeTab === 'liked' ? '8px' : 0,
+                      width: activeTab === 'liked' ? '100%' : undefined,
+                    }}>
                       <button
                         onClick={(e) => {
                           e.preventDefault();
@@ -3567,10 +3583,10 @@ export default function OutreachPage() {
                         }}
                         aria-label={`Open ${prop.property_address} in Google Maps`}
                         style={{
-                          fontSize: '0.75rem',
+                          fontSize: '0.85rem',
                           color: '#2563eb',
                           fontWeight: '600',
-                          padding: '4px 10px',
+                          padding: '6px 10px',
                           borderRadius: '8px',
                           background: '#eff6ff',
                           border: '1px solid #bfdbfe',

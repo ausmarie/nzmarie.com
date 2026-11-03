@@ -601,6 +601,25 @@ describe('Outreach page - Liked icon on card image', () => {
     expect(screen.getByTitle('取消喜欢 / Unlike')).toBeDefined();
   });
 
+  it('places the address on its own row and aligns Edit then Street on the right below it', async () => {
+    render(<OutreachPage />);
+
+    const address = await screen.findByRole('heading', { name: '15 Marine Parade' });
+    const addressAndActionsRow = address.parentElement;
+    expect(addressAndActionsRow?.style.flexDirection).toBe('column');
+
+    const actionsRow = addressAndActionsRow?.children[1] as HTMLElement;
+    expect(actionsRow.style.flexDirection).toBe('row');
+    expect(actionsRow.style.justifyContent).toBe('flex-end');
+    const [editButton, streetButton] = Array.from(actionsRow.querySelectorAll('button'));
+    expect([editButton.textContent?.trim(), streetButton.textContent?.trim()]).toEqual(['Edit', 'Street']);
+    expect(streetButton.style.fontSize).toBe(editButton.style.fontSize);
+    expect(streetButton.style.paddingTop).toBe(editButton.style.paddingTop);
+    expect(streetButton.style.paddingBottom).toBe(editButton.style.paddingBottom);
+    expect(streetButton.style.color).toBe('rgb(37, 99, 235)');
+    expect(streetButton.style.background).toBe('rgb(239, 246, 255)');
+  });
+
   it('clicking the liked icon removes the record via DELETE without full refresh', async () => {
     render(<OutreachPage />);
     await waitFor(() => expect(screen.getByText('❤️ Liked')).toBeDefined());
