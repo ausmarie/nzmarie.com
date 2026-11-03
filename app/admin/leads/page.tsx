@@ -62,6 +62,13 @@ interface Lead {
   estimated_value_high?: number | null;
   property_history?: string | null;
   realestate_url?: string | null;
+  postcode?: string | null;
+  land_value?: number | null;
+  improvement_value?: number | null;
+  property_type?: string | null;
+  sale_status?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   on_market_sale?: boolean;
   sale_listing_status?: string | null;
   sale_price?: string | null;
@@ -76,8 +83,15 @@ interface Lead {
   sent_at?: string | null;
   last_sent_at?: string | null;
   total_send_count?: number | null;
+  address_notes?: AddressNote[];
   documents?: LeadPdfDocument[];
   events?: LeadEvent[];
+}
+
+interface AddressNote {
+  lead_id: string;
+  notes: string;
+  created_at?: string | null;
 }
 
 interface LeadEvent {
@@ -165,8 +179,17 @@ function normalizeLeadAddress(lead: Lead): Lead {
   };
 }
 
-function buildLeadAiData(lead: Lead): string {
+function buildLeadAiData(
+  lead: Lead,
+  sendHistory: SendHistoryLog[] = [],
+  sendHistoryError?: string,
+): string {
   const documents = Array.isArray(lead.documents) ? lead.documents : [];
+  const notes = Array.isArray(lead.address_notes)
+    ? lead.address_notes
+    : lead.notes
+      ? [{ lead_id: lead.id, notes: lead.notes, created_at: lead.created_at }]
+      : [];
   const events = Array.isArray(lead.events) ? lead.events : [];
   const lines: Array<string | null | undefined> = [
     '[AI-DATA-START]',
@@ -176,6 +199,7 @@ function buildLeadAiData(lead: Lead): string {
     lead.suburb ? `Suburb: ${lead.suburb}` : null,
     lead.city ? `City: ${lead.city}` : null,
     lead.region ? `Region: ${lead.region}` : null,
+    lead.postcode ? `Postcode: ${lead.postcode}` : null,
     lead.owner_name ? `Owner Name: ${lead.owner_name}` : null,
     lead.owner_email ? `Owner Email: ${lead.owner_email}` : null,
     lead.owner_phone ? `Owner Phone: ${lead.owner_phone}` : null,
@@ -185,7 +209,8 @@ function buildLeadAiData(lead: Lead): string {
     `Status: ${lead.status}`,
     `Priority: ${lead.priority}`,
     lead.summary ? `Summary: ${lead.summary}` : null,
-    lead.notes ? `Notes: ${lead.notes}` : null,
+    `Notes Count: ${notes.length}`,
+    ...notes.map((note) => `Note: ${note.created_at || 'Unknown date'} | Lead ID: ${note.lead_id} | ${note.notes}`),
     lead.next_action ? `Next Action: ${lead.next_action}` : null,
     lead.next_action_at ? `Next Action At: ${lead.next_action_at}` : null,
     lead.last_contacted_at ? `Last Contacted At: ${lead.last_contacted_at}` : null,
@@ -195,6 +220,8 @@ function buildLeadAiData(lead: Lead): string {
     lead.bathrooms != null ? `Bathrooms: ${lead.bathrooms}` : null,
     lead.garages != null ? `Car Spaces: ${lead.garages}` : null,
     lead.rv != null ? `Capital Value (RV): ${lead.rv}` : null,
+    lead.land_value != null ? `Land Value: ${lead.land_value}` : null,
+    lead.improvement_value != null ? `Improvement Value: ${lead.improvement_value}` : null,
     lead.last_sold_price != null ? `Last Sold Price: ${lead.last_sold_price}` : null,
     lead.last_sold_date ? `Last Sold Date: ${lead.last_sold_date}` : null,
     lead.build_year != null ? `Year Built: ${lead.build_year}` : null,
@@ -206,6 +233,9 @@ function buildLeadAiData(lead: Lead): string {
     lead.is_currently_rented != null ? `Currently Rented: ${lead.is_currently_rented ? 'Yes' : 'No'}` : null,
     lead.estimated_value_low != null ? `Estimated Value Low: ${lead.estimated_value_low}` : null,
     lead.estimated_value_high != null ? `Estimated Value High: ${lead.estimated_value_high}` : null,
+    lead.property_type ? `Property Type: ${lead.property_type}` : null,
+    lead.sale_status ? `Sale Status: ${lead.sale_status}` : null,
+    lead.latitude != null && lead.longitude != null ? `Coordinates: ${lead.latitude}, ${lead.longitude}` : null,
     lead.property_history ? `Property History: ${lead.property_history}` : null,
     lead.realestate_url ? `Realestate URL: ${lead.realestate_url}` : null,
     lead.on_market_sale ? `For Sale: ${lead.sale_listing_status || 'Yes'}` : null,
@@ -219,13 +249,18 @@ function buildLeadAiData(lead: Lead): string {
     lead.sent_at ? `Outreach Sent At: ${lead.sent_at}` : null,
     lead.last_sent_at ? `Outreach Last Sent At: ${lead.last_sent_at}` : null,
     lead.total_send_count != null ? `Outreach Send Count: ${lead.total_send_count}` : null,
+    `Sent History Count: ${sendHistory.length}`,
+    ...sendHistory.map((entry) =>
+      `Sent History: ${entry.sent_at} | ${entry.report_title} | Campaign: ${entry.campaign_key} | Suburb: ${entry.suburb} | Sent By: ${entry.sent_by} | Scans: ${entry.scan_count}${entry.notes ? ` | Notes: ${entry.notes}` : ''}${entry.pdf_file_name ? ` | PDF: ${entry.pdf_file_name}` : ''}${entry.pdf_file_url ? ` | PDF URL: ${entry.pdf_file_url}` : ''}`
+    ),
+    sendHistoryError ? `Sent History Error: ${sendHistoryError}` : null,
     `Appraisal PDF Count: ${documents.length}`,
     ...documents.map((document) =>
       `Appraisal PDF: ${document.file_name} | Uploaded: ${document.created_at} | URL: ${document.file_url}`
     ),
     `Timeline Event Count: ${events.length}`,
     ...events.map((event) =>
-      `Timeline Event: ${event.created_at} | ${event.event_type} | ${event.title}${event.description ? ` | ${event.description}` : ''}${event.created_by ? ` | By ${event.created_by}` : ''}`
+      `Timeline Event: ${event.created_at} | ${event.event_type} | ${event.title} | Lead ID: ${event.lead_id}${event.description ? ` | ${event.description}` : ''}${event.created_by ? ` | By ${event.created_by}` : ''}`
     ),
     '[AI-DATA-END]',
   ];
@@ -273,6 +308,8 @@ export default function LeadsPage() {
   const [eventsLoading, setEventsLoading] = useState(false);
   const [sendHistory, setSendHistory] = useState<SendHistoryLog[]>([]);
   const [sendHistoryLoading, setSendHistoryLoading] = useState(false);
+  const [sendHistoryByLead, setSendHistoryByLead] = useState<Record<string, SendHistoryLog[]>>({});
+  const [sendHistoryErrors, setSendHistoryErrors] = useState<Record<string, string>>({});
   // Pre-fetched send history keyed by lead id for instant modal display
   const sendHistoryCacheRef = useRef<Record<string, SendHistoryLog[]>>({});
   const [detailOpen, setDetailOpen] = useState(false);
@@ -454,11 +491,22 @@ export default function LeadsPage() {
         batch.map(async (id) => {
           try {
             const res = await fetch(`/api/admin/leads/${id}/send-history`);
+            if (!res.ok) throw new Error(`Failed to load sent history (${res.status})`);
             const json = await res.json();
-            const history = Array.isArray(json.history) ? json.history : [];
+            if (!Array.isArray(json.history)) throw new Error('Sent history response was invalid');
+            const history = json.history;
             sendHistoryCacheRef.current = { ...sendHistoryCacheRef.current, [id]: history };
-          } catch {
-            // Silently fail - will fallback to on-demand fetch when modal opens
+            setSendHistoryByLead((current) => ({ ...current, [id]: history }));
+            setSendHistoryErrors((current) => {
+              const next = { ...current };
+              delete next[id];
+              return next;
+            });
+          } catch (error) {
+            setSendHistoryErrors((current) => ({
+              ...current,
+              [id]: error instanceof Error ? error.message : 'Failed to load sent history',
+            }));
           }
         })
       );
@@ -683,20 +731,31 @@ export default function LeadsPage() {
       const eventsJson = await eventsRes.json();
       const loadedEvents = Array.isArray(eventsJson.data) ? eventsJson.data : [];
       setEvents(loadedEvents);
-      updateLeadRecord(lead.id, (current) => ({ ...current, events: loadedEvents }));
 
       // Only fetch send history if not already cached
       if (cachedHistory === undefined) {
         const historyRes = await fetch(`/api/admin/leads/${lead.id}/send-history`);
+        if (!historyRes.ok) throw new Error(`Failed to load sent history (${historyRes.status})`);
         const historyJson = await historyRes.json();
-        const loadedHistory = Array.isArray(historyJson.history) ? historyJson.history : [];
+        if (!Array.isArray(historyJson.history)) throw new Error('Sent history response was invalid');
+        const loadedHistory = historyJson.history;
         setSendHistory(loadedHistory);
         sendHistoryCacheRef.current = { ...sendHistoryCacheRef.current, [lead.id]: loadedHistory };
+        setSendHistoryByLead((current) => ({ ...current, [lead.id]: loadedHistory }));
+        setSendHistoryErrors((current) => {
+          const next = { ...current };
+          delete next[lead.id];
+          return next;
+        });
       }
     } catch {
       setEvents([]);
       if (cachedHistory === undefined) {
         setSendHistory([]);
+        setSendHistoryErrors((current) => ({
+          ...current,
+          [lead.id]: 'Failed to load sent history',
+        }));
       }
     } finally {
       setEventsLoading(false);
@@ -1807,22 +1866,6 @@ export default function LeadsPage() {
                         </div>
                       </div>
                     </div>
-                    <div
-                      aria-hidden="true"
-                      data-testid={`lead-ai-data-${lead.id}`}
-                      style={{
-                        position: 'absolute',
-                        top: '-9999px',
-                        left: '-9999px',
-                        pointerEvents: 'none',
-                        userSelect: 'none',
-                        fontSize: '1px',
-                        opacity: 0,
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {buildLeadAiData(lead)}
-                    </div>
                   </div>
                 );
               })}
@@ -1915,6 +1958,31 @@ export default function LeadsPage() {
         </div>
       )}
 
+      <div aria-hidden="true">
+        {displayLeads.map((lead) => (
+          <div
+            key={lead.id}
+            data-testid={`lead-ai-data-${lead.id}`}
+            style={{
+              position: 'absolute',
+              top: '-9999px',
+              left: '-9999px',
+              pointerEvents: 'none',
+              userSelect: 'none',
+              fontSize: '1px',
+              opacity: 0,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {buildLeadAiData(
+              lead,
+              sendHistoryByLead[lead.id] ?? sendHistoryCacheRef.current[lead.id] ?? [],
+              sendHistoryErrors[lead.id],
+            )}
+          </div>
+        ))}
+      </div>
+
       {/* Detail Modal */}
       {detailOpen && selectedLead && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={() => setDetailOpen(false)}>
@@ -1983,6 +2051,36 @@ export default function LeadsPage() {
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedLead.notes}</p>
                 </div>
               )}
+
+              {/* Read-only property details from Edit Property */}
+              <div data-testid="lead-property-basic-info">
+                <p className="text-xs font-medium text-slate-500 mb-2">Property Basic Information</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    ['Address', selectedLead.property_address],
+                    ['Suburb', selectedLead.suburb],
+                    ['City', selectedLead.city],
+                    ['Region', selectedLead.region],
+                    ['Postcode', selectedLead.postcode],
+                    ['Bedrooms', selectedLead.bedrooms],
+                    ['Bathrooms', selectedLead.bathrooms],
+                    ['Car Spaces', selectedLead.garages],
+                    ['Year Built', selectedLead.build_year],
+                    ['Floor Size (m²)', selectedLead.floor_area],
+                    ['Land Area', selectedLead.land_area],
+                    ['Last Sold Price', selectedLead.last_sold_price],
+                    ['Last Sold Date', selectedLead.last_sold_date],
+                    ['Capital Value (RV)', selectedLead.rv],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                      <p className="text-xs text-slate-400 mb-0.5">{label}</p>
+                      <p className="text-sm font-medium text-slate-700 break-words">
+                        {value === null || value === undefined || value === '' ? '—' : value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
               {/* Next Action */}
               {selectedLead.next_action && (

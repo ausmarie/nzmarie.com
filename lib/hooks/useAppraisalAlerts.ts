@@ -23,23 +23,34 @@ export function useAppraisalAlerts() {
   const [loading, setLoading] = useState(true);
   const prevCountRef = useRef<number | null>(null);
   const [hasNew, setHasNew] = useState(false);
+  const inFlightRef = useRef<Promise<void> | null>(null);
+  const lastFetchStartedAtRef = useRef(0);
 
-  const fetchAlerts = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/appraisal-alerts');
-      if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
-      const list: AppraisalAlertItem[] = data.data ?? [];
-      setItems(list);
-      if (prevCountRef.current !== null && list.length > prevCountRef.current) {
-        setHasNew(true);
+  const fetchAlerts = useCallback((force = false) => {
+    if (inFlightRef.current) return inFlightRef.current;
+    if (!force && Date.now() - lastFetchStartedAtRef.current < 5000) return Promise.resolve();
+
+    lastFetchStartedAtRef.current = Date.now();
+    const request = (async () => {
+      try {
+        const res = await fetch('/api/admin/appraisal-alerts');
+        if (!res.ok) throw new Error('Failed to fetch');
+        const data = await res.json();
+        const list: AppraisalAlertItem[] = data.data ?? [];
+        setItems(list);
+        if (prevCountRef.current !== null && list.length > prevCountRef.current) {
+          setHasNew(true);
+        }
+        prevCountRef.current = list.length;
+      } catch {
+        // leave items as-is on transient errors
+      } finally {
+        setLoading(false);
+        inFlightRef.current = null;
       }
-      prevCountRef.current = list.length;
-    } catch {
-      // leave items as-is on transient errors
-    } finally {
-      setLoading(false);
-    }
+    })();
+    inFlightRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
@@ -62,7 +73,7 @@ export function useAppraisalAlerts() {
     return res.json();
   }, []);
 
-  const refresh = fetchAlerts;
+  const refresh = useCallback(() => fetchAlerts(true), [fetchAlerts]);
   const clearHasNew = useCallback(() => setHasNew(false), []);
 
   return { items, loading, convertToLead, refresh, hasNew, clearHasNew };

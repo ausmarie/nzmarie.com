@@ -40,11 +40,14 @@ const mockLeadRow = {
   created_at: '2026-07-23T00:00:00.000Z',
   updated_at: '2026-07-23T00:00:00.000Z',
   joined_property_id: 'prop-1',
+  postcode: '0620',
   image_url: 'https://example.com/img.jpg',
   bedrooms: 3,
   bathrooms: 2,
   garages: 1,
   rv: '950000',
+  land_value: '600000',
+  improvement_value: '350000',
   last_sold_price: '880000',
   last_sold_date: '2023-06-15',
   build_year: 1998,
@@ -53,6 +56,17 @@ const mockLeadRow = {
   property_url: 'https://example.com/prop',
   description: 'Nice home',
   property_history: 'Sold 2020 for $800k',
+  property_type: 'Residential',
+  sale_status: 'not for sale',
+  latitude: -36.7421,
+  longitude: 174.721,
+  address_notes: [
+    { lead_id: 'lead-1', notes: 'Call back next week', created_at: '2026-07-23T00:00:00.000Z' },
+  ],
+  documents: [],
+  events: [
+    { id: 'event-1', lead_id: 'lead-1', event_type: 'note', title: 'Follow-up', created_at: '2026-07-23T00:00:00.000Z' },
+  ],
   realestate_url: 'https://realestate.co.nz/prop',
   on_market_sale: true,
   sale_listing_status: 'for sale',
@@ -87,6 +101,9 @@ describe('GET /api/admin/leads', () => {
     expect(body.success).toBe(true);
     expect(body.data).toHaveLength(1);
     expect(body.data[0].property_address).toBe('2/23 Sartors Avenue');
+    expect(body.data[0].postcode).toBe('0620');
+    expect(body.data[0].address_notes).toEqual(mockLeadRow.address_notes);
+    expect(body.data[0].events).toEqual(mockLeadRow.events);
     expect(body.pagination).toEqual({ page: 1, limit: 50, total: 1, totalPages: 1 });
   });
 
@@ -107,7 +124,61 @@ describe('GET /api/admin/leads', () => {
 
     expect(dataCall[0]).toContain('SELECT l.*');
     expect(dataCall[0]).toContain('LEFT JOIN properties');
+    expect(dataCall[0]).toContain('p.land_value');
+    expect(dataCall[0]).toContain('p.improvement_value');
+    expect(dataCall[0]).toContain('p.property_type');
+    expect(dataCall[0]).toContain('p.latitude');
+    expect(dataCall[0]).toContain("LOWER(REGEXP_REPLACE(TRIM(SPLIT_PART(re.address, ',', 1)), '  +', ' ', 'g'))");
+    expect(dataCall[0]).not.toContain('op.total_send_count,\n      FROM');
+    expect(dataCall[0]).not.toContain("TRIM(LOWER(SPLIT_PART(re.address, ',', 1)))");
+    expect(dataCall[0]).not.toContain('JSON_AGG');
     expect(dataCall[0]).not.toContain('COUNT(*) OVER()');
+  });
+
+  it('loads all address history in one batched query after retrieving the lead page', async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ total: '1' }] })
+      .mockResolvedValueOnce({
+        rows: [{
+          ...mockLeadRow,
+          image_url: null,
+          address_notes: undefined,
+          documents: undefined,
+          events: undefined,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          lead_id: 'lead-1',
+          address_notes: [{ lead_id: 'lead-1', notes: 'Address note', created_at: '2026-07-23' }],
+          documents: [{ id: 'document-1', file_name: 'appraisal.pdf' }],
+          events: [{ id: 'event-1', title: 'Address timeline event' }],
+        }],
+      });
+
+    const response = await GET(new Request('http://localhost:3000/api/admin/leads'));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data[0].address_notes[0].notes).toBe('Address note');
+    expect(body.data[0].documents[0].file_name).toBe('appraisal.pdf');
+    expect(body.data[0].events[0].title).toBe('Address timeline event');
+
+    const historyCall = mockQuery.mock.calls[2];
+    expect(historyCall[0]).toContain('WITH requested AS MATERIALIZED');
+    expect(historyCall[0]).toContain('JOIN leads related_lead');
+    expect(historyCall[0]).not.toContain('normalized_leads AS MATERIALIZED');
+    expect(historyCall[0]).toContain('REPLACE(related_lead.property_id::text, \'-\', \'\') = r.property_id');
+    expect(historyCall[0]).toContain('events_by_lead AS');
+    expect(historyCall[0]).toContain('ld.lead_id = related.related_lead_id::uuid');
+    expect(historyCall[0]).toContain('le.lead_id = related.related_lead_id::uuid');
+    expect(historyCall[0]).toContain("LOWER(REGEXP_REPLACE(TRIM(SPLIT_PART(related_lead.property_address, ',', 1)), '[^[:alnum:]/]', '', 'g'))");
+    expect(historyCall[1]).toEqual([
+      ['lead-1'],
+      ['prop1'],
+      ['2/23sartorsavenue'],
+      ['hillcrest'],
+    ]);
   });
 
   it('should return empty data when no leads', async () => {
@@ -261,8 +332,8 @@ describe('GET /api/admin/leads', () => {
 
     expect(body.data[0].documents).toHaveLength(1);
     expect(body.data[0].events).toHaveLength(1);
-    expect(mockQuery.mock.calls[1][0]).toContain('FROM lead_documents');
-    expect(mockQuery.mock.calls[1][0]).toContain('FROM lead_events');
+    expect(mockQuery.mock.calls[1][0]).not.toContain('FROM lead_documents');
+    expect(mockQuery.mock.calls[1][0]).not.toContain('FROM lead_events');
   });
 });
 

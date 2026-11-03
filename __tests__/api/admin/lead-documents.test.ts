@@ -173,10 +173,10 @@ describe('lead appraisal PDF documents API', () => {
     expect(mockUploadToR2).not.toHaveBeenCalled();
   });
 
-  it('deletes the R2 object and database row', async () => {
+  it('deletes a document belonging to another lead for the same property', async () => {
     mockQuery
       .mockResolvedValueOnce({
-        rows: [{ id: 'document-1', file_key: 'leads/lead-1/appraisal/old.pdf' }],
+        rows: [{ id: 'document-1', file_key: 'leads/related-lead/appraisal/old.pdf' }],
       })
       .mockResolvedValueOnce({ rows: [] });
 
@@ -187,7 +187,28 @@ describe('lead appraisal PDF documents API', () => {
     const response = await DELETE(request, { params: Promise.resolve({ id: leadId }) });
 
     expect(response.status).toBe(200);
-    expect(mockDeleteFromR2).toHaveBeenCalledWith('leads/lead-1/appraisal/old.pdf');
+    expect(mockDeleteFromR2).toHaveBeenCalledWith('leads/related-lead/appraisal/old.pdf');
+    expect(mockQuery.mock.calls[0][0]).toContain('JOIN leads document_lead');
+    expect(mockQuery.mock.calls[0][0]).toContain('JOIN leads requested_lead');
+    expect(mockQuery.mock.calls[0][0]).toContain('document_lead.property_address');
+    expect(mockQuery.mock.calls[0][0]).toContain('document_lead.property_id');
+    expect(mockQuery.mock.calls[0][1]).toEqual(['document-1', leadId]);
     expect(mockQuery.mock.calls[1][0]).toContain('DELETE FROM lead_documents');
+  });
+
+  it('does not delete a document belonging to an unrelated property', async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+
+    const request = new Request(
+      `http://localhost:3000/api/admin/leads/${leadId}/documents?documentId=document-1`,
+      { method: 'DELETE' }
+    );
+    const response = await DELETE(request, { params: Promise.resolve({ id: leadId }) });
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe('Document not found');
+    expect(mockDeleteFromR2).not.toHaveBeenCalled();
+    expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 });

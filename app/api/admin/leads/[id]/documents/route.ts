@@ -228,7 +228,25 @@ export async function DELETE(
     }
 
     const documentResult = await marieDB.query(
-      `SELECT id, file_key FROM lead_documents WHERE id = $1 AND lead_id = $2`,
+      `SELECT ld.id, ld.file_key
+       FROM lead_documents ld
+       JOIN leads document_lead ON document_lead.id = ld.lead_id
+       JOIN leads requested_lead ON requested_lead.id = $2
+       WHERE ld.id = $1
+         AND (
+           ld.lead_id = requested_lead.id
+           OR (
+             COALESCE(requested_lead.property_id::text, '') <> ''
+             AND REPLACE(document_lead.property_id::text, '-', '') =
+                 REPLACE(requested_lead.property_id::text, '-', '')
+           )
+           OR (
+             LOWER(REGEXP_REPLACE(TRIM(SPLIT_PART(document_lead.property_address, ',', 1)), '[^[:alnum:]/]', '', 'g')) =
+               LOWER(REGEXP_REPLACE(TRIM(SPLIT_PART(requested_lead.property_address, ',', 1)), '[^[:alnum:]/]', '', 'g'))
+             AND LOWER(REGEXP_REPLACE(COALESCE(document_lead.suburb, ''), '[^[:alnum:]]', '', 'g')) =
+               LOWER(REGEXP_REPLACE(COALESCE(requested_lead.suburb, ''), '[^[:alnum:]]', '', 'g'))
+           )
+         )`,
       [documentId, id]
     );
 

@@ -1280,6 +1280,8 @@ export default function OutreachPage() {
       ? displayItems.filter((item) => idSet.has(item.id)).length
       : 0;
 
+    fetchSeqRef.current++;
+    abortRef.current?.abort();
     cacheRef.current.clear();
     if (activeTab === 'sent') {
       setItems((prev) => prev.filter((item) => !idSet.has(item.id)));
