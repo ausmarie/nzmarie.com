@@ -4567,7 +4567,8 @@ export default function OutreachPage() {
         }}
         onConfirmed={() => {
           if (mapSendRef.current) {
-            mapDataChangedRef.current = true;
+            setMapRefreshKey((k) => k + 1);
+            mapDataChangedRef.current = false;
             mapDataCardsReturnRef.current = false;
           } else {
             setTodayRunRefreshKey((k) => k + 1);

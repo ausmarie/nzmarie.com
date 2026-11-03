@@ -174,13 +174,14 @@ describe('Outreach map Sent modal suburb', () => {
     expect(map.getAttribute('data-refresh-key')).not.toBe(refreshedKey);
   });
 
-  it('refreshes map data only after returning from cards following a map dispatch', async () => {
+  it('refreshes the map immediately after a dispatch and keeps the Pending Unsent filter', async () => {
     const scrollToSpy = vi.fn();
     vi.stubGlobal('scrollTo', scrollToSpy);
 
     render(<OutreachPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unsent' }));
     fireEvent.click(await screen.findByRole('button', { name: /Map$/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Map Sent' }));
 
@@ -190,6 +191,7 @@ describe('Outreach map Sent modal suburb', () => {
       expect(screen.getByDisplayValue('2026_Q3_Torbay')).toBeTruthy();
     });
     const map = screen.getByTestId('map-stub');
+    expect(map.getAttribute('data-status-filter')).toBe('unsent');
     const initialRefreshKey = map.getAttribute('data-refresh-key');
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Dispatch Log' }));
 
@@ -199,20 +201,23 @@ describe('Outreach map Sent modal suburb', () => {
           String(url).includes('/api/admin/outreach/send')
         )
       ).toBe(true);
+      expect(map.getAttribute('data-refresh-key')).not.toBe(initialRefreshKey);
     });
 
     expect(screen.queryByRole('button', { name: 'Confirm Dispatch Log' })).toBeNull();
     expect(screen.getByTestId('map-stub')).toBe(map);
-    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+    expect(map.getAttribute('data-status-filter')).toBe('unsent');
+    const refreshedKey = map.getAttribute('data-refresh-key');
 
     fireEvent.click(screen.getByTitle('Card View'));
     expect(map.getAttribute('data-visible')).toBe('false');
-    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+    expect(map.getAttribute('data-refresh-key')).toBe(refreshedKey);
 
     fireEvent.click(screen.getByTitle('Map View'));
     expect(screen.getByTestId('map-stub')).toBe(map);
     expect(map.getAttribute('data-visible')).toBe('true');
-    expect(map.getAttribute('data-refresh-key')).not.toBe(initialRefreshKey);
+    expect(map.getAttribute('data-refresh-key')).not.toBe(refreshedKey);
+    expect(map.getAttribute('data-status-filter')).toBe('unsent');
     expect(scrollToSpy).not.toHaveBeenCalled();
   });
 
