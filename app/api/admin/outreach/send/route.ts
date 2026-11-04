@@ -203,11 +203,9 @@ export async function POST(request: Request) {
     }
 
     // Invalidate street-clusters cache for all affected suburbs
-    for (const suburb of affectedSuburbs) {
-      invalidateStreetClustersForSuburb(suburb).catch((error) => {
-        console.error(`Street-cluster cache invalidation failed for ${suburb}:`, error);
-      });
-    }
+    await Promise.all(
+      [...affectedSuburbs].map((suburb) => invalidateStreetClustersForSuburb(suburb))
+    );
 
     // Refresh dependent views in order so the overview never reads stale suburb totals.
     try {

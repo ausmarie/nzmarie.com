@@ -11,6 +11,7 @@ import { isAdmin } from '@/lib/permissions';
 import { getFixedImageUrl } from '@/lib/google-maps';
 import SendReportModal from './components/SendReportModal';
 import { reorderStreetClustersForStart } from '@/lib/street-cluster-reorder';
+import { findNextUnsentStreet } from '@/lib/outreach-next-street';
 import DispatchHistoryDrawer from './components/DispatchHistoryDrawer';
 import SentDateFilter from './components/SentDateFilter';
 import TodayRunSection, { type TodayRunData } from './components/TodayRunSection';
@@ -297,6 +298,31 @@ export default function OutreachPage() {
       group.streets.map((street) => street.street)
     );
   }, [effectiveTodayRunData]);
+  const todayRunOrderedStreets = useMemo(
+    () => effectiveTodayRunData?.groups.flatMap((group) => group.streets.map((street) => street.street)) ?? [],
+    [effectiveTodayRunData]
+  );
+  const pendingTodayRunStreetAdvanceRef = useRef<{
+    completedStreet: string;
+    orderedStreets: string[];
+  } | null>(null);
+  const pendingDispatchStreetsRef = useRef<string[] | null>(null);
+  const queueTodayRunStreetAdvance = useCallback((completedStreet: string) => {
+    if (
+      activeTab !== 'pending' ||
+      sentStatusFilter !== 'unsent' ||
+      !todayRunOrderedStreets.some(
+        (street) => street.trim().toLocaleLowerCase() === completedStreet.trim().toLocaleLowerCase()
+      )
+    ) {
+      return;
+    }
+
+    pendingTodayRunStreetAdvanceRef.current = {
+      completedStreet,
+      orderedStreets: todayRunOrderedStreets,
+    };
+  }, [activeTab, sentStatusFilter, todayRunOrderedStreets]);
 
   const todayRunBatchSize = 30;
 
@@ -1564,13 +1590,52 @@ export default function OutreachPage() {
       .then((json) => {
         if (cancelled) return;
         if (!json.success) throw new Error(json.error || 'Failed to load');
-        if (
-          effectiveStartStreet &&
-          Array.isArray(json.allStreets) &&
-          !json.allStreets.some((s: { street: string }) => s.street === effectiveStartStreet)
-        ) {
-          window.localStorage.removeItem(`today_run_start_street:${todayRunSuburb}`);
-          setTodayRunStartStreet('');
+        const availableStreets = Array.isArray(json.allStreets)
+          ? json.allStreets.map((street: { street: string }) => street.street)
+          : [];
+        const advance = pendingTodayRunStreetAdvanceRef.current;
+        const completedStreetUnavailable = Boolean(
+          advance && !availableStreets.some(
+            (street: string) => street.trim().toLocaleLowerCase() === advance.completedStreet.trim().toLocaleLowerCase()
+          )
+        );
+        const nextStreet = completedStreetUnavailable && advance
+          ? findNextUnsentStreet(advance.orderedStreets, advance.completedStreet, availableStreets)
+          : null;
+        if (advance) pendingTodayRunStreetAdvanceRef.current = null;
+
+        const focusedStreet = streetFocusRef.current || effectiveStartStreet;
+        const focusedStreetUnavailable = Boolean(
+          (availableStreets.length > 0 || advance) &&
+          focusedStreet &&
+          !availableStreets.some(
+            (street: string) => street.trim().toLocaleLowerCase() === focusedStreet.trim().toLocaleLowerCase()
+          )
+        );
+        if (nextStreet || focusedStreetUnavailable) {
+          const nextStartStreet = nextStreet || (
+            availableStreets.some((street: string) => street === json.startStreet)
+              ? json.startStreet
+              : ''
+          );
+          if (nextStartStreet) {
+            todayRunStartStreetRef.current = nextStartStreet;
+            setTodayRunStartStreet(nextStartStreet);
+            window.localStorage.setItem(`today_run_start_street:${todayRunSuburb}`, nextStartStreet);
+            streetFocusRef.current = nextStartStreet;
+            streetFocusSuburbRef.current = todayRunSuburb;
+            setStreetFilter(nextStartStreet);
+            fetchStreetDataRef.current?.(todayRunSuburb, nextStartStreet);
+          } else {
+            todayRunStartStreetRef.current = '';
+            setTodayRunStartStreet('');
+            window.localStorage.removeItem(`today_run_start_street:${todayRunSuburb}`);
+            streetFocusRef.current = '';
+            streetFocusSuburbRef.current = '';
+            setStreetFilter('');
+          }
+          setRunStreetFilter([]);
+          setCurrentPage(1);
         }
         setTodayRunData(json);
       })
@@ -4109,6 +4174,7 @@ export default function OutreachPage() {
                                           if (!res.ok) throw new Error('Failed to mark as sent');
                                           await res.json();
                                           showNotification('success', 'Marked as sent');
+                                          queueTodayRunStreetAdvance(prop.street || '');
                                           handleMarkAsSentSuccess();
                                         } catch {
                                           showNotification('error', 'Failed to mark as sent');
@@ -4589,12 +4655,21 @@ export default function OutreachPage() {
             mapDataChangedRef.current = false;
             mapDataCardsReturnRef.current = false;
           } else {
+            const sentStreets = new Set(
+              (pendingDispatchStreetsRef.current ?? []).map((street) => street.toLocaleLowerCase())
+            );
+            const lastSentRouteStreet = [...todayRunOrderedStreets]
+              .reverse()
+              .find((street) => sentStreets.has(street.toLocaleLowerCase()));
+            if (lastSentRouteStreet) queueTodayRunStreetAdvance(lastSentRouteStreet);
+            pendingDispatchStreetsRef.current = null;
             setTodayRunRefreshKey((k) => k + 1);
           }
           mapSendRef.current = false;
           mapSendSubmittedRef.current = false;
         }}
         onFailure={(message) => {
+          pendingDispatchStreetsRef.current = null;
           mapSendRef.current = false;
           mapSendSubmittedRef.current = false;
           showNotification('error', `Dispatch failed, changes reverted: ${message}`);
@@ -4603,6 +4678,14 @@ export default function OutreachPage() {
           const idSet = new Set(ids);
           const previousItems = items;
           const previousClassicItems = classicItems;
+          pendingDispatchStreetsRef.current = [
+            ...new Set(
+              [...items, ...classicItems]
+                .filter((item) => idSet.has(item.id))
+                .map((item) => item.street || extractStreetFromLikedItem(item))
+                .filter(Boolean)
+            ),
+          ];
           setItems((prev) => prev.filter((item) => !idSet.has(item.id)));
           setClassicItems((prev) => prev.filter((item) => !idSet.has(item.id)));
           return () => {

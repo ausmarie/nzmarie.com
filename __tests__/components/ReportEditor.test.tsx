@@ -112,6 +112,19 @@ describe('ReportEditor image paste', () => {
     cleanup();
   });
 
+  it('gives quarterly report titles more editor width while preserving the default width', () => {
+    const quarterly = render(
+      <ReportEditor docId="report-1" initialContent={null} className="is-quarterly-report" />
+    );
+    expect(quarterly.container.querySelector('.report-editor-container')?.getAttribute('style'))
+      .toContain('max-width: 1100px');
+    quarterly.unmount();
+
+    const standard = render(<ReportEditor docId="doc-1" initialContent={null} />);
+    expect(standard.container.querySelector('.report-editor-container')?.getAttribute('style'))
+      .toContain('max-width: 900px');
+  });
+
   it('uploads a pasted image and inserts it as an image block', async () => {
     mocks.handleImageFile.mockResolvedValue('https://reports.example.com/pasted.png');
     const { container } = render(<ReportEditor docId="doc-1" initialContent={null} />);

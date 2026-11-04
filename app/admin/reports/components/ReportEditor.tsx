@@ -1029,11 +1029,12 @@ const ReportEditor = memo(function ReportEditor({ docId, initialContent, onConte
   }, [editor]);
 
   const isUploadingImage = pendingImageUploads > 0;
+  const isQuarterlyReport = className?.split(/\s+/).includes('is-quarterly-report') ?? false;
 
   return (
     <div
       className={'report-editor-container' + (className ? ' ' + className : '')}
-      style={{ position: 'relative', maxWidth: '900px', margin: '0 auto' }}
+      style={{ position: 'relative', maxWidth: isQuarterlyReport ? '1100px' : '900px', margin: '0 auto' }}
       onPasteCapture={handlePasteCapture}
     >
       <ReportEditorStatus isUploadingImage={isUploadingImage} imageError={imageError} />

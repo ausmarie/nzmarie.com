@@ -34,7 +34,7 @@ export async function PATCH(
     // Invalidate street-clusters cache for this suburb
     const suburban = result.rows[0]?.suburb;
     if (suburban) {
-      invalidateStreetClustersForSuburb(suburban).catch(() => { });
+      await invalidateStreetClustersForSuburb(suburban);
     }
 
     return NextResponse.json({ success: true, data: result.rows[0], message: 'Marked as sent successfully' });
