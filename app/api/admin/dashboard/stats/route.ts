@@ -48,6 +48,12 @@ interface SuburbDownloadRow {
   download_count?: string | number;
 }
 
+interface LeadSuburbRow {
+  suburb?: string;
+  lead_count?: string | number;
+  addresses?: string[] | null;
+}
+
 interface TodaySentSuburbRow {
   suburb?: string;
   sent_count?: string | number;
@@ -419,7 +425,7 @@ export async function GET(request: Request) {
   // succession (e.g. a React effect firing twice) don't both run the heavy
   // aggregation and burn Registers twice. It also makes a stale cached payload
   // from before a fix impossible to keep serving for the whole TTL.
-  const cacheVersion = 15;
+  const cacheVersion = 17;
 
   try {
     await ensureCampaignTablesExist();
@@ -594,6 +600,7 @@ export async function GET(request: Request) {
       async () => {
         const suburbFilter = suburb && suburb !== 'all';
         const suburbCondition = suburbFilter ? sql`AND suburb = ${suburb}` : sql``;
+        const leadsSuburbCondition = suburbFilter ? sql`AND l.suburb = ${suburb}` : sql``;
 
         // Fetch quarter overview from materialized view (all quarters). The
         // active sending quarter is whatever the view reports as the newest
@@ -697,10 +704,50 @@ export async function GET(request: Request) {
         
         const dbResult = await db.execute(sql`
           WITH
-            new_leads_cte AS (
-              SELECT COUNT(*) as count FROM appraisal_leads
-              WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)
-              ${suburbCondition}
+            leads_deduped_cte AS (
+              SELECT
+                l.id,
+                l.property_address,
+                l.suburb,
+                l.created_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY COALESCE(
+                    NULLIF(
+                      REGEXP_REPLACE(
+                        REGEXP_REPLACE(LOWER(BTRIM(l.property_address)), '[.,]', ' ', 'g'),
+                        '[[:space:]]+',
+                        ' ',
+                        'g'
+                      ),
+                      ''
+                    ),
+                    l.id::text
+                  )
+                  ORDER BY l.created_at DESC NULLS LAST, l.id DESC
+                ) AS address_rank
+              FROM leads l
+              WHERE 1=1
+              ${leadsSuburbCondition}
+            ),
+            leads_summary_cte AS (
+              SELECT
+                COUNT(*)::int AS total_count,
+                COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP))::int AS month_count
+              FROM leads_deduped_cte
+              WHERE address_rank = 1
+            ),
+            leads_by_suburb_cte AS (
+              SELECT
+                COALESCE(NULLIF(BTRIM(suburb), ''), 'Unknown') AS suburb,
+                COUNT(*)::int AS lead_count,
+                COALESCE(
+                  json_agg(property_address ORDER BY created_at DESC)
+                    FILTER (WHERE NULLIF(BTRIM(property_address), '') IS NOT NULL),
+                  '[]'::json
+                ) AS addresses
+              FROM leads_deduped_cte
+              WHERE address_rank = 1
+              GROUP BY COALESCE(NULLIF(BTRIM(suburb), ''), 'Unknown')
             ),
             high_priority_cte AS (
               SELECT COUNT(*) as count FROM appraisal_leads
@@ -1145,7 +1192,9 @@ export async function GET(request: Request) {
               FROM dispatch_legacy_sent n
             )
           SELECT
-            (SELECT count FROM new_leads_cte) as new_leads,
+            (SELECT total_count FROM leads_summary_cte) as total_leads,
+            (SELECT month_count FROM leads_summary_cte) as month_leads,
+            (SELECT COALESCE(json_agg(row_to_json(s) ORDER BY s.lead_count DESC, s.suburb), '[]') FROM leads_by_suburb_cte s) as leads_by_suburb,
             (SELECT count FROM high_priority_cte) as high_priority_leads,
             (SELECT pending_count FROM outreach_status_cte) as pending_outreach,
             (SELECT sent_count FROM outreach_status_cte) as sent_outreach,
@@ -1374,7 +1423,17 @@ export async function GET(request: Request) {
         const totalUnsentAllQuarters = quarterOverview.reduce((sum, q) => sum + q.totalUnsent, 0);
 
         return {
-          newLeads: Number(row.new_leads) || 0,
+          totalLeads: Number(row.total_leads) || 0,
+          monthLeads: Number(row.month_leads) || 0,
+          leadsBySuburb: Array.isArray(row.leads_by_suburb)
+            ? (row.leads_by_suburb as LeadSuburbRow[]).map((item) => ({
+                suburb: item?.suburb || 'Unknown',
+                lead_count: Number(item?.lead_count) || 0,
+                addresses: Array.isArray(item?.addresses)
+                  ? [...new Set(item.addresses.filter((address): address is string => typeof address === 'string'))]
+                  : [],
+              }))
+            : [],
           highPriorityLeads: Number(row.high_priority_leads) || 0,
           pendingOutreach: Number(row.pending_outreach) || 0,
           sentOutreach: Number(row.sent_outreach) || 0,

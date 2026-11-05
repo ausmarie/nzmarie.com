@@ -48,7 +48,11 @@ describe('GET /api/admin/dashboard/stats', () => {
 
   it('returns 200 with stats structure', async () => {
     const mockRow = {
-      new_leads: '5',
+      total_leads: '42',
+      month_leads: '7',
+      leads_by_suburb: [
+        { suburb: 'Torbay', lead_count: '2', addresses: ['1 Main Road', '2 Main Road', '2 Main Road'] },
+      ],
       high_priority_leads: '2',
       pending_outreach: '10',
       sent_outreach: '20',
@@ -72,7 +76,11 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
-    expect(body.stats.newLeads).toBe(5);
+    expect(body.stats.totalLeads).toBe(42);
+    expect(body.stats.monthLeads).toBe(7);
+    expect(body.stats.leadsBySuburb).toEqual([
+      { suburb: 'Torbay', lead_count: 2, addresses: ['1 Main Road', '2 Main Road'] },
+    ]);
     expect(body.stats.highPriorityLeads).toBe(2);
     expect(body.stats.pendingOutreach).toBe(10);
     expect(body.stats.sentOutreach).toBe(20);
@@ -103,7 +111,7 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(getDashboardStatsCached).toHaveBeenCalledWith(
-      'dashboard:stats:v15:all:all',
+      'dashboard:stats:v17:all:all',
       expect.any(Function),
       600
     );
@@ -229,7 +237,8 @@ describe('GET /api/admin/dashboard/stats', () => {
 
   it('returns zeroes when all counts are null', async () => {
     const emptyRow = {
-      new_leads: null, high_priority_leads: null, pending_outreach: null,
+      total_leads: null, month_leads: null, leads_by_suburb: null,
+      high_priority_leads: null, pending_outreach: null,
       sent_outreach: null, today_followups: null, overdue_followups: null,
       today_downloads: null, total_downloads: null, month_downloads: null,
       total_bookings: null, month_bookings: null, qr_codes_total: null,
@@ -242,14 +251,17 @@ describe('GET /api/admin/dashboard/stats', () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.stats.newLeads).toBe(0);
+    expect(body.stats.totalLeads).toBe(0);
+    expect(body.stats.monthLeads).toBe(0);
+    expect(body.stats.leadsBySuburb).toEqual([]);
     expect(body.stats.outreachBySuburb).toEqual([]);
     expect(body.stats.recentDownloads).toEqual([]);
   });
 
   it('passes suburb filter to query', async () => {
     const mockRow = {
-      new_leads: '3', high_priority_leads: '1', pending_outreach: '5',
+      total_leads: '30', month_leads: '4', leads_by_suburb: [],
+      high_priority_leads: '1', pending_outreach: '5',
       sent_outreach: '10', today_followups: '2', overdue_followups: '0',
       today_downloads: '4', total_downloads: '50', month_downloads: '15',
       total_bookings: '25', month_bookings: '8', qr_codes_total: '4',
@@ -263,7 +275,55 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(body.suburb).toBe('Takapuna');
-    expect(body.stats.newLeads).toBe(3);
+    expect(body.stats.totalLeads).toBe(30);
+  });
+
+  it('builds Leads dashboard data from the same leads table used by the Leads page', async () => {
+    const mockRow = {
+      total_leads: '12',
+      month_leads: '3',
+      leads_by_suburb: [{ suburb: 'Albany', lead_count: '2', addresses: ['1 Example Road', '2 Example Road'] }],
+    };
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((query: any) => {
+      capturedSql += JSON.stringify(query?.queryChunks ?? []);
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(capturedSql).toContain('FROM leads l');
+    expect(capturedSql).toContain('date_trunc');
+    expect(body.stats.totalLeads).toBe(12);
+    expect(body.stats.monthLeads).toBe(3);
+    expect(body.stats.leadsBySuburb).toEqual([
+      { suburb: 'Albany', lead_count: 2, addresses: ['1 Example Road', '2 Example Road'] },
+    ]);
+    expect(capturedSql).toContain('ROW_NUMBER() OVER');
+    expect(capturedSql).toContain('REGEXP_REPLACE');
+    expect(capturedSql).toContain('address_rank = 1');
+  });
+
+  it('removes exact duplicate addresses from suburb lead details', async () => {
+    vi.mocked(db.execute).mockResolvedValue({
+      rows: [{
+        total_leads: '1',
+        month_leads: '1',
+        leads_by_suburb: [{
+          suburb: 'Pinehill',
+          lead_count: '1',
+          addresses: ['13 Carberry Lane', '13 Carberry Lane'],
+        }],
+      }],
+    } as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stats.leadsBySuburb[0].addresses).toEqual(['13 Carberry Lane']);
   });
 
   it('queries live outreach tables for sent summary', async () => {

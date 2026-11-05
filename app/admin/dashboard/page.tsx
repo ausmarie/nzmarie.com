@@ -63,7 +63,9 @@ interface SuburbDownload {
 }
 
 interface DashboardStats {
-  newLeads: number;
+  totalLeads: number;
+  monthLeads: number;
+  leadsBySuburb: Array<{ suburb: string; lead_count: number; addresses: string[] }>;
   highPriorityLeads: number;
   pendingOutreach: number;
   sentOutreach: number;
@@ -429,6 +431,48 @@ export default function AdminDashboardPage() {
 
         {showDeferred && (
           <>
+        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col min-h-[192px]">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-2xl">👥</span>
+              <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                Leads
+              </span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900 mb-1">
+              {stats?.totalLeads ?? 0}
+            </div>
+            <div className="text-sm text-slate-600">Total Leads</div>
+            <p className="text-xs text-slate-400 mt-1">This month: {stats?.monthLeads ?? 0}</p>
+          </div>
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+            {stats?.leadsBySuburb && stats.leadsBySuburb.length > 0 ? (
+              stats.leadsBySuburb.map((item) => {
+                const addresses = [...new Set(item.addresses)];
+                return (
+                  <div key={item.suburb}>
+                    <div className="text-xs font-semibold text-slate-700">
+                      {item.suburb}: {item.lead_count}
+                    </div>
+                    {addresses.length > 0 && (
+                      <ul className="mt-1 space-y-0.5">
+                        {addresses.map((address, index) => (
+                          <li key={`${item.suburb}-${index}`} className="text-[11px] text-slate-500 break-words">
+                            {address}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
+                No leads yet
+              </span>
+            )}
+          </div>
+        </div>
         <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -498,14 +542,6 @@ export default function AdminDashboardPage() {
               )}
             </div>
           </div>
-        </div>
-
-        <div className="bg-white rounded-lg p-4 shadow-sm border border-slate-100">
-          <p className="text-xs text-slate-500 font-medium">New Leads</p>
-          <p className="text-2xl font-bold text-slate-800 mt-2">
-            {stats?.newLeads ?? 0}
-          </p>
-          <p className="text-xs text-slate-400 mt-1">This month</p>
         </div>
 
         <div className="bg-white rounded-lg p-4 shadow-sm border border-slate-100">

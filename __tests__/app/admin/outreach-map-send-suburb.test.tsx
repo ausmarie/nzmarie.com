@@ -31,6 +31,7 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
   default: (props: {
     onMarkAsSent?: (id: string, suburb: string) => void;
     onMarkAsJunk?: (id: string, suburb: string) => void | Promise<void>;
+    optimisticSentIds?: string[];
     refreshKey?: number | string;
     isVisible?: boolean;
     statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
@@ -40,12 +41,19 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
       data-refresh-key={props.refreshKey}
       data-visible={String(props.isVisible)}
       data-status-filter={props.statusFilter}
+      data-optimistic-sent-ids={props.optimisticSentIds?.join(',') ?? ''}
     >
       <button
         type="button"
         onClick={() => props.onMarkAsSent?.('map-address-1', 'Torbay')}
       >
         Map Sent
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onMarkAsSent?.('map-address-2', 'Torbay')}
+      >
+        Map Sent 2
       </button>
       <button
         type="button"
@@ -64,6 +72,7 @@ class MockIntersectionObserver {
   constructor(_cb: IntersectionObserverCallback, _opts?: IntersectionObserverInit) {}
 }
 globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
+let deferredSendResponses: Array<(response: { ok: boolean; json: () => Promise<{ success: boolean }> }) => void> | null = null;
 
 const pdfReports = [
   { id: 'r-f', suburb: 'Fairview Heights', quarter: 'Q3', year: 2026, label: '2026-Q3', doc_label: 'Main Report', file_url: 'https://x/f.pdf', file_name: 'f.pdf' },
@@ -72,8 +81,12 @@ const pdfReports = [
 
 describe('Outreach map Sent modal suburb', () => {
   beforeEach(() => {
+    deferredSendResponses = null;
     global.fetch = vi.fn((url: RequestInfo) => {
       const s = String(url || '');
+      if (s.includes('/api/admin/outreach/send') && deferredSendResponses) {
+        return new Promise((resolve) => deferredSendResponses?.push(resolve));
+      }
       if (s.includes('/api/admin/pdf/reports')) {
         const parsed = new URL(s, 'http://localhost');
         const suburb = parsed.searchParams.get('suburb');
@@ -186,15 +199,13 @@ describe('Outreach map Sent modal suburb', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Map Sent' }));
 
     await screen.findByText('Send Market Report');
-    await waitFor(() => {
-      expect(screen.getByDisplayValue(/Torbay 2026-Q3 Market Report/)).toBeTruthy();
-      expect(screen.getByDisplayValue('2026_Q3_Torbay')).toBeTruthy();
-    });
+    await screen.findByDisplayValue(/Torbay 2026-Q3 Market Report/);
+    await screen.findByDisplayValue('2026_Q3_Torbay');
     const map = screen.getByTestId('map-stub');
     expect(map.getAttribute('data-status-filter')).toBe('unsent');
+
     const initialRefreshKey = map.getAttribute('data-refresh-key');
     fireEvent.click(screen.getByRole('button', { name: 'Confirm Dispatch Log' }));
-
     await waitFor(() => {
       expect(
         vi.mocked(global.fetch).mock.calls.some(([url]) =>
@@ -219,6 +230,39 @@ describe('Outreach map Sent modal suburb', () => {
     expect(map.getAttribute('data-refresh-key')).not.toBe(refreshedKey);
     expect(map.getAttribute('data-status-filter')).toBe('unsent');
     expect(scrollToSpy).not.toHaveBeenCalled();
+  });
+
+  it('lets a second map address be sent while the first dispatch is still recording', async () => {
+    deferredSendResponses = [];
+    render(<OutreachPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Map$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Map Sent' }));
+    await screen.findByText('Send Market Report');
+    await screen.findByDisplayValue('2026_Q3_Torbay');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Dispatch Log' }));
+
+    await waitFor(() => {
+      expect(deferredSendResponses).toHaveLength(1);
+    });
+    const map = screen.getByTestId('map-stub');
+    expect(map.getAttribute('data-optimistic-sent-ids')).toBe('map-address-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Map Sent 2' }));
+    await screen.findByText('Send Market Report');
+    await screen.findByDisplayValue('2026_Q3_Torbay');
+    const confirmButton = screen.getByRole('button', { name: 'Confirm Dispatch Log' });
+    expect((confirmButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(deferredSendResponses).toHaveLength(2);
+    });
+    expect(map.getAttribute('data-optimistic-sent-ids')).toBe('map-address-1,map-address-2');
+
+    deferredSendResponses[1]({ ok: true, json: async () => ({ success: true }) });
+    deferredSendResponses[0]({ ok: true, json: async () => ({ success: true }) });
   });
 
   it('batches multiple junk updates into one refresh when returning from cards', async () => {

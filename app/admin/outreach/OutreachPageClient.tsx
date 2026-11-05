@@ -415,12 +415,18 @@ export default function OutreachPage() {
   const [mapSidebarHidden, setMapSidebarHidden] = useState<boolean>(false);
   const [mapStreetStatusMap, setMapStreetStatusMap] = useState<Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>>(new Map());
   const [mapAddressCounts, setMapAddressCounts] = useState<{ total: number; unsent: number; sent: number; junk: number } | null>(null);
+  const [optimisticMapSentIds, setOptimisticMapSentIds] = useState<string[]>([]);
+  const mapSendIdsRef = useRef(new Set<string>());
+  const submittedMapSendIdsRef = useRef(new Set<string>());
   const handleMapCoordsLoaded = useCallback((
     sm: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
-    counts: { total: number; unsent: number; sent: number; junk: number }
+    counts: { total: number; unsent: number; sent: number; junk: number },
+    sentAddressIds: string[]
   ) => {
     setMapStreetStatusMap(sm);
     setMapAddressCounts(counts);
+    const confirmedIds = new Set(sentAddressIds);
+    setOptimisticMapSentIds((ids) => ids.filter((id) => !confirmedIds.has(id)));
   }, []);
   useEffect(() => {
     window.localStorage.setItem('outreach_map_sidebar_hidden', mapSidebarHidden ? '1' : '0');
@@ -444,8 +450,6 @@ export default function OutreachPage() {
   const canMarkAsSent = isAdmin(session?.user?.email ?? '');
 
   const [sendModalOpen, setSendModalOpen] = useState(false);
-  const mapSendRef = useRef(false);
-  const mapSendSubmittedRef = useRef(false);
   const mapDataChangedRef = useRef(false);
   const mapDataCardsReturnRef = useRef(false);
   const [sendTargetIds, setSendTargetIds] = useState<string[]>([]);
@@ -1994,6 +1998,7 @@ export default function OutreachPage() {
           reportQuarter={activeQuarter || undefined}
           onCoordsLoaded={handleMapCoordsLoaded}
           statusFilter={mapStatusFilter}
+          optimisticSentIds={optimisticMapSentIds}
           onStatusFilterChange={setMapStatusFilter}
           refreshKey={`${todayRunRefreshKey}:${mapRefreshKey}`}
           isVisible={viewMode === 'map'}
@@ -2044,8 +2049,7 @@ export default function OutreachPage() {
           onMarkAsSent={(id: string, suburb: string) => {
             const mapSuburb = suburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb || suburbFilter;
             const prop = items.find((p) => p.id === id);
-            mapSendRef.current = true;
-            mapSendSubmittedRef.current = false;
+            mapSendIdsRef.current.add(id);
             setSendTargetSuburb(mapSuburb || prop?.suburb || '');
             setSendTargetIds([id]);
             setSendModalOpen(true);
@@ -4637,20 +4641,26 @@ export default function OutreachPage() {
         isOpen={sendModalOpen}
         onClose={() => {
           setSendModalOpen(false);
-          if (!mapSendSubmittedRef.current) {
-            mapSendRef.current = false;
+          for (const id of sendTargetIds) {
+            if (mapSendIdsRef.current.has(id) && !submittedMapSendIdsRef.current.has(id)) {
+              mapSendIdsRef.current.delete(id);
+            }
           }
         }}
         selectedIds={sendTargetIds}
         suburb={sendTargetSuburb}
         onSuccess={() => {
-          mapSendSubmittedRef.current = mapSendRef.current;
           showNotification('success', 'Report dispatch logged successfully');
           clearSelected();
           cacheRef.current.clear();
         }}
-        onConfirmed={() => {
-          if (mapSendRef.current) {
+        onConfirmed={(ids) => {
+          const mapIds = ids.filter((id) => mapSendIdsRef.current.has(id));
+          if (mapIds.length > 0) {
+            for (const id of mapIds) {
+              mapSendIdsRef.current.delete(id);
+              submittedMapSendIdsRef.current.delete(id);
+            }
             setMapRefreshKey((k) => k + 1);
             mapDataChangedRef.current = false;
             mapDataCardsReturnRef.current = false;
@@ -4665,32 +4675,49 @@ export default function OutreachPage() {
             pendingDispatchStreetsRef.current = null;
             setTodayRunRefreshKey((k) => k + 1);
           }
-          mapSendRef.current = false;
-          mapSendSubmittedRef.current = false;
         }}
-        onFailure={(message) => {
-          pendingDispatchStreetsRef.current = null;
-          mapSendRef.current = false;
-          mapSendSubmittedRef.current = false;
+        onFailure={(message, ids) => {
+          const mapIds = ids.filter((id) => mapSendIdsRef.current.has(id));
+          if (mapIds.length > 0) {
+            for (const id of mapIds) {
+              mapSendIdsRef.current.delete(id);
+              submittedMapSendIdsRef.current.delete(id);
+            }
+          } else {
+            pendingDispatchStreetsRef.current = null;
+          }
           showNotification('error', `Dispatch failed, changes reverted: ${message}`);
         }}
         onOptimisticSend={(ids) => {
           const idSet = new Set(ids);
-          const previousItems = items;
-          const previousClassicItems = classicItems;
-          pendingDispatchStreetsRef.current = [
-            ...new Set(
-              [...items, ...classicItems]
-                .filter((item) => idSet.has(item.id))
-                .map((item) => item.street || extractStreetFromLikedItem(item))
-                .filter(Boolean)
-            ),
-          ];
+          const mapIds = ids.filter((id) => mapSendIdsRef.current.has(id));
+          const previousItems = items.filter((item) => idSet.has(item.id));
+          const previousClassicItems = classicItems.filter((item) => idSet.has(item.id));
+          for (const id of mapIds) submittedMapSendIdsRef.current.add(id);
+          if (mapIds.length > 0) {
+            setOptimisticMapSentIds((current) => [...new Set([...current, ...mapIds])]);
+          } else {
+            pendingDispatchStreetsRef.current = [
+              ...new Set(
+                [...items, ...classicItems]
+                  .filter((item) => idSet.has(item.id))
+                  .map((item) => item.street || extractStreetFromLikedItem(item))
+                  .filter(Boolean)
+              ),
+            ];
+          }
           setItems((prev) => prev.filter((item) => !idSet.has(item.id)));
           setClassicItems((prev) => prev.filter((item) => !idSet.has(item.id)));
           return () => {
-            setItems(previousItems);
-            setClassicItems(previousClassicItems);
+            setItems((current) => {
+              const currentIds = new Set(current.map((item) => item.id));
+              return [...current, ...previousItems.filter((item) => !currentIds.has(item.id))];
+            });
+            setClassicItems((current) => {
+              const currentIds = new Set(current.map((item) => item.id));
+              return [...current, ...previousClassicItems.filter((item) => !currentIds.has(item.id))];
+            });
+            setOptimisticMapSentIds((current) => current.filter((id) => !mapIds.includes(id)));
           };
         }}
       />

@@ -179,6 +179,64 @@ describe('Dashboard Stats API', () => {
     expect(container.querySelector('[class*="bg-white"]')).toBeDefined();
   });
 
+  it('renders total and monthly Leads with suburb addresses between appraisals and scans', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/admin/dashboard/stats')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            success: true,
+            stats: {
+              totalLeads: 17,
+              monthLeads: 3,
+              leadsBySuburb: [
+                { suburb: 'Albany', lead_count: 2, addresses: ['1 Example Road', '2 Example Road', '2 Example Road'] },
+              ],
+              totalBookings: 9,
+              recentAppraisals: [],
+              scanStats: { total_scans: 25, total_unique: 20, campaigns: [] },
+            },
+          }),
+        });
+      }
+      if (url.includes('/api/admin/bookings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            data: [],
+            pagination: { page: 1, limit: 10, total: 0, totalPages: 0 },
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    render(<DashboardPage />);
+
+    expect(await screen.findByText('Total Leads')).toBeTruthy();
+    expect(screen.getByText('17')).toBeTruthy();
+    expect(screen.getByText('This month: 3')).toBeTruthy();
+    expect(screen.getByText('Albany: 2')).toBeTruthy();
+    expect(screen.getByText('1 Example Road')).toBeTruthy();
+    expect(screen.getByText('2 Example Road')).toBeTruthy();
+    expect(screen.getAllByText('2 Example Road')).toHaveLength(1);
+
+    const appraisalCard = screen.getByText('Total Appraisals').closest('div.bg-white')!;
+    const leadsCard = screen.getByText('Total Leads').closest('div.bg-white')!;
+    const scansCard = screen.getByText('Total Scans').closest('div.bg-white')!;
+    expect(appraisalCard.compareDocumentPosition(leadsCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(leadsCard.compareDocumentPosition(scansCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const leadDetails = leadsCard.querySelector('.border-t') as HTMLElement;
+    expect(leadDetails.className).not.toContain('overflow-y-auto');
+    expect(leadDetails.className).not.toContain('max-h-');
+  });
+
   it('renders follow-ups section', async () => {
     useSessionMock = vi.fn().mockReturnValue({
       data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
@@ -671,14 +729,15 @@ describe('Dashboard Stats API', () => {
     // card order can be asserted.
     await waitFor(() => {
       expect(screen.getByText('Total Scans')).toBeTruthy();
+      expect(screen.getByText('Total Leads')).toBeTruthy();
     }, { timeout: 3000 });
 
     const cards = Array.from(container.querySelectorAll('div.min-h-\\[192px\\]'));
     const labels = cards.map((card) =>
-      ['Total Sent', 'Total Appraisals', 'Total Scans', 'Total Downloads']
+      ['Total Sent', 'Total Appraisals', 'Total Leads', 'Total Scans', 'Total Downloads']
         .find((label) => card.textContent?.includes(label)) ?? ''
     );
-    expect(labels.slice(0, 3)).toEqual(['Total Sent', 'Total Appraisals', 'Total Scans']);
+    expect(labels.slice(0, 4)).toEqual(['Total Sent', 'Total Appraisals', 'Total Leads', 'Total Scans']);
 
     const appraisalCard = cards.find((card) => card.textContent?.includes('Total Appraisals')) as HTMLElement;
     expect(within(appraisalCard).getByText('9')).toBeTruthy();

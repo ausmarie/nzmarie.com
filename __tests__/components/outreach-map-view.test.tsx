@@ -35,7 +35,7 @@ vi.mock('@googlemaps/markerclusterer', () => {
   };
 });
 
-import OutreachMapView from '../../app/admin/outreach/components/OutreachMapView';
+import OutreachMapView, { applyOptimisticSentIds } from '../../app/admin/outreach/components/OutreachMapView';
 
 const mockFitBounds = vi.fn();
 
@@ -55,7 +55,7 @@ function coordsPayload(runs: Array<{ runId: number; totalPending: number }>) {
             pendingCount: 12,
             runId: 1,
             addressCoords: [
-              { id: 'out-1', address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
+              { id: 'out-1', address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' as 'unsent' | 'sent' | 'junk' },
             ],
           },
         ],
@@ -253,6 +253,16 @@ describe('OutreachMapView', () => {
       expect(url).toContain('sent_status=all');
       expect(url).toContain('report_quarter=2026-Q2');
     });
+  });
+
+  it('optimistically treats a sent address as sent without mutating fetched data', () => {
+    const payload = coordsPayload([{ runId: 1, totalPending: 12 }]);
+
+    const updated = applyOptimisticSentIds(payload, ['out-1']);
+
+    expect(updated?.groups[0].streets[0].addressCoords?.[0].status).toBe('sent');
+    expect(updated?.groups[0].streets[0].addressCoords?.[0].sent).toBe(true);
+    expect(payload.groups[0].streets[0].addressCoords[0].status).toBe('unsent');
   });
 
   it('renders map canvas and status legend', async () => {

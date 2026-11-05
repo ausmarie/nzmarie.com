@@ -183,10 +183,66 @@ describe('SendReportModal', () => {
     );
 
     await waitFor(() => {
-      expect(onFailure).toHaveBeenCalledWith('Send failed');
+      expect(onFailure).toHaveBeenCalledWith('Send failed', ['p1']);
     });
     expect(rollback).toHaveBeenCalledTimes(1);
     expect(onConfirmed).not.toHaveBeenCalled();
     expect(await screen.findByText('Send failed')).toBeTruthy();
+  });
+
+  it('allows another address to be submitted while the previous dispatch is pending', async () => {
+    const pendingResponses: Array<(response: { ok: boolean; json: () => Promise<{ success: boolean }> }) => void> = [];
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url === '/api/admin/pdf/reports?status=active&suburb=Torbay') {
+        return Promise.resolve({ ok: true, json: async () => ({ reports: torbayDocs }) });
+      }
+      return new Promise((resolve) => pendingResponses.push(resolve));
+    });
+
+    const onConfirmed = vi.fn();
+    const props = {
+      onClose: vi.fn(),
+      onSuccess: vi.fn(),
+      onConfirmed,
+      suburb: 'Torbay',
+    };
+    const { rerender } = render(
+      <SendReportModal {...props} isOpen selectedIds={['first-address']} />
+    );
+
+    await screen.findByDisplayValue('2026_Q2_Torbay');
+    fireEvent.submit(screen.getByRole('button', { name: /Confirm Dispatch Log/i }).closest('form')!);
+
+    await waitFor(() => {
+      expect(pendingResponses).toHaveLength(1);
+    });
+
+    rerender(<SendReportModal {...props} isOpen={false} selectedIds={['second-address']} />);
+    rerender(<SendReportModal {...props} isOpen selectedIds={['second-address']} />);
+    await screen.findByDisplayValue('2026_Q2_Torbay');
+
+    const confirmButton = screen.getByRole('button', { name: /Confirm Dispatch Log/i });
+    expect((confirmButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.submit(confirmButton.closest('form')!);
+
+    await waitFor(() => {
+      expect(pendingResponses).toHaveLength(2);
+    });
+
+    const sendCalls = (global.fetch as any).mock.calls.filter(
+      (call: unknown[]) => call[0] === '/api/admin/outreach/send'
+    ) as Array<[string, { body: string }]>;
+    const sendBodies = sendCalls.map(([, options]) => JSON.parse(options.body));
+    expect(sendBodies.map((body: { property_ids: string[] }) => body.property_ids)).toEqual([
+      ['first-address'],
+      ['second-address'],
+    ]);
+
+    pendingResponses[1]({ ok: true, json: async () => ({ success: true }) });
+    pendingResponses[0]({ ok: true, json: async () => ({ success: true }) });
+    await waitFor(() => {
+      expect(onConfirmed).toHaveBeenNthCalledWith(1, ['second-address']);
+      expect(onConfirmed).toHaveBeenNthCalledWith(2, ['first-address']);
+    });
   });
 });

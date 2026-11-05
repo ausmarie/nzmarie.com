@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { DateTime } from 'luxon';
 import { periodLabel, periodSortValue } from '@/lib/report-period';
 import { FaFilePdf, FaPaperPlane, FaTimes, FaCheckCircle } from 'react-icons/fa';
@@ -34,8 +34,8 @@ interface SendReportModalProps {
   suburb: string;
   onSuccess: () => void;
   onOptimisticSend?: (ids: string[]) => () => void;
-  onConfirmed?: () => void;
-  onFailure?: (message: string) => void;
+  onConfirmed?: (ids: string[]) => void;
+  onFailure?: (message: string, ids: string[]) => void;
 }
 
 // Groups individual PDF documents into a single quarterly report set
@@ -84,8 +84,16 @@ export default function SendReportModal({
   const [loading, setLoading] = useState<boolean>(false);
   const [fetchingReports, setFetchingReports] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const submissionSequenceRef = useRef(0);
 
   const reportSets = useMemo(() => buildReportSets(reports), [reports]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    submissionSequenceRef.current += 1;
+    setLoading(false);
+    setError('');
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -146,6 +154,7 @@ export default function SendReportModal({
     e.preventDefault();
     if (selectedIds.length === 0) return;
 
+    const submissionId = ++submissionSequenceRef.current;
     setLoading(true);
     setError('');
 
@@ -170,14 +179,14 @@ export default function SendReportModal({
         const data = await res.json();
         throw new Error(data.error || 'Failed to record send log');
       }
-      onConfirmed?.();
+      onConfirmed?.(selectedIds);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       rollback?.();
-      onFailure?.(message);
-      setError(message);
+      onFailure?.(message, selectedIds);
+      if (submissionSequenceRef.current === submissionId) setError(message);
     } finally {
-      setLoading(false);
+      if (submissionSequenceRef.current === submissionId) setLoading(false);
     }
   };
 

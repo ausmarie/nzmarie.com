@@ -42,6 +42,28 @@ interface ClusterPayload {
   runs: RunSummary[];
 }
 
+export function applyOptimisticSentIds(
+  coordsData: ClusterPayload | null,
+  optimisticSentIds: string[] = []
+): ClusterPayload | null {
+  if (!coordsData || optimisticSentIds.length === 0) return coordsData;
+  const sentIds = new Set(optimisticSentIds);
+  return {
+    ...coordsData,
+    groups: coordsData.groups.map((group) => ({
+      ...group,
+      streets: group.streets.map((street) => ({
+        ...street,
+        addressCoords: street.addressCoords?.map((address) =>
+          address.id && sentIds.has(address.id)
+            ? { ...address, sent: true, status: 'sent' as const }
+            : address
+        ),
+      })),
+    })),
+  };
+}
+
 export interface OutreachMapViewProps {
   suburb: string;
   activeRunId: number | null;
@@ -52,12 +74,14 @@ export interface OutreachMapViewProps {
   onStreetSelect: (suburb: string, street: string) => void;
   onCoordsLoaded?: (
     streetStatusMap: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
-    counts: { total: number; unsent: number; sent: number; junk: number }
+    counts: { total: number; unsent: number; sent: number; junk: number },
+    sentAddressIds: string[]
   ) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   onStatusFilterChange?: (status: 'all' | 'unsent' | 'sent' | 'junk') => void;
   onMarkAsJunk?: (id: string, suburb: string) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
+  optimisticSentIds?: string[];
   refreshKey?: number | string;
   isVisible?: boolean;
 }
@@ -459,6 +483,7 @@ export default function OutreachMapView({
   statusFilter: externalStatusFilter = 'all',
   onMarkAsJunk,
   onMarkAsSent,
+  optimisticSentIds,
   refreshKey,
   isVisible = true,
 }: OutreachMapViewProps) {
@@ -538,7 +563,10 @@ export default function OutreachMapView({
       userCircleRef.current = circle;
     }
 
-    const nearestPoint = computeNearestUnsent(userLocation, coordsData);
+    const nearestPoint = computeNearestUnsent(
+      userLocation,
+      applyOptimisticSentIds(coordsData, optimisticSentIds)
+    );
     setNearest(nearestPoint ? { address: nearestPoint.address, suburb: nearestPoint.suburb, distanceM: nearestPoint.distanceM } : null);
 
     const pts: { lat: number; lng: number }[] = [{ lat: userLocation.lat, lng: userLocation.lng }];
@@ -553,7 +581,7 @@ export default function OutreachMapView({
       userMarkerRef.current = null;
       userCircleRef.current = null;
     };
-  }, [userLocation, coordsData]);
+  }, [userLocation, coordsData, optimisticSentIds]);
 
   useEffect(() => {
     return () => {
@@ -568,6 +596,10 @@ export default function OutreachMapView({
   onCoordsLoadedRef.current = onCoordsLoaded;
   const coordsDataRef = useRef(coordsData);
   coordsDataRef.current = coordsData;
+  const displayedCoordsData = useMemo(
+    () => applyOptimisticSentIds(coordsData, optimisticSentIds),
+    [coordsData, optimisticSentIds]
+  );
 
   const loadCoords = useCallback(async (force = false) => {
     if (!suburb) return;
@@ -595,6 +627,7 @@ export default function OutreachMapView({
         let unsentCount = 0;
         let sentCount = 0;
         let junkCount = 0;
+        const sentAddressIds: string[] = [];
         for (const g of (body.groups ?? []) as Array<{ streets: ClusterStreet[] }>) {
           for (const s of g.streets ?? []) {
             const coords = s.addressCoords ?? [];
@@ -611,7 +644,10 @@ export default function OutreachMapView({
             sm.set(s.street, state);
             for (const c of coords) {
               if (c.status === 'unsent') unsentCount++;
-              else if (c.status === 'sent') sentCount++;
+              else if (c.status === 'sent') {
+                sentCount++;
+                if (c.id) sentAddressIds.push(c.id);
+              }
               else if (c.status === 'junk') junkCount++;
             }
           }
@@ -621,7 +657,7 @@ export default function OutreachMapView({
           unsent: unsentCount,
           sent: sentCount,
           junk: junkCount,
-        });
+        }, sentAddressIds);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -783,7 +819,7 @@ export default function OutreachMapView({
         }}
       >
         <MapInner
-          coordsData={coordsData}
+          coordsData={displayedCoordsData}
           activeRunId={activeRunId}
           selectedStreet={selectedStreet ?? null}
           onStreetSelect={onStreetSelect}
