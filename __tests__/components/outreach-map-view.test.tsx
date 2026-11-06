@@ -35,7 +35,11 @@ vi.mock('@googlemaps/markerclusterer', () => {
   };
 });
 
-import OutreachMapView, { applyOptimisticAddressStatuses, applyOptimisticSentIds } from '../../app/admin/outreach/components/OutreachMapView';
+import OutreachMapView, {
+  applyOptimisticAddressStatuses,
+  applyOptimisticSentIds,
+  buildAddressInfoWindowContent,
+} from '../../app/admin/outreach/components/OutreachMapView';
 
 const mockFitBounds = vi.fn();
 
@@ -273,6 +277,55 @@ describe('OutreachMapView', () => {
     expect(updated?.groups[0].streets[0].addressCoords?.[0].status).toBe('junk');
     expect(updated?.groups[0].streets[0].addressCoords?.[0].sent).toBe(false);
     expect(payload.groups[0].streets[0].addressCoords[0].status).toBe('unsent');
+  });
+
+  it('optimistically removes junk status and restores an address to unsent', () => {
+    const payload = coordsPayload([{ runId: 1, totalPending: 12 }]);
+    payload.groups[0].streets[0].addressCoords[0].status = 'junk';
+
+    const updated = applyOptimisticAddressStatuses(payload, [], [], ['out-1']);
+
+    expect(updated?.groups[0].streets[0].addressCoords?.[0].status).toBe('unsent');
+    expect(updated?.groups[0].streets[0].addressCoords?.[0].sent).toBe(false);
+    expect(payload.groups[0].streets[0].addressCoords[0].status).toBe('junk');
+  });
+
+  it('shows Unjunk for junk addresses and applies the unjunk action', () => {
+    const onToggleJunk = vi.fn();
+    const content = buildAddressInfoWindowContent(
+      '3 Beechwood Road',
+      'No junk mail',
+      '#eab308',
+      'Torbay',
+      'out-1',
+      undefined,
+      undefined,
+      onToggleJunk
+    );
+    const button = content.querySelector('button');
+
+    expect(button?.textContent).toBe('Unjunk');
+    button?.click();
+    expect(onToggleJunk).toHaveBeenCalledWith('out-1', 'Torbay', false);
+  });
+
+  it('shows Junk for non-junk addresses and applies the junk action', () => {
+    const onToggleJunk = vi.fn();
+    const content = buildAddressInfoWindowContent(
+      '3 Beechwood Road',
+      'Unsent',
+      '#dc2626',
+      'Torbay',
+      'out-1',
+      undefined,
+      undefined,
+      onToggleJunk
+    );
+    const button = content.querySelector('button');
+
+    expect(button?.textContent).toBe('Junk');
+    button?.click();
+    expect(onToggleJunk).toHaveBeenCalledWith('out-1', 'Torbay', true);
   });
 
   it('renders map canvas and status legend', async () => {

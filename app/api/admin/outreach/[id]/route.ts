@@ -232,7 +232,7 @@ export async function PATCH(
     }
 
     if (updatedProperty?.suburb) {
-      invalidateStreetClustersForSuburb(updatedProperty.suburb).catch(() => { });
+      await invalidateStreetClustersForSuburb(updatedProperty.suburb);
     }
 
     if (process.env.USE_OUTREACH_MV === 'true') {

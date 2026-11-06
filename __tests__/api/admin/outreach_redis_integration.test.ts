@@ -138,6 +138,34 @@ describe('Outreach Redis Caching and Prefetch API', () => {
     expect(redisModule.invalidateStreetClustersForSuburb).toHaveBeenCalledWith('Pinehill');
   });
 
+  it('waits for map cache invalidation when removing junk status', async () => {
+    mockAuth();
+    let invalidationCompleted = false;
+    vi.mocked(redisModule.invalidateStreetClustersForSuburb).mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      invalidationCompleted = true;
+    });
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'outreach-3', property_id: 'prop-uuid-3', suburb: 'Torbay' }],
+      } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/outreach-3', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no_junk_mail: false }),
+      }),
+      { params: Promise.resolve({ id: 'outreach-3' }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(invalidationCompleted).toBe(true);
+    expect(redisModule.invalidateStreetClustersForSuburb).toHaveBeenCalledWith('Torbay');
+  });
+
   it('updates properties by address fallback when property_address and suburb are present', async () => {
     mockAuth();
 

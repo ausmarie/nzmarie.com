@@ -52,11 +52,17 @@ export function applyOptimisticSentIds(
 export function applyOptimisticAddressStatuses(
   coordsData: ClusterPayload | null,
   optimisticSentIds: string[] = [],
-  optimisticJunkIds: string[] = []
+  optimisticJunkIds: string[] = [],
+  optimisticUnjunkIds: string[] = []
 ): ClusterPayload | null {
-  if (!coordsData || (optimisticSentIds.length === 0 && optimisticJunkIds.length === 0)) return coordsData;
+  if (!coordsData || (
+    optimisticSentIds.length === 0 &&
+    optimisticJunkIds.length === 0 &&
+    optimisticUnjunkIds.length === 0
+  )) return coordsData;
   const sentIds = new Set(optimisticSentIds);
   const junkIds = new Set(optimisticJunkIds);
+  const unjunkIds = new Set(optimisticUnjunkIds);
   return {
     ...coordsData,
     groups: coordsData.groups.map((group) => ({
@@ -66,6 +72,7 @@ export function applyOptimisticAddressStatuses(
         addressCoords: street.addressCoords?.map((address) => {
           if (address.id && sentIds.has(address.id)) return { ...address, sent: true, status: 'sent' as const };
           if (address.id && junkIds.has(address.id)) return { ...address, status: 'junk' as const };
+          if (address.id && unjunkIds.has(address.id)) return { ...address, sent: false, status: 'unsent' as const };
           return address;
         }),
       })),
@@ -85,15 +92,17 @@ export interface OutreachMapViewProps {
     streetStatusMap: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
     counts: { total: number; unsent: number; sent: number; junk: number },
     sentAddressIds: string[],
-    junkAddressIds?: string[]
+    junkAddressIds?: string[],
+    unsentAddressIds?: string[]
   ) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   onStatusFilterChange?: (status: 'all' | 'unsent' | 'sent' | 'junk') => void;
-  onMarkAsJunk?: (id: string, suburb: string) => void;
+  onToggleJunk?: (id: string, suburb: string, shouldBeJunk: boolean) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
   onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
   optimisticSentIds?: string[];
   optimisticJunkIds?: string[];
+  optimisticUnjunkIds?: string[];
   refreshKey?: number | string;
   isVisible?: boolean;
 }
@@ -107,7 +116,7 @@ function dotScaleForZoom(zoom: number, isUnsent: boolean): number | null {
   return isUnsent ? 6 : 5;
 }
 
-function buildAddressInfoWindowContent(address: string, statusLabel: string, color: string, suburb?: string, id?: string | null, street?: string, streetAddresses?: Array<{ id: string; address: string }>, onMarkAsJunk?: (id: string, suburb: string) => void, onMarkAsSent?: (id: string, suburb: string) => void, onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void): HTMLElement {
+export function buildAddressInfoWindowContent(address: string, statusLabel: string, color: string, suburb?: string, id?: string | null, street?: string, streetAddresses?: Array<{ id: string; address: string }>, onToggleJunk?: (id: string, suburb: string, shouldBeJunk: boolean) => void, onMarkAsSent?: (id: string, suburb: string) => void, onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void): HTMLElement {
   const container = document.createElement('div');
   container.style.cssText = 'padding:8px 10px;min-width:210px;font-family:inherit;';
   const row = document.createElement('div');
@@ -129,12 +138,14 @@ function buildAddressInfoWindowContent(address: string, statusLabel: string, col
   container.appendChild(status);
   const btnRow = document.createElement('div');
   btnRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
-  if (onMarkAsJunk) {
+  if (onToggleJunk) {
+    const isJunk = statusLabel === 'No junk mail';
     const btnJunk = document.createElement('button');
     btnJunk.type = 'button';
-    btnJunk.textContent = 'Junk';
-    btnJunk.style.cssText = 'flex:1;padding:4px 8px;font-size:11px;border:1px solid #dc2626;color:#dc2626;background:#fff;border-radius:4px;cursor:pointer;';
-    btnJunk.onclick = (e) => { e.stopPropagation(); onMarkAsJunk?.(id ?? '', suburb ?? ''); };
+    btnJunk.textContent = isJunk ? 'Unjunk' : 'Junk';
+    const actionColor = isJunk ? '#16a34a' : '#dc2626';
+    btnJunk.style.cssText = `flex:1;padding:4px 8px;font-size:11px;border:1px solid ${actionColor};color:${actionColor};background:#fff;border-radius:4px;cursor:pointer;`;
+    btnJunk.onclick = (e) => { e.stopPropagation(); onToggleJunk(id ?? '', suburb ?? '', !isJunk); };
     btnRow.appendChild(btnJunk);
   }
   if (onMarkAsSent) {
@@ -208,7 +219,7 @@ function NativeMarkerManager({
   selectedStreet,
   onStreetSelect,
   statusFilter = 'all',
-  onMarkAsJunk,
+  onToggleJunk,
   onMarkAsSent,
   onSendStreet,
 }: {
@@ -218,14 +229,14 @@ function NativeMarkerManager({
   selectedStreet: string | null;
   onStreetSelect: (suburb: string, street: string) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
-  onMarkAsJunk?: (id: string, suburb: string) => void;
+  onToggleJunk?: (id: string, suburb: string, shouldBeJunk: boolean) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
   onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
 }) {
   const onStreetSelectRef = useRef(onStreetSelect);
   onStreetSelectRef.current = onStreetSelect;
-  const onMarkAsJunkRef = useRef(onMarkAsJunk);
-  onMarkAsJunkRef.current = onMarkAsJunk;
+  const onToggleJunkRef = useRef(onToggleJunk);
+  onToggleJunkRef.current = onToggleJunk;
   const onMarkAsSentRef = useRef(onMarkAsSent);
   onMarkAsSentRef.current = onMarkAsSent;
   const onSendStreetRef = useRef(onSendStreet);
@@ -343,9 +354,9 @@ function NativeMarkerManager({
             onStreetSelectRef.current(suburb, streetName);
             if (infoWindowRef.current) infoWindowRef.current.close();
             if (!infoWindowRef.current) infoWindowRef.current = new google.maps.InfoWindow();
-            const handleJunk = (addressId: string, addressSuburb: string) => {
+            const handleJunk = (addressId: string, addressSuburb: string, shouldBeJunk: boolean) => {
               infoWindowRef.current?.close();
-              onMarkAsJunkRef.current?.(addressId, addressSuburb);
+              onToggleJunkRef.current?.(addressId, addressSuburb, shouldBeJunk);
             };
             const handleSent = (addressId: string, addressSuburb: string) => {
               infoWindowRef.current?.close();
@@ -421,7 +432,7 @@ function MapInner({
   onMapLoad,
   error,
   statusFilter,
-  onMarkAsJunk,
+  onToggleJunk,
   onMarkAsSent,
   onSendStreet,
 }: {
@@ -432,7 +443,7 @@ function MapInner({
   onMapLoad: (map: google.maps.Map) => void;
   error: string | null;
   statusFilter: 'all' | 'unsent' | 'sent' | 'junk';
-  onMarkAsJunk?: (id: string, suburb: string) => void;
+  onToggleJunk?: (id: string, suburb: string, shouldBeJunk: boolean) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
   onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
 }) {
@@ -510,7 +521,7 @@ function MapInner({
             selectedStreet={selectedStreet}
             onStreetSelect={onStreetSelect}
             statusFilter={statusFilter}
-            onMarkAsJunk={onMarkAsJunk}
+            onToggleJunk={onToggleJunk}
             onMarkAsSent={onMarkAsSent}
             onSendStreet={onSendStreet}
           />
@@ -529,17 +540,19 @@ export default function OutreachMapView({
   onStreetSelect,
   onCoordsLoaded,
   statusFilter: externalStatusFilter = 'all',
-  onMarkAsJunk,
+  onToggleJunk,
   onMarkAsSent,
   onSendStreet,
   optimisticSentIds,
   optimisticJunkIds,
+  optimisticUnjunkIds,
   refreshKey,
   isVisible = true,
 }: OutreachMapViewProps) {
   const [coordsData, setCoordsData] = useState<ClusterPayload | null>(null);
   const [localOptimisticSentIds, setLocalOptimisticSentIds] = useState<string[]>([]);
   const [localOptimisticJunkIds, setLocalOptimisticJunkIds] = useState<string[]>([]);
+  const [localOptimisticUnjunkIds, setLocalOptimisticUnjunkIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
@@ -620,7 +633,8 @@ export default function OutreachMapView({
       applyOptimisticAddressStatuses(
         coordsData,
         optimisticSentIds ?? localOptimisticSentIds,
-        optimisticJunkIds ?? localOptimisticJunkIds
+        optimisticJunkIds ?? localOptimisticJunkIds,
+        optimisticUnjunkIds ?? localOptimisticUnjunkIds
       )
     );
     setNearest(nearestPoint ? { address: nearestPoint.address, suburb: nearestPoint.suburb, distanceM: nearestPoint.distanceM } : null);
@@ -637,7 +651,7 @@ export default function OutreachMapView({
       userMarkerRef.current = null;
       userCircleRef.current = null;
     };
-  }, [userLocation, coordsData, optimisticSentIds, optimisticJunkIds, localOptimisticSentIds, localOptimisticJunkIds]);
+  }, [userLocation, coordsData, optimisticSentIds, optimisticJunkIds, optimisticUnjunkIds, localOptimisticSentIds, localOptimisticJunkIds, localOptimisticUnjunkIds]);
 
   useEffect(() => {
     return () => {
@@ -656,9 +670,10 @@ export default function OutreachMapView({
     () => applyOptimisticAddressStatuses(
       coordsData,
       optimisticSentIds ?? localOptimisticSentIds,
-      optimisticJunkIds ?? localOptimisticJunkIds
+      optimisticJunkIds ?? localOptimisticJunkIds,
+      optimisticUnjunkIds ?? localOptimisticUnjunkIds
     ),
-    [coordsData, optimisticSentIds, optimisticJunkIds, localOptimisticSentIds, localOptimisticJunkIds]
+    [coordsData, optimisticSentIds, optimisticJunkIds, optimisticUnjunkIds, localOptimisticSentIds, localOptimisticJunkIds, localOptimisticUnjunkIds]
   );
 
   const loadCoords = useCallback(async (force = false) => {
@@ -689,6 +704,7 @@ export default function OutreachMapView({
         let junkCount = 0;
         const sentAddressIds: string[] = [];
         const junkAddressIds: string[] = [];
+        const unsentAddressIds: string[] = [];
         for (const g of (body.groups ?? []) as Array<{ streets: ClusterStreet[] }>) {
           for (const s of g.streets ?? []) {
             const coords = s.addressCoords ?? [];
@@ -704,7 +720,10 @@ export default function OutreachMapView({
             }
             sm.set(s.street, state);
             for (const c of coords) {
-              if (c.status === 'unsent') unsentCount++;
+              if (c.status === 'unsent') {
+                unsentCount++;
+                if (c.id) unsentAddressIds.push(c.id);
+              }
               else if (c.status === 'sent') {
                 sentCount++;
                 if (c.id) sentAddressIds.push(c.id);
@@ -721,34 +740,44 @@ export default function OutreachMapView({
           unsent: unsentCount,
           sent: sentCount,
           junk: junkCount,
-        }, sentAddressIds, junkAddressIds);
+        }, sentAddressIds, junkAddressIds, unsentAddressIds);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [suburb, sentStatus, reportQuarter, refreshKey]);
 
-  const handleMarkAsJunk = useCallback(async (id: string, addressSuburb: string) => {
+  const handleToggleJunk = useCallback(async (id: string, addressSuburb: string, shouldBeJunk: boolean) => {
     if (!id) return;
-    setLocalOptimisticJunkIds((ids) => [...new Set([...ids, id])]);
+    if (shouldBeJunk) {
+      setLocalOptimisticUnjunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
+      setLocalOptimisticJunkIds((ids) => [...new Set([...ids, id])]);
+    } else {
+      setLocalOptimisticJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
+      setLocalOptimisticUnjunkIds((ids) => [...new Set([...ids, id])]);
+    }
     try {
       const quarter = parseReportQuarter(reportQuarter);
       const res = await fetch(`/api/admin/outreach/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          no_junk_mail: true,
+          no_junk_mail: shouldBeJunk,
           ...(quarter ? { quarter: quarter.quarter, year: quarter.year, suburb: addressSuburb } : {}),
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(err.error || 'Failed to mark as junk');
+        throw new Error(err.error || `Failed to ${shouldBeJunk ? 'mark as junk' : 'remove junk status'}`);
       }
       await res.json();
     } catch (err) {
-      setLocalOptimisticJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
-      console.error('Mark as junk failed:', err);
+      if (shouldBeJunk) {
+        setLocalOptimisticJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
+      } else {
+        setLocalOptimisticUnjunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
+      }
+      console.error('Junk status update failed:', err);
     }
   }, [reportQuarter]);
 
@@ -893,7 +922,7 @@ export default function OutreachMapView({
           onMapLoad={handleMapLoad}
           error={error}
           statusFilter={statusFilter}
-          onMarkAsJunk={onMarkAsJunk ?? handleMarkAsJunk}
+          onToggleJunk={onToggleJunk ?? handleToggleJunk}
           onMarkAsSent={onMarkAsSent ?? handleMarkAsSent}
           onSendStreet={onSendStreet}
         />

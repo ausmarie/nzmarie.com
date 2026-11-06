@@ -30,10 +30,11 @@ vi.mock('@/lib/geo-data', () => ({
 vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
   default: (props: {
     onMarkAsSent?: (id: string, suburb: string) => void;
-    onMarkAsJunk?: (id: string, suburb: string) => void | Promise<void>;
+    onToggleJunk?: (id: string, suburb: string, shouldBeJunk: boolean) => void | Promise<void>;
     onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
     optimisticSentIds?: string[];
     optimisticJunkIds?: string[];
+    optimisticUnjunkIds?: string[];
     refreshKey?: number | string;
     isVisible?: boolean;
     statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
@@ -46,6 +47,7 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
       data-status-filter={props.statusFilter}
       data-optimistic-sent-ids={props.optimisticSentIds?.join(',') ?? ''}
       data-optimistic-junk-ids={props.optimisticJunkIds?.join(',') ?? ''}
+      data-optimistic-unjunk-ids={props.optimisticUnjunkIds?.join(',') ?? ''}
     >
       <button
         type="button"
@@ -61,9 +63,15 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
       </button>
       <button
         type="button"
-        onClick={() => { void props.onMarkAsJunk?.('junk-address-1', 'Torbay'); }}
+        onClick={() => { void props.onToggleJunk?.('map-address-1', 'Torbay', true); }}
       >
         Map Junk
+      </button>
+      <button
+        type="button"
+        onClick={() => { void props.onToggleJunk?.('map-address-1', 'Torbay', false); }}
+      >
+        Map Unjunk
       </button>
       <button
         type="button"
@@ -92,6 +100,7 @@ class MockIntersectionObserver {
 }
 globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 let deferredSendResponses: Array<(response: { ok: boolean; json: () => Promise<{ success: boolean }> }) => void> | null = null;
+let mockNoJunkMail = false;
 
 const pdfReports = [
   { id: 'r-f', suburb: 'Fairview Heights', quarter: 'Q3', year: 2026, label: '2026-Q3', doc_label: 'Main Report', file_url: 'https://x/f.pdf', file_name: 'f.pdf' },
@@ -101,8 +110,16 @@ const pdfReports = [
 describe('Outreach map Sent modal suburb', () => {
   beforeEach(() => {
     deferredSendResponses = null;
-    global.fetch = vi.fn((url: RequestInfo) => {
+    mockNoJunkMail = false;
+    global.fetch = vi.fn((url: RequestInfo, init?: RequestInit) => {
       const s = String(url || '');
+      if (s.includes('/api/admin/outreach/map-address-1') && init?.method === 'PATCH') {
+        mockNoJunkMail = JSON.parse(String(init.body)).no_junk_mail;
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, quarter_junk_recorded: mockNoJunkMail }),
+        });
+      }
       if (s.includes('/api/admin/outreach/send') && deferredSendResponses) {
         return new Promise((resolve) => deferredSendResponses?.push(resolve));
       }
@@ -145,6 +162,7 @@ describe('Outreach map Sent modal suburb', () => {
                 city: 'Auckland',
                 region: 'Auckland',
                 status: 'PENDING',
+                no_junk_mail: mockNoJunkMail,
                 created_at: '2026-07-01T10:00:00Z',
               },
             ],
@@ -332,7 +350,7 @@ describe('Outreach map Sent modal suburb', () => {
     expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
   });
 
-  it('optimistically marks junk yellow and hides it in the Unsent filter without refreshing the map', async () => {
+  it('does not refresh the map after card junk changes until Map is clicked', async () => {
     render(<OutreachPage />);
     fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
     fireEvent.click(await screen.findByRole('button', { name: /2026-Q3/ }));
@@ -342,20 +360,35 @@ describe('Outreach map Sent modal suburb', () => {
     const initialRefreshKey = map.getAttribute('data-refresh-key');
     fireEvent.click(screen.getByRole('button', { name: 'Map Unsent' }));
     expect(map.getAttribute('data-status-filter')).toBe('unsent');
-    fireEvent.click(screen.getByRole('button', { name: 'Map Junk' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Map Junk' }));
+    fireEvent.click(screen.getByTitle('Card View'));
+    fireEvent.click(await screen.findByTitle('Click to mark No Junk'));
+    expect(map.getAttribute('data-optimistic-junk-ids')).toBe('map-address-1');
 
     await waitFor(() => {
       const junkRequests = vi.mocked(global.fetch).mock.calls.filter(([url, init]) =>
-        String(url).includes('/api/admin/outreach/junk-address-1') && init?.method === 'PATCH'
+        String(url).includes('/api/admin/outreach/map-address-1') && init?.method === 'PATCH'
+      );
+      expect(junkRequests).toHaveLength(1);
+    });
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+
+    fireEvent.click(await screen.findByTitle('No Junk - Click to allow'));
+
+    await waitFor(() => {
+      const junkRequests = vi.mocked(global.fetch).mock.calls.filter(([url, init]) =>
+        String(url).includes('/api/admin/outreach/map-address-1') && init?.method === 'PATCH'
       );
       expect(junkRequests).toHaveLength(2);
     });
-    expect(map.getAttribute('data-optimistic-junk-ids')).toBe('junk-address-1');
+    const junkRequests = vi.mocked(global.fetch).mock.calls.filter(([url, init]) =>
+      String(url).includes('/api/admin/outreach/map-address-1') && init?.method === 'PATCH'
+    );
+    expect(JSON.parse(String(junkRequests[0][1]?.body)).no_junk_mail).toBe(true);
+    expect(JSON.parse(String(junkRequests[1][1]?.body)).no_junk_mail).toBe(false);
+    expect(map.getAttribute('data-optimistic-junk-ids')).toBe('');
+    expect(map.getAttribute('data-optimistic-unjunk-ids')).toBe('map-address-1');
     expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
 
-    fireEvent.click(screen.getByTitle('Card View'));
-    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
     fireEvent.click(screen.getByTitle('Map View'));
 
     expect(screen.getByTestId('map-stub')).toBe(map);

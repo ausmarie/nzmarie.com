@@ -417,13 +417,24 @@ export default function OutreachPage() {
   const [mapAddressCounts, setMapAddressCounts] = useState<{ total: number; unsent: number; sent: number; junk: number } | null>(null);
   const [optimisticMapSentIds, setOptimisticMapSentIds] = useState<string[]>([]);
   const [optimisticMapJunkIds, setOptimisticMapJunkIds] = useState<string[]>([]);
+  const [optimisticMapUnjunkIds, setOptimisticMapUnjunkIds] = useState<string[]>([]);
+  const setOptimisticMapJunkStatus = useCallback((id: string, shouldBeJunk: boolean) => {
+    if (shouldBeJunk) {
+      setOptimisticMapUnjunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
+      setOptimisticMapJunkIds((ids) => [...new Set([...ids, id])]);
+    } else {
+      setOptimisticMapJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
+      setOptimisticMapUnjunkIds((ids) => [...new Set([...ids, id])]);
+    }
+  }, []);
   const mapSendIdsRef = useRef(new Set<string>());
   const submittedMapSendIdsRef = useRef(new Set<string>());
   const handleMapCoordsLoaded = useCallback((
     sm: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
     counts: { total: number; unsent: number; sent: number; junk: number },
     sentAddressIds: string[],
-    junkAddressIds: string[] = []
+    junkAddressIds: string[] = [],
+    unsentAddressIds: string[] = []
   ) => {
     setMapStreetStatusMap(sm);
     setMapAddressCounts(counts);
@@ -431,6 +442,8 @@ export default function OutreachPage() {
     setOptimisticMapSentIds((ids) => ids.filter((id) => !confirmedIds.has(id)));
     const confirmedJunkIds = new Set(junkAddressIds);
     setOptimisticMapJunkIds((ids) => ids.filter((id) => !confirmedJunkIds.has(id)));
+    const confirmedUnjunkIds = new Set(unsentAddressIds);
+    setOptimisticMapUnjunkIds((ids) => ids.filter((id) => !confirmedUnjunkIds.has(id)));
   }, []);
   useEffect(() => {
     window.localStorage.setItem('outreach_map_sidebar_hidden', mapSidebarHidden ? '1' : '0');
@@ -1119,6 +1132,7 @@ export default function OutreachPage() {
   const updateNoJunkMail = async (prop: OutreachProperty, newValue: boolean) => {
     const previousItems = items;
     const previousClassicItems = classicItems;
+    const previousJunkValue = prop.no_junk_mail === true;
     let endpoint = `/api/admin/properties/${prop.joined_property_id}`;
     let payload: Record<string, string | number | boolean> = { no_junk_mail: newValue };
 
@@ -1143,6 +1157,7 @@ export default function OutreachPage() {
     cacheRef.current.clear();
     setItems((prev) => prev.map((item) => item.id === prop.id ? { ...item, no_junk_mail: newValue } : item));
     setClassicItems((prev) => prev.map((item) => item.id === prop.id ? { ...item, no_junk_mail: newValue } : item));
+    if (activeTab === 'pending') setOptimisticMapJunkStatus(prop.id, newValue);
 
     try {
       const response = await fetch(endpoint, {
@@ -1159,6 +1174,7 @@ export default function OutreachPage() {
       cacheRef.current.clear();
       setItems(previousItems);
       setClassicItems(previousClassicItems);
+      if (activeTab === 'pending') setOptimisticMapJunkStatus(prop.id, previousJunkValue);
       showNotification('error', 'Failed to update No Junk Mail status');
     }
   };
@@ -2006,6 +2022,7 @@ export default function OutreachPage() {
           statusFilter={mapStatusFilter}
           optimisticSentIds={optimisticMapSentIds}
           optimisticJunkIds={optimisticMapJunkIds}
+          optimisticUnjunkIds={optimisticMapUnjunkIds}
           onStatusFilterChange={setMapStatusFilter}
           refreshKey={`${todayRunRefreshKey}:${mapRefreshKey}`}
           isVisible={viewMode === 'map'}
@@ -2017,12 +2034,16 @@ export default function OutreachPage() {
             setActiveMapStreet(street);
             setReportSuburbFilter(suburb);
           }}
-          onMarkAsJunk={async (id: string, addressSuburb: string) => {
+          onToggleJunk={async (id: string, addressSuburb: string, shouldBeJunk: boolean) => {
             if (!id) {
               showNotification('error', 'Invalid address ID');
               return;
             }
-            setOptimisticMapJunkIds((ids) => [...new Set([...ids, id])]);
+            const previousJunkValue = items.find((item) => item.id === id)?.no_junk_mail === true;
+            setOptimisticMapJunkStatus(id, shouldBeJunk);
+            cacheRef.current.clear();
+            setItems((prev) => prev.map((item) => item.id === id ? { ...item, no_junk_mail: shouldBeJunk } : item));
+            setClassicItems((prev) => prev.map((item) => item.id === id ? { ...item, no_junk_mail: shouldBeJunk } : item));
             try {
               const suburb = addressSuburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb;
               const report = availableReports
@@ -2033,24 +2054,32 @@ export default function OutreachPage() {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  no_junk_mail: true,
+                  no_junk_mail: shouldBeJunk,
                   quarter: report.quarter,
                   year: report.year,
                   suburb_report_id: report.id,
                   suburb,
                 }),
               });
-              if (!res.ok) throw new Error('Failed to mark as junk');
+              if (!res.ok) throw new Error(`Failed to ${shouldBeJunk ? 'mark as junk' : 'remove junk status'}`);
               const result = await res.json();
-              showNotification(
-                'success',
-                result.quarter_junk_recorded === false
-                  ? 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window'
-                  : 'Marked as junk for this quarter'
-              );
+              setMapRefreshKey((key) => key + 1);
+              if (shouldBeJunk) {
+                showNotification(
+                  'success',
+                  result.quarter_junk_recorded === false
+                    ? 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window'
+                    : 'Marked as junk for this quarter'
+                );
+              } else {
+                showNotification('success', 'Junk status removed');
+              }
             } catch {
-              setOptimisticMapJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
-              showNotification('error', 'Failed to mark as junk');
+              setOptimisticMapJunkStatus(id, !shouldBeJunk);
+              cacheRef.current.clear();
+              setItems((prev) => prev.map((item) => item.id === id ? { ...item, no_junk_mail: previousJunkValue } : item));
+              setClassicItems((prev) => prev.map((item) => item.id === id ? { ...item, no_junk_mail: previousJunkValue } : item));
+              showNotification('error', `Failed to ${shouldBeJunk ? 'mark as junk' : 'remove junk status'}`);
             }
           }}
           onMarkAsSent={(id: string, suburb: string) => {
