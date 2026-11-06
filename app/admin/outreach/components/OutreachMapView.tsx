@@ -88,6 +88,7 @@ export interface OutreachMapViewProps {
   reportQuarter?: string;
   onRunSelect: (runId: number) => void;
   onStreetSelect: (suburb: string, street: string) => void;
+  onAddressSelect?: (suburb: string) => void;
   onCoordsLoaded?: (
     streetStatusMap: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
     counts: { total: number; unsent: number; sent: number; junk: number },
@@ -218,6 +219,7 @@ function NativeMarkerManager({
   activeRunId,
   selectedStreet,
   onStreetSelect,
+  onAddressSelect,
   statusFilter = 'all',
   onToggleJunk,
   onMarkAsSent,
@@ -228,6 +230,7 @@ function NativeMarkerManager({
   activeRunId: number | null;
   selectedStreet: string | null;
   onStreetSelect: (suburb: string, street: string) => void;
+  onAddressSelect?: (suburb: string) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   onToggleJunk?: (id: string, suburb: string, shouldBeJunk: boolean) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
@@ -235,6 +238,8 @@ function NativeMarkerManager({
 }) {
   const onStreetSelectRef = useRef(onStreetSelect);
   onStreetSelectRef.current = onStreetSelect;
+  const onAddressSelectRef = useRef(onAddressSelect);
+  onAddressSelectRef.current = onAddressSelect;
   const onToggleJunkRef = useRef(onToggleJunk);
   onToggleJunkRef.current = onToggleJunk;
   const onMarkAsSentRef = useRef(onMarkAsSent);
@@ -351,7 +356,7 @@ function NativeMarkerManager({
             zIndex: isUnsent ? 500 : isJunk ? 450 : 300,
           });
           dotMarker.addListener('click', () => {
-            onStreetSelectRef.current(suburb, streetName);
+            onAddressSelectRef.current?.(suburb);
             if (infoWindowRef.current) infoWindowRef.current.close();
             if (!infoWindowRef.current) infoWindowRef.current = new google.maps.InfoWindow();
             const handleJunk = (addressId: string, addressSuburb: string, shouldBeJunk: boolean) => {
@@ -429,6 +434,7 @@ function MapInner({
   activeRunId,
   selectedStreet,
   onStreetSelect,
+  onAddressSelect,
   onMapLoad,
   error,
   statusFilter,
@@ -440,6 +446,7 @@ function MapInner({
   activeRunId: number | null;
   selectedStreet: string | null;
   onStreetSelect: (suburb: string, street: string) => void;
+  onAddressSelect?: (suburb: string) => void;
   onMapLoad: (map: google.maps.Map) => void;
   error: string | null;
   statusFilter: 'all' | 'unsent' | 'sent' | 'junk';
@@ -520,6 +527,7 @@ function MapInner({
             activeRunId={activeRunId}
             selectedStreet={selectedStreet}
             onStreetSelect={onStreetSelect}
+            onAddressSelect={onAddressSelect}
             statusFilter={statusFilter}
             onToggleJunk={onToggleJunk}
             onMarkAsSent={onMarkAsSent}
@@ -538,6 +546,7 @@ export default function OutreachMapView({
   sentStatus,
   reportQuarter,
   onStreetSelect,
+  onAddressSelect,
   onCoordsLoaded,
   statusFilter: externalStatusFilter = 'all',
   onToggleJunk,
@@ -827,6 +836,8 @@ export default function OutreachMapView({
 
   const lastFittedRunRef = useRef<number | null>(null);
   useEffect(() => {
+    if (selectedStreet) return;
+
     if (activeRunId != null && activeRunId !== lastFittedRunRef.current && coordsData) {
       lastFittedRunRef.current = activeRunId;
       const pts: { lat: number; lng: number }[] = [];
@@ -843,7 +854,7 @@ export default function OutreachMapView({
     } else if (activeRunId == null) {
       lastFittedRunRef.current = null;
     }
-  }, [activeRunId, coordsData, fitToBounds]);
+  }, [activeRunId, coordsData, fitToBounds, selectedStreet]);
 
   const focusStreet = useCallback((streetName: string) => {
     const map = mapRef.current;
@@ -886,8 +897,9 @@ export default function OutreachMapView({
   }, [isVisible]);
 
   useEffect(() => {
+    if (selectedStreet || activeRunId != null) return;
     if (mapRef.current && allPoints.length > 0) fitToBounds(allPoints);
-  }, [allPoints, fitToBounds]);
+  }, [activeRunId, allPoints, fitToBounds, selectedStreet]);
 
   if (!suburb) return (
     <div style={{ height: '100%', minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', background: '#f8fafc', borderRadius: 12 }}>
@@ -919,6 +931,7 @@ export default function OutreachMapView({
           activeRunId={activeRunId}
           selectedStreet={selectedStreet ?? null}
           onStreetSelect={onStreetSelect}
+          onAddressSelect={onAddressSelect}
           onMapLoad={handleMapLoad}
           error={error}
           statusFilter={statusFilter}

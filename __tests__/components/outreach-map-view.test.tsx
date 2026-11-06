@@ -2,20 +2,27 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const { mockFitBounds, mockMap } = vi.hoisted(() => {
+  const fitBounds = vi.fn();
+  return {
+    mockFitBounds: fitBounds,
+    mockMap: {
+      fitBounds,
+      setZoom: vi.fn(),
+      setCenter: vi.fn(),
+      getCenter: vi.fn(() => ({ lat: -36.69, lng: 174.74 })),
+      getZoom: vi.fn(() => 12),
+      addListener: vi.fn(() => () => {}),
+      setMap: vi.fn(),
+    },
+  };
+});
+
 vi.mock('@vis.gl/react-google-maps', () => {
   const LatLngBounds = class {
     extend() {
       return this;
     }
-  };
-  const mockMap = {
-    fitBounds: vi.fn(),
-    setZoom: vi.fn(),
-    setCenter: vi.fn(),
-    getCenter: vi.fn(() => ({ lat: -36.69, lng: 174.74 })),
-    getZoom: vi.fn(() => 14),
-    addListener: vi.fn(() => () => {}),
-    setMap: vi.fn(),
   };
   return {
     APIProvider: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -40,8 +47,6 @@ import OutreachMapView, {
   applyOptimisticSentIds,
   buildAddressInfoWindowContent,
 } from '../../app/admin/outreach/components/OutreachMapView';
-
-const mockFitBounds = vi.fn();
 
 function coordsPayload(runs: Array<{ runId: number; totalPending: number }>) {
   return {
@@ -256,6 +261,36 @@ describe('OutreachMapView', () => {
       const url = called.find((u) => u.includes('/api/admin/outreach/street-clusters'));
       expect(url).toContain('sent_status=all');
       expect(url).toContain('report_quarter=2026-Q2');
+    });
+  });
+
+  it.each([
+    { description: 'selected street', selectedStreet: 'Glamorgan Drive', activeRunId: null },
+    { description: 'selected run', selectedStreet: null, activeRunId: 1 },
+  ])('fits bounds once for a $description instead of refitting the whole map', async ({
+    selectedStreet,
+    activeRunId,
+  }) => {
+    installMockMap();
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => coordsPayload([{ runId: 1, totalPending: 12 }]),
+    })) as unknown as typeof fetch;
+
+    render(
+      <OutreachMapView
+        suburb="Torbay"
+        activeRunId={activeRunId}
+        selectedStreet={selectedStreet}
+        sentStatus="unsent"
+        onRunSelect={vi.fn()}
+        onStreetSelect={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByTestId('map-canvas')).toBeTruthy();
+    await waitFor(() => {
+      expect(mockFitBounds).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -514,6 +549,9 @@ describe('OutreachMapView', () => {
 
   it('opens an info window with the address when a dot marker is clicked', async () => {
     installMockMap();
+    mockMap.getZoom.mockReturnValue(13);
+    const handleAddressSelect = vi.fn();
+    const handleStreetSelect = vi.fn();
     const openedContents: Array<Node | string> = [];
     const InfoWindowMock = class {
       static instances: unknown[] = [];
@@ -576,11 +614,12 @@ describe('OutreachMapView', () => {
     render(
       <OutreachMapView
         suburb="Torbay"
-        activeRunId={1}
+        activeRunId={null}
         sentStatus="unsent"
-        selectedStreet="Glamorgan Drive"
         onRunSelect={vi.fn()}
-        onStreetSelect={vi.fn()}
+        onStreetSelect={handleStreetSelect}
+        onAddressSelect={handleAddressSelect}
+        statusFilter="unsent"
         onSendStreet={sendStreet}
       />
     );
@@ -589,8 +628,12 @@ describe('OutreachMapView', () => {
       expect(dotClickHandlers.length).toBeGreaterThan(0);
     });
 
+    const fitBoundsCallsBeforeAddressClick = mockFitBounds.mock.calls.length;
     dotClickHandlers[0]();
 
+    expect(handleAddressSelect).toHaveBeenCalledWith('Torbay');
+    expect(handleStreetSelect).not.toHaveBeenCalled();
+    expect(mockFitBounds).toHaveBeenCalledTimes(fitBoundsCallsBeforeAddressClick);
     expect(openedContents.length).toBe(1);
     const text = typeof openedContents[0] === 'string' ? openedContents[0] : (openedContents[0] as Node).textContent ?? '';
     expect(text).toContain('1 Glamorgan Drive');

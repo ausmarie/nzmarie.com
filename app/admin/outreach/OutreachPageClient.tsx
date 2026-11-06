@@ -2034,6 +2034,7 @@ export default function OutreachPage() {
             setActiveMapStreet(street);
             setReportSuburbFilter(suburb);
           }}
+          onAddressSelect={(suburb) => setReportSuburbFilter(suburb)}
           onToggleJunk={async (id: string, addressSuburb: string, shouldBeJunk: boolean) => {
             if (!id) {
               showNotification('error', 'Invalid address ID');
