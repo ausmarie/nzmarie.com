@@ -416,17 +416,21 @@ export default function OutreachPage() {
   const [mapStreetStatusMap, setMapStreetStatusMap] = useState<Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>>(new Map());
   const [mapAddressCounts, setMapAddressCounts] = useState<{ total: number; unsent: number; sent: number; junk: number } | null>(null);
   const [optimisticMapSentIds, setOptimisticMapSentIds] = useState<string[]>([]);
+  const [optimisticMapJunkIds, setOptimisticMapJunkIds] = useState<string[]>([]);
   const mapSendIdsRef = useRef(new Set<string>());
   const submittedMapSendIdsRef = useRef(new Set<string>());
   const handleMapCoordsLoaded = useCallback((
     sm: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
     counts: { total: number; unsent: number; sent: number; junk: number },
-    sentAddressIds: string[]
+    sentAddressIds: string[],
+    junkAddressIds: string[] = []
   ) => {
     setMapStreetStatusMap(sm);
     setMapAddressCounts(counts);
     const confirmedIds = new Set(sentAddressIds);
     setOptimisticMapSentIds((ids) => ids.filter((id) => !confirmedIds.has(id)));
+    const confirmedJunkIds = new Set(junkAddressIds);
+    setOptimisticMapJunkIds((ids) => ids.filter((id) => !confirmedJunkIds.has(id)));
   }, []);
   useEffect(() => {
     window.localStorage.setItem('outreach_map_sidebar_hidden', mapSidebarHidden ? '1' : '0');
@@ -454,6 +458,8 @@ export default function OutreachPage() {
   const mapDataCardsReturnRef = useRef(false);
   const [sendTargetIds, setSendTargetIds] = useState<string[]>([]);
   const [sendTargetSuburb, setSendTargetSuburb] = useState('');
+  const [sendTargetStreet, setSendTargetStreet] = useState('');
+  const [sendTargetStreetAddresses, setSendTargetStreetAddresses] = useState<Array<{ id: string; address: string }>>([]);
   const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [historyTargetId, setHistoryTargetId] = useState<string | null>(null);
   const [historyTargetAddress, setHistoryTargetAddress] = useState<string>('');
@@ -1999,6 +2005,7 @@ export default function OutreachPage() {
           onCoordsLoaded={handleMapCoordsLoaded}
           statusFilter={mapStatusFilter}
           optimisticSentIds={optimisticMapSentIds}
+          optimisticJunkIds={optimisticMapJunkIds}
           onStatusFilterChange={setMapStatusFilter}
           refreshKey={`${todayRunRefreshKey}:${mapRefreshKey}`}
           isVisible={viewMode === 'map'}
@@ -2015,6 +2022,7 @@ export default function OutreachPage() {
               showNotification('error', 'Invalid address ID');
               return;
             }
+            setOptimisticMapJunkIds((ids) => [...new Set([...ids, id])]);
             try {
               const suburb = addressSuburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb;
               const report = availableReports
@@ -2034,8 +2042,6 @@ export default function OutreachPage() {
               });
               if (!res.ok) throw new Error('Failed to mark as junk');
               const result = await res.json();
-              mapDataChangedRef.current = true;
-              mapDataCardsReturnRef.current = false;
               showNotification(
                 'success',
                 result.quarter_junk_recorded === false
@@ -2043,6 +2049,7 @@ export default function OutreachPage() {
                   : 'Marked as junk for this quarter'
               );
             } catch {
+              setOptimisticMapJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
               showNotification('error', 'Failed to mark as junk');
             }
           }}
@@ -2052,6 +2059,19 @@ export default function OutreachPage() {
             mapSendIdsRef.current.add(id);
             setSendTargetSuburb(mapSuburb || prop?.suburb || '');
             setSendTargetIds([id]);
+            setSendTargetStreet('');
+            setSendTargetStreetAddresses([]);
+            setSendModalOpen(true);
+          }}
+          onSendStreet={(suburb, street, addresses) => {
+            const mapSuburb = suburb || reportSuburbFilter || effectiveTodayRunData?.suburb || firstPendingSuburb || suburbFilter;
+            const unsentAddresses = addresses.filter((address) => Boolean(address.id));
+            if (unsentAddresses.length === 0) return;
+            for (const address of unsentAddresses) mapSendIdsRef.current.add(address.id);
+            setSendTargetSuburb(mapSuburb);
+            setSendTargetStreet(street);
+            setSendTargetStreetAddresses(unsentAddresses);
+            setSendTargetIds(unsentAddresses.map((address) => address.id));
             setSendModalOpen(true);
           }}
         />
@@ -4649,6 +4669,8 @@ export default function OutreachPage() {
         }}
         selectedIds={sendTargetIds}
         suburb={sendTargetSuburb}
+        streetName={sendTargetStreet || undefined}
+        streetAddresses={sendTargetStreet ? sendTargetStreetAddresses : undefined}
         onSuccess={() => {
           showNotification('success', 'Report dispatch logged successfully');
           clearSelected();

@@ -32,6 +32,8 @@ interface SendReportModalProps {
   onClose: () => void;
   selectedIds: string[];
   suburb: string;
+  streetName?: string;
+  streetAddresses?: Array<{ id: string; address: string }>;
   onSuccess: () => void;
   onOptimisticSend?: (ids: string[]) => () => void;
   onConfirmed?: (ids: string[]) => void;
@@ -70,6 +72,8 @@ export default function SendReportModal({
   onClose,
   selectedIds,
   suburb,
+  streetName,
+  streetAddresses = [],
   onSuccess,
   onOptimisticSend,
   onConfirmed,
@@ -84,7 +88,10 @@ export default function SendReportModal({
   const [loading, setLoading] = useState<boolean>(false);
   const [fetchingReports, setFetchingReports] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [selectedAddressIds, setSelectedAddressIds] = useState<string[]>(selectedIds);
   const submissionSequenceRef = useRef(0);
+  const canSelectStreetAddresses = Boolean(streetName);
+  const targetIds = canSelectStreetAddresses ? selectedAddressIds : selectedIds;
 
   const reportSets = useMemo(() => buildReportSets(reports), [reports]);
 
@@ -93,7 +100,8 @@ export default function SendReportModal({
     submissionSequenceRef.current += 1;
     setLoading(false);
     setError('');
-  }, [isOpen]);
+    setSelectedAddressIds(selectedIds);
+  }, [isOpen, selectedIds]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,13 +160,13 @@ export default function SendReportModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedIds.length === 0) return;
+    if (targetIds.length === 0) return;
 
     const submissionId = ++submissionSequenceRef.current;
     setLoading(true);
     setError('');
 
-    const rollback = onOptimisticSend?.(selectedIds);
+    const rollback = onOptimisticSend?.(targetIds);
     onSuccess();
     onClose();
 
@@ -167,7 +175,7 @@ export default function SendReportModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          property_ids: selectedIds,
+          property_ids: targetIds,
           suburb_report_id: selectedReportId || undefined,
           report_title: customTitle,
           campaign_key: campaignKey,
@@ -179,11 +187,11 @@ export default function SendReportModal({
         const data = await res.json();
         throw new Error(data.error || 'Failed to record send log');
       }
-      onConfirmed?.(selectedIds);
+      onConfirmed?.(targetIds);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'An error occurred';
       rollback?.();
-      onFailure?.(message, selectedIds);
+      onFailure?.(message, targetIds);
       if (submissionSequenceRef.current === submissionId) setError(message);
     } finally {
       if (submissionSequenceRef.current === submissionId) setLoading(false);
@@ -191,16 +199,21 @@ export default function SendReportModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
-        <div className="px-6 py-5 bg-slate-900 text-white flex items-center justify-between">
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center overflow-y-auto bg-slate-900/60 backdrop-blur-sm p-4">
+      <div
+        data-testid="send-report-modal"
+        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl animate-in fade-in zoom-in-95 duration-200"
+      >
+        <div className="flex flex-shrink-0 items-center justify-between bg-slate-900 px-6 py-5 text-white">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-blue-600/30 flex items-center justify-center text-blue-400">
               <FaPaperPlane className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-base font-semibold">Send Market Report</h3>
-              <p className="text-xs text-slate-400">Selected {selectedIds.length} target addresses</p>
+              <h3 className="text-base font-semibold">
+                {streetName ? 'Send Market Report for this Street' : 'Send Market Report'}
+              </h3>
+              <p className="text-xs text-slate-400">Selected {targetIds.length} target addresses</p>
             </div>
           </div>
           <button
@@ -211,7 +224,53 @@ export default function SendReportModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div data-testid="send-report-modal-scroll" className="min-h-0 flex-1 overflow-y-auto px-6 pt-6 pb-4">
+            <div className="space-y-4">
+            {streetName && (
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 tracking-wider mb-1.5">
+                Street
+              </label>
+              <input
+                type="text"
+                value={streetName}
+                readOnly
+                aria-label="Street"
+                className="w-full h-10 px-3 text-sm bg-slate-100 border border-slate-200 rounded-xl text-slate-700"
+              />
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-700 tracking-wider">Addresses to Send</span>
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700"
+                  onClick={() => setSelectedAddressIds(
+                    selectedAddressIds.length === streetAddresses.length
+                      ? []
+                      : streetAddresses.map((item) => item.id)
+                  )}
+                >
+                  {selectedAddressIds.length === streetAddresses.length ? 'Clear all' : 'Select all'}
+                </button>
+              </div>
+              <div className="mt-2 max-h-36 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                {streetAddresses.map((item) => (
+                  <label key={item.id} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedAddressIds.includes(item.id)}
+                      onChange={(event) => setSelectedAddressIds((current) =>
+                        event.target.checked
+                          ? [...current, item.id]
+                          : current.filter((id) => id !== item.id)
+                      )}
+                    />
+                    <span>{item.address}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-600 font-medium">
               {error}
@@ -219,7 +278,7 @@ export default function SendReportModal({
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-semibold text-slate-700 tracking-wider mb-1.5">
               Select Report Set (from PDF Manager)
             </label>
             {fetchingReports ? (
@@ -251,7 +310,7 @@ export default function SendReportModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-semibold text-slate-700 tracking-wider mb-1.5">
               Report Title
             </label>
             <input
@@ -264,7 +323,7 @@ export default function SendReportModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-semibold text-slate-700 tracking-wider mb-1.5">
               Campaign Identifier
             </label>
             <input
@@ -277,7 +336,7 @@ export default function SendReportModal({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+            <label className="block text-xs font-semibold text-slate-700 tracking-wider mb-1.5">
               Dispatch Notes (Optional)
             </label>
             <textarea
@@ -288,8 +347,9 @@ export default function SendReportModal({
               className="w-full p-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 resize-none"
             />
           </div>
-
-          <div className="pt-2 flex items-center justify-end space-x-3">
+            </div>
+          </div>
+          <div className="flex flex-shrink-0 items-center justify-end space-x-3 border-t border-slate-100 bg-white px-6 py-4">
             <button
               type="button"
               onClick={onClose}
@@ -299,7 +359,7 @@ export default function SendReportModal({
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || targetIds.length === 0}
               className="px-5 py-2.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl shadow-lg shadow-blue-600/20 transition-all flex items-center space-x-2 disabled:opacity-50"
             >
               {loading ? (

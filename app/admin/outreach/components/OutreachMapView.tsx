@@ -46,19 +46,28 @@ export function applyOptimisticSentIds(
   coordsData: ClusterPayload | null,
   optimisticSentIds: string[] = []
 ): ClusterPayload | null {
-  if (!coordsData || optimisticSentIds.length === 0) return coordsData;
+  return applyOptimisticAddressStatuses(coordsData, optimisticSentIds);
+}
+
+export function applyOptimisticAddressStatuses(
+  coordsData: ClusterPayload | null,
+  optimisticSentIds: string[] = [],
+  optimisticJunkIds: string[] = []
+): ClusterPayload | null {
+  if (!coordsData || (optimisticSentIds.length === 0 && optimisticJunkIds.length === 0)) return coordsData;
   const sentIds = new Set(optimisticSentIds);
+  const junkIds = new Set(optimisticJunkIds);
   return {
     ...coordsData,
     groups: coordsData.groups.map((group) => ({
       ...group,
       streets: group.streets.map((street) => ({
         ...street,
-        addressCoords: street.addressCoords?.map((address) =>
-          address.id && sentIds.has(address.id)
-            ? { ...address, sent: true, status: 'sent' as const }
-            : address
-        ),
+        addressCoords: street.addressCoords?.map((address) => {
+          if (address.id && sentIds.has(address.id)) return { ...address, sent: true, status: 'sent' as const };
+          if (address.id && junkIds.has(address.id)) return { ...address, status: 'junk' as const };
+          return address;
+        }),
       })),
     })),
   };
@@ -75,13 +84,16 @@ export interface OutreachMapViewProps {
   onCoordsLoaded?: (
     streetStatusMap: Map<string, 'has-unsent' | 'all-sent' | 'junk-only' | 'no-pending'>,
     counts: { total: number; unsent: number; sent: number; junk: number },
-    sentAddressIds: string[]
+    sentAddressIds: string[],
+    junkAddressIds?: string[]
   ) => void;
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   onStatusFilterChange?: (status: 'all' | 'unsent' | 'sent' | 'junk') => void;
   onMarkAsJunk?: (id: string, suburb: string) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
+  onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
   optimisticSentIds?: string[];
+  optimisticJunkIds?: string[];
   refreshKey?: number | string;
   isVisible?: boolean;
 }
@@ -95,7 +107,7 @@ function dotScaleForZoom(zoom: number, isUnsent: boolean): number | null {
   return isUnsent ? 6 : 5;
 }
 
-function buildAddressInfoWindowContent(address: string, statusLabel: string, color: string, suburb?: string, id?: string | null, onMarkAsJunk?: (id: string, suburb: string) => void, onMarkAsSent?: (id: string, suburb: string) => void): HTMLElement {
+function buildAddressInfoWindowContent(address: string, statusLabel: string, color: string, suburb?: string, id?: string | null, street?: string, streetAddresses?: Array<{ id: string; address: string }>, onMarkAsJunk?: (id: string, suburb: string) => void, onMarkAsSent?: (id: string, suburb: string) => void, onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void): HTMLElement {
   const container = document.createElement('div');
   container.style.cssText = 'padding:8px 10px;min-width:210px;font-family:inherit;';
   const row = document.createElement('div');
@@ -134,6 +146,17 @@ function buildAddressInfoWindowContent(address: string, statusLabel: string, col
     btnRow.appendChild(btnSent);
   }
   container.appendChild(btnRow);
+  if (statusLabel === 'Unsent' && street && streetAddresses?.length && onSendStreet) {
+    const btnStreet = document.createElement('button');
+    btnStreet.type = 'button';
+    btnStreet.textContent = 'Send for Street';
+    btnStreet.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;border:1px solid #2563eb;color:#2563eb;background:#eff6ff;border-radius:4px;cursor:pointer;font-weight:600;';
+    btnStreet.onclick = (e) => {
+      e.stopPropagation();
+      onSendStreet(suburb ?? '', street, streetAddresses);
+    };
+    container.appendChild(btnStreet);
+  }
   const link = document.createElement('a');
   link.href = `https://www.google.com/maps?q=${encodeURIComponent([address, suburb].filter(Boolean).join(', '))}`;
   link.target = '_blank';
@@ -187,6 +210,7 @@ function NativeMarkerManager({
   statusFilter = 'all',
   onMarkAsJunk,
   onMarkAsSent,
+  onSendStreet,
 }: {
   map: google.maps.Map;
   groups: Array<{ suburb?: string; streets: ClusterStreet[] }>;
@@ -196,6 +220,7 @@ function NativeMarkerManager({
   statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
   onMarkAsJunk?: (id: string, suburb: string) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
+  onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
 }) {
   const onStreetSelectRef = useRef(onStreetSelect);
   onStreetSelectRef.current = onStreetSelect;
@@ -203,6 +228,8 @@ function NativeMarkerManager({
   onMarkAsJunkRef.current = onMarkAsJunk;
   const onMarkAsSentRef = useRef(onMarkAsSent);
   onMarkAsSentRef.current = onMarkAsSent;
+  const onSendStreetRef = useRef(onSendStreet);
+  onSendStreetRef.current = onSendStreet;
 
   const [zoom, setZoom] = useState<number>(() => map.getZoom() ?? 12);
   useEffect(() => {
@@ -324,7 +351,25 @@ function NativeMarkerManager({
               infoWindowRef.current?.close();
               onMarkAsSentRef.current?.(addressId, addressSuburb);
             };
-            infoWindowRef.current.setContent(buildAddressInfoWindowContent(a.address, statusLabel, dotColor, suburb, a.id ?? undefined, handleJunk, handleSent));
+            const unsentStreetAddresses = (street.addressCoords ?? [])
+              .filter((address) => address.status === 'unsent' && address.id)
+              .map((address) => ({ id: address.id as string, address: address.address }));
+            const handleSendStreet = (addressSuburb: string, addressStreet: string, addresses: Array<{ id: string; address: string }>) => {
+              infoWindowRef.current?.close();
+              onSendStreetRef.current?.(addressSuburb, addressStreet, addresses);
+            };
+            infoWindowRef.current.setContent(buildAddressInfoWindowContent(
+              a.address,
+              statusLabel,
+              dotColor,
+              suburb,
+              a.id ?? undefined,
+              streetName,
+              unsentStreetAddresses,
+              handleJunk,
+              handleSent,
+              handleSendStreet
+            ));
             infoWindowRef.current.setPosition({ lat: a.lat, lng: a.lng });
             infoWindowRef.current.open(map);
           });
@@ -378,6 +423,7 @@ function MapInner({
   statusFilter,
   onMarkAsJunk,
   onMarkAsSent,
+  onSendStreet,
 }: {
   coordsData: ClusterPayload | null;
   activeRunId: number | null;
@@ -388,6 +434,7 @@ function MapInner({
   statusFilter: 'all' | 'unsent' | 'sent' | 'junk';
   onMarkAsJunk?: (id: string, suburb: string) => void;
   onMarkAsSent?: (id: string, suburb: string) => void;
+  onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
 }) {
   const map = useMap();
   const [legendVisible, setLegendVisible] = useState(true);
@@ -465,6 +512,7 @@ function MapInner({
             statusFilter={statusFilter}
             onMarkAsJunk={onMarkAsJunk}
             onMarkAsSent={onMarkAsSent}
+            onSendStreet={onSendStreet}
           />
         )}
       </div>
@@ -483,11 +531,15 @@ export default function OutreachMapView({
   statusFilter: externalStatusFilter = 'all',
   onMarkAsJunk,
   onMarkAsSent,
+  onSendStreet,
   optimisticSentIds,
+  optimisticJunkIds,
   refreshKey,
   isVisible = true,
 }: OutreachMapViewProps) {
   const [coordsData, setCoordsData] = useState<ClusterPayload | null>(null);
+  const [localOptimisticSentIds, setLocalOptimisticSentIds] = useState<string[]>([]);
+  const [localOptimisticJunkIds, setLocalOptimisticJunkIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
@@ -565,7 +617,11 @@ export default function OutreachMapView({
 
     const nearestPoint = computeNearestUnsent(
       userLocation,
-      applyOptimisticSentIds(coordsData, optimisticSentIds)
+      applyOptimisticAddressStatuses(
+        coordsData,
+        optimisticSentIds ?? localOptimisticSentIds,
+        optimisticJunkIds ?? localOptimisticJunkIds
+      )
     );
     setNearest(nearestPoint ? { address: nearestPoint.address, suburb: nearestPoint.suburb, distanceM: nearestPoint.distanceM } : null);
 
@@ -581,7 +637,7 @@ export default function OutreachMapView({
       userMarkerRef.current = null;
       userCircleRef.current = null;
     };
-  }, [userLocation, coordsData, optimisticSentIds]);
+  }, [userLocation, coordsData, optimisticSentIds, optimisticJunkIds, localOptimisticSentIds, localOptimisticJunkIds]);
 
   useEffect(() => {
     return () => {
@@ -597,8 +653,12 @@ export default function OutreachMapView({
   const coordsDataRef = useRef(coordsData);
   coordsDataRef.current = coordsData;
   const displayedCoordsData = useMemo(
-    () => applyOptimisticSentIds(coordsData, optimisticSentIds),
-    [coordsData, optimisticSentIds]
+    () => applyOptimisticAddressStatuses(
+      coordsData,
+      optimisticSentIds ?? localOptimisticSentIds,
+      optimisticJunkIds ?? localOptimisticJunkIds
+    ),
+    [coordsData, optimisticSentIds, optimisticJunkIds, localOptimisticSentIds, localOptimisticJunkIds]
   );
 
   const loadCoords = useCallback(async (force = false) => {
@@ -628,6 +688,7 @@ export default function OutreachMapView({
         let sentCount = 0;
         let junkCount = 0;
         const sentAddressIds: string[] = [];
+        const junkAddressIds: string[] = [];
         for (const g of (body.groups ?? []) as Array<{ streets: ClusterStreet[] }>) {
           for (const s of g.streets ?? []) {
             const coords = s.addressCoords ?? [];
@@ -648,7 +709,10 @@ export default function OutreachMapView({
                 sentCount++;
                 if (c.id) sentAddressIds.push(c.id);
               }
-              else if (c.status === 'junk') junkCount++;
+              else if (c.status === 'junk') {
+                junkCount++;
+                if (c.id) junkAddressIds.push(c.id);
+              }
             }
           }
         }
@@ -657,7 +721,7 @@ export default function OutreachMapView({
           unsent: unsentCount,
           sent: sentCount,
           junk: junkCount,
-        }, sentAddressIds);
+        }, sentAddressIds, junkAddressIds);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -666,6 +730,7 @@ export default function OutreachMapView({
 
   const handleMarkAsJunk = useCallback(async (id: string, addressSuburb: string) => {
     if (!id) return;
+    setLocalOptimisticJunkIds((ids) => [...new Set([...ids, id])]);
     try {
       const quarter = parseReportQuarter(reportQuarter);
       const res = await fetch(`/api/admin/outreach/${id}`, {
@@ -681,24 +746,26 @@ export default function OutreachMapView({
         throw new Error(err.error || 'Failed to mark as junk');
       }
       await res.json();
-      await loadCoords(true);
     } catch (err) {
+      setLocalOptimisticJunkIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
       console.error('Mark as junk failed:', err);
     }
-  }, [loadCoords, reportQuarter]);
+  }, [reportQuarter]);
 
   const handleMarkAsSent = useCallback(async (id: string) => {
+    if (!id) return;
+    setLocalOptimisticSentIds((ids) => [...new Set([...ids, id])]);
     try {
       const res = await fetch(`/api/admin/outreach/${id}/mark-sent`, {
         method: 'PATCH',
       });
       if (!res.ok) throw new Error('Failed to mark as sent');
       await res.json();
-      await loadCoords(true);
     } catch (error) {
+      setLocalOptimisticSentIds((ids) => ids.filter((optimisticId) => optimisticId !== id));
       console.error('Mark as sent failed:', error);
     }
-  }, [loadCoords]);
+  }, []);
 
   useEffect(() => { if (suburb) loadCoords(); }, [suburb, loadCoords]);
 
@@ -828,6 +895,7 @@ export default function OutreachMapView({
           statusFilter={statusFilter}
           onMarkAsJunk={onMarkAsJunk ?? handleMarkAsJunk}
           onMarkAsSent={onMarkAsSent ?? handleMarkAsSent}
+          onSendStreet={onSendStreet}
         />
         <button
           type="button"

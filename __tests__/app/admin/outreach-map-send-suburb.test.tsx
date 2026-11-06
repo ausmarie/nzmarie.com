@@ -31,10 +31,13 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
   default: (props: {
     onMarkAsSent?: (id: string, suburb: string) => void;
     onMarkAsJunk?: (id: string, suburb: string) => void | Promise<void>;
+    onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
     optimisticSentIds?: string[];
+    optimisticJunkIds?: string[];
     refreshKey?: number | string;
     isVisible?: boolean;
     statusFilter?: 'all' | 'unsent' | 'sent' | 'junk';
+    onStatusFilterChange?: (status: 'all' | 'unsent' | 'sent' | 'junk') => void;
   }) => (
     <div
       data-testid="map-stub"
@@ -42,6 +45,7 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
       data-visible={String(props.isVisible)}
       data-status-filter={props.statusFilter}
       data-optimistic-sent-ids={props.optimisticSentIds?.join(',') ?? ''}
+      data-optimistic-junk-ids={props.optimisticJunkIds?.join(',') ?? ''}
     >
       <button
         type="button"
@@ -60,6 +64,21 @@ vi.mock('../../../app/admin/outreach/components/DynamicMapView', () => ({
         onClick={() => { void props.onMarkAsJunk?.('junk-address-1', 'Torbay'); }}
       >
         Map Junk
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onStatusFilterChange?.('unsent')}
+      >
+        Map Unsent
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onSendStreet?.('Torbay', 'Glamorgan Drive', [
+          { id: 'map-address-1', address: '1 Glamorgan Drive' },
+          { id: 'map-address-2', address: '5 Glamorgan Drive' },
+        ])}
+      >
+        Map Send for Street
       </button>
     </div>
   ),
@@ -269,7 +288,51 @@ describe('Outreach map Sent modal suburb', () => {
     deferredSendResponses[0]({ ok: true, json: async () => ({ success: true }) });
   });
 
-  it('batches multiple junk updates into one refresh when returning from cards', async () => {
+  it('opens the street dispatch with a locked street name and sends only selected addresses', async () => {
+    deferredSendResponses = [];
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Map$/ }));
+
+    const map = screen.getByTestId('map-stub');
+    const initialRefreshKey = map.getAttribute('data-refresh-key');
+    fireEvent.click(screen.getByRole('button', { name: 'Map Send for Street' }));
+
+    expect(await screen.findByText('Send Market Report for this Street')).toBeTruthy();
+    const streetField = screen.getByRole('textbox', { name: 'Street' }) as HTMLInputElement;
+    expect(streetField.value).toBe('Glamorgan Drive');
+    expect(streetField.readOnly).toBe(true);
+    const modal = screen.getByTestId('send-report-modal');
+    const modalScroll = screen.getByTestId('send-report-modal-scroll');
+    expect(modal.className).toContain('max-h-[calc(100dvh-2rem)]');
+    expect(modalScroll.className).toContain('overflow-y-auto');
+    expect(modalScroll.contains(screen.getByRole('button', { name: 'Confirm Dispatch Log' }))).toBe(false);
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+
+    const addressCheckboxes = screen.getAllByRole('checkbox');
+    expect(addressCheckboxes).toHaveLength(2);
+    expect((addressCheckboxes[0] as HTMLInputElement).checked).toBe(true);
+    expect((addressCheckboxes[1] as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(addressCheckboxes[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Dispatch Log' }));
+
+    await waitFor(() => expect(deferredSendResponses).toHaveLength(1));
+    const sendCall = vi.mocked(global.fetch).mock.calls.find(([url]) =>
+      String(url).includes('/api/admin/outreach/send')
+    );
+    expect(sendCall).toBeDefined();
+    expect(JSON.parse(String(sendCall?.[1]?.body)).property_ids).toEqual(['map-address-1']);
+    expect(map.getAttribute('data-optimistic-sent-ids')).toBe('map-address-1');
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+
+    deferredSendResponses[0]({ ok: true, json: async () => ({ success: true }) });
+    await waitFor(() => {
+      expect(map.getAttribute('data-optimistic-sent-ids')).toBe('map-address-1');
+    });
+    expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
+  });
+
+  it('optimistically marks junk yellow and hides it in the Unsent filter without refreshing the map', async () => {
     render(<OutreachPage />);
     fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
     fireEvent.click(await screen.findByRole('button', { name: /2026-Q3/ }));
@@ -277,6 +340,8 @@ describe('Outreach map Sent modal suburb', () => {
 
     const map = screen.getByTestId('map-stub');
     const initialRefreshKey = map.getAttribute('data-refresh-key');
+    fireEvent.click(screen.getByRole('button', { name: 'Map Unsent' }));
+    expect(map.getAttribute('data-status-filter')).toBe('unsent');
     fireEvent.click(screen.getByRole('button', { name: 'Map Junk' }));
     fireEvent.click(screen.getByRole('button', { name: 'Map Junk' }));
 
@@ -286,6 +351,7 @@ describe('Outreach map Sent modal suburb', () => {
       );
       expect(junkRequests).toHaveLength(2);
     });
+    expect(map.getAttribute('data-optimistic-junk-ids')).toBe('junk-address-1');
     expect(map.getAttribute('data-refresh-key')).toBe(initialRefreshKey);
 
     fireEvent.click(screen.getByTitle('Card View'));

@@ -35,7 +35,7 @@ vi.mock('@googlemaps/markerclusterer', () => {
   };
 });
 
-import OutreachMapView, { applyOptimisticSentIds } from '../../app/admin/outreach/components/OutreachMapView';
+import OutreachMapView, { applyOptimisticAddressStatuses, applyOptimisticSentIds } from '../../app/admin/outreach/components/OutreachMapView';
 
 const mockFitBounds = vi.fn();
 
@@ -265,6 +265,16 @@ describe('OutreachMapView', () => {
     expect(payload.groups[0].streets[0].addressCoords[0].status).toBe('unsent');
   });
 
+  it('optimistically marks an address as junk without mutating fetched data', () => {
+    const payload = coordsPayload([{ runId: 1, totalPending: 12 }]);
+
+    const updated = applyOptimisticAddressStatuses(payload, [], ['out-1']);
+
+    expect(updated?.groups[0].streets[0].addressCoords?.[0].status).toBe('junk');
+    expect(updated?.groups[0].streets[0].addressCoords?.[0].sent).toBe(false);
+    expect(payload.groups[0].streets[0].addressCoords[0].status).toBe('unsent');
+  });
+
   it('renders map canvas and status legend', async () => {
     installMockMap();
     const fetchMock = vi.fn(async () => {
@@ -346,8 +356,8 @@ describe('OutreachMapView', () => {
                   runId: 1,
                   addresses: ['1 Glamorgan Drive', '5 Glamorgan Drive', '10 Glamorgan Drive'],
                   addressCoords: [
-                    { address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
-                    { address: '5 Glamorgan Drive', lat: -36.692, lng: 174.741, sent: false, status: 'unsent' },
+                      { id: 'out-1', address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
+                    { id: 'out-2', address: '5 Glamorgan Drive', lat: -36.692, lng: 174.741, sent: false, status: 'unsent' },
                   ],
                 },
               ],
@@ -366,6 +376,7 @@ describe('OutreachMapView', () => {
         sentStatus="unsent"
         onRunSelect={vi.fn()}
         onStreetSelect={vi.fn()}
+        onSendStreet={vi.fn()}
       />
     );
 
@@ -469,6 +480,7 @@ describe('OutreachMapView', () => {
     (globalThis.google as any).maps.InfoWindow = InfoWindowMock;
 
     const dotClickHandlers: Array<() => void> = [];
+    const sendStreet = vi.fn();
     const OriginalMarker = (globalThis.google as any).maps.Marker;
     (globalThis.google as any).maps.Marker = class extends OriginalMarker {
       constructor(opts: any) {
@@ -496,8 +508,8 @@ describe('OutreachMapView', () => {
                 pendingCount: 2,
                 runId: 1,
                 addressCoords: [
-                  { address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
-                  { address: '5 Glamorgan Drive', lat: -36.692, lng: 174.741, sent: false, status: 'unsent' },
+                  { id: 'out-1', address: '1 Glamorgan Drive', lat: -36.69, lng: 174.74, sent: false, status: 'unsent' },
+                  { id: 'out-2', address: '5 Glamorgan Drive', lat: -36.692, lng: 174.741, sent: false, status: 'unsent' },
                 ],
               },
             ],
@@ -516,6 +528,7 @@ describe('OutreachMapView', () => {
         selectedStreet="Glamorgan Drive"
         onRunSelect={vi.fn()}
         onStreetSelect={vi.fn()}
+        onSendStreet={sendStreet}
       />
     );
 
@@ -539,10 +552,18 @@ describe('OutreachMapView', () => {
     expect(addressHref).toContain('Torbay');
     expect(addressLink?.getAttribute('target')).toBe('_blank');
     expect(addressLink?.getAttribute('rel')).toContain('noopener');
+    const sendStreetButton = Array.from((openedContents[0] as HTMLElement).querySelectorAll('button'))
+      .find((button) => button.textContent === 'Send for Street');
+    expect(sendStreetButton).toBeTruthy();
+    fireEvent.click(sendStreetButton!);
+    expect(sendStreet).toHaveBeenCalledWith('Torbay', 'Glamorgan Drive', [
+      { id: 'out-1', address: '1 Glamorgan Drive' },
+      { id: 'out-2', address: '5 Glamorgan Drive' },
+    ]);
     expect((InfoWindowMock as unknown as { instances: unknown[] }).instances.length).toBe(1);
   });
 
-  it('refetches coordinates after marking an address as sent', async () => {
+  it('does not refetch coordinates after marking an address as sent', async () => {
     installMockMap();
     const markerClicks: Array<() => void> = [];
     const OriginalMarker = (globalThis.google as any).maps.Marker;
@@ -605,12 +626,13 @@ describe('OutreachMapView', () => {
     expect(sentButton).toBeTruthy();
     fireEvent.click(sentButton!);
 
-    await waitFor(() => {
-      const clusterRequests = fetchMock.mock.calls.filter(([requestUrl]) =>
-        String(requestUrl).includes('/api/admin/outreach/street-clusters')
-      );
-      expect(clusterRequests).toHaveLength(2);
-    });
+    await waitFor(() => expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')
+    ).toBe(true));
+    const clusterRequests = fetchMock.mock.calls.filter(([requestUrl]) =>
+      String(requestUrl).includes('/api/admin/outreach/street-clusters')
+    );
+    expect(clusterRequests).toHaveLength(1);
   });
 
   it('shows the nearest unsent address after locating', async () => {
