@@ -4661,7 +4661,6 @@ export default function OutreachPage() {
               mapSendIdsRef.current.delete(id);
               submittedMapSendIdsRef.current.delete(id);
             }
-            setMapRefreshKey((k) => k + 1);
             mapDataChangedRef.current = false;
             mapDataCardsReturnRef.current = false;
           } else {

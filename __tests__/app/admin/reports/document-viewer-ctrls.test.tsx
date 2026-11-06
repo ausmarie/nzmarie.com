@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
 import DocumentViewer from '@/app/admin/reports/components/DocumentViewer';
 import { useReportStore } from '@/app/admin/reports/stores/report-store';
@@ -90,7 +90,7 @@ describe('DocumentViewer Ctrl+S save', () => {
     vi.mocked(global.fetch).mockClear();
 
     const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true });
-    window.dispatchEvent(event);
+    fireEvent(window, event);
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(

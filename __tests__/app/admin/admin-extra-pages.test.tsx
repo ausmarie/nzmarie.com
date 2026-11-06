@@ -60,7 +60,7 @@ describe('Extra admin pages', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            stats: { newLeads: 0, highPriorityLeads: 0, pendingOutreach: 0, todayFollowups: 0, overdueFollowups: 0, todayDownloads: 0, sentOutreach: 0, totalDownloads: 0, monthDownloads: 0, totalBookings: 0, monthBookings: 0, qrCodesTotal: 0, pdfReportsTotal: 0, outreachBySuburb: [], recentDownloads: [] },
+            stats: { totalLeads: 0, monthLeads: 0, leadsBySuburb: [], highPriorityLeads: 0, pendingOutreach: 0, todayFollowups: 0, overdueFollowups: 0, todayDownloads: 0, sentOutreach: 0, totalDownloads: 0, monthDownloads: 0, totalBookings: 0, monthBookings: 0, qrCodesTotal: 0, pdfReportsTotal: 0, outreachBySuburb: [], recentDownloads: [] },
             followups: []
           })
         }) as any;
@@ -152,7 +152,7 @@ describe('Extra admin pages', () => {
       </QueryClientProvider>
     );
     expect(await screen.findByText('Dashboard')).toBeTruthy();
-    expect(await screen.findByText('New Leads')).toBeTruthy();
+    expect(await screen.findByText('Total Leads')).toBeTruthy();
     expect(screen.getByText('High Priority')).toBeTruthy();
   });
 
