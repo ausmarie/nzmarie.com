@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { mockFitBounds, mockMap } = vi.hoisted(() => {
@@ -363,7 +363,7 @@ describe('OutreachMapView', () => {
     expect(onToggleJunk).toHaveBeenCalledWith('out-1', 'Torbay', true);
   });
 
-  it('renders map canvas and status legend', async () => {
+  it('renders map canvas without the status legend', async () => {
     installMockMap();
     const fetchMock = vi.fn(async () => {
       return {
@@ -388,7 +388,8 @@ describe('OutreachMapView', () => {
     );
 
     expect(await screen.findByTestId('map-canvas')).toBeTruthy();
-    expect(screen.getByText('Unsent')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Close legend' })).toBeNull();
+    expect(screen.queryByText('No junk mail')).toBeNull();
   });
 
   it('shows an inline error when the coords request fails', async () => {
@@ -850,11 +851,21 @@ describe('OutreachMapView', () => {
     });
   });
 
-  it('closes the legend when its close button is clicked', async () => {
+  it('automatically hides the location panel five seconds after locating', async () => {
     installMockMap();
+    mockMap.getZoom.mockReturnValue(13);
+    Object.defineProperty(globalThis.navigator, 'geolocation', {
+      configurable: true,
+      value: {
+        getCurrentPosition: vi.fn((success: (pos: { coords: { latitude: number; longitude: number; accuracy: number } }) => void) =>
+          success({ coords: { latitude: -36.6895, longitude: 174.7395, accuracy: 30 } })
+        ),
+      },
+    });
+
     const fetchMock = vi.fn(async () => ({
       ok: true,
-      json: async () => coordsPayload([{ runId: 1, totalPending: 12 }]),
+      json: async () => coordsPayload([{ runId: 1, totalPending: 1 }]),
     }));
     global.fetch = fetchMock as unknown as typeof fetch;
 
@@ -868,18 +879,23 @@ describe('OutreachMapView', () => {
       />
     );
 
-    await waitFor(() => {
-      expect(screen.getByText('Unsent')).toBeTruthy();
-    });
-    expect(screen.getByText('Sent')).toBeTruthy();
-    expect(screen.getByText('No junk mail')).toBeTruthy();
+    await screen.findByTestId('map-canvas');
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Locate me' }));
+      expect(screen.getByText('Your location')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Close legend' }));
+      act(() => {
+        vi.advanceTimersByTime(4999);
+      });
+      expect(screen.getByText('Your location')).toBeTruthy();
 
-    await waitFor(() => {
-      expect(screen.queryByText('Unsent')).toBeNull();
-      expect(screen.queryByText('Sent')).toBeNull();
-      expect(screen.queryByText('No junk mail')).toBeNull();
-    });
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByText('Your location')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

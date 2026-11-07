@@ -455,7 +455,6 @@ function MapInner({
   onSendStreet?: (suburb: string, street: string, addresses: Array<{ id: string; address: string }>) => void;
 }) {
   const map = useMap();
-  const [legendVisible, setLegendVisible] = useState(true);
 
   useEffect(() => {
     if (map) onMapLoad(map);
@@ -470,44 +469,6 @@ function MapInner({
           padding: '4px 8px', borderRadius: 6, fontSize: '0.85rem',
         }}>
           {error}
-        </div>
-      )}
-
-      {coordsData && legendVisible && (
-        <div style={{
-          position: 'absolute', left: 12, bottom: 28, zIndex: 50,
-          background: 'rgba(255,255,255,.95)', border: '1px solid #e5e7eb',
-          borderRadius: 8, padding: '6px 10px', fontSize: '11px', color: '#374151',
-          display: 'flex', flexDirection: 'column', gap: 3,
-          boxShadow: '0 1px 4px rgba(0,0,0,.12)', pointerEvents: 'none',
-        }}>
-          <button
-            type="button"
-            onClick={() => setLegendVisible(false)}
-            aria-label="Close legend"
-            title="Close legend"
-            style={{
-              position: 'absolute', top: 2, right: 2,
-              pointerEvents: 'auto', width: 18, height: 18, borderRadius: '50%',
-              border: 'none', background: '#e5e7eb', color: '#4b5563',
-              cursor: 'pointer', display: 'flex', alignItems: 'center',
-              justifyContent: 'center', fontSize: 9, lineHeight: 1,
-            }}
-          >
-            <FaTimes />
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#dc2626', border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,.2)', flexShrink: 0 }} />
-            Unsent
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#7c3aed', border: '2px solid #fff', flexShrink: 0 }} />
-            Sent
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#eab308', border: '2px solid #fff', flexShrink: 0 }} />
-            No junk mail
-          </div>
         </div>
       )}
 
@@ -574,6 +535,12 @@ export default function OutreachMapView({
   const userMarkerRef = useRef<google.maps.Marker | null>(null);
   const userCircleRef = useRef<google.maps.Circle | null>(null);
   const lastFetchParamsRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!userLocation) return;
+    const timeout = window.setTimeout(() => setLocationPanelOpen(false), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [userLocation]);
 
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen((f) => !f);
