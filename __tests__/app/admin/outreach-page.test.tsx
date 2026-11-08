@@ -2526,6 +2526,68 @@ describe('Outreach page - Last Sold resets to All when default report applies', 
     expect(await screen.findByText('Sent · 2026-Q2 · 2 Jun 2026, 2:30 am')).toBeTruthy();
     expect(screen.queryByText('Oteha · 2026-Q2 report')).toBeNull();
   });
+
+  it('uses the same Sent format for quarterly and monthly report cards', async () => {
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const requestUrl = String(url || '');
+      if (requestUrl.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            reports: [{ id: 'r2', suburb: 'Oteha', quarter: 'Q2', year: 2026, label: '2026-Q2' }],
+          }),
+        });
+      }
+      if (requestUrl.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, defaultReport: { suburb: 'Oteha', label: '2026-Q2' } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              id: 'quarterly-1',
+              property_address: '4 Quarterly Road',
+              suburb: 'Oteha',
+              city: 'North Shore City',
+              region: 'Auckland',
+              status: 'pending',
+              latest_send_title: 'Oteha 2026 Q2 Market Report',
+              latest_send_quarter: 'Q2',
+              latest_send_year: 2026,
+              latest_sent_at: '2026-06-01T14:30:00.000Z',
+            },
+            {
+              id: 'monthly-1',
+              property_address: '5 Monthly Road',
+              suburb: 'Oteha',
+              city: 'North Shore City',
+              region: 'Auckland',
+              status: 'pending',
+              latest_send_title: 'Oteha September Market Report',
+              latest_campaign: '2026_09_Oteha',
+              latest_sent_at: '2026-09-10T14:30:00.000Z',
+            },
+          ],
+          pagination: { page: 1, limit: 50, total: 2, totalPages: 1 },
+        }),
+      });
+    });
+
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+
+    expect(await screen.findByText('Sent · 2026-Q2 · 2 Jun 2026, 2:30 am')).toBeTruthy();
+    await screen.findByText('5 Monthly Road');
+    expect(await screen.findByText('Sent · 2026-09 · 11 Sept 2026, 2:30 am')).toBeTruthy();
+    expect(screen.queryByText('Oteha 2026 Q2 Market Report')).toBeNull();
+    expect(screen.queryByText('Oteha September Market Report')).toBeNull();
+  });
 });
 
 describe('Outreach page - scroll to top after actions', () => {

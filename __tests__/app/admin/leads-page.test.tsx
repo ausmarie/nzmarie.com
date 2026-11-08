@@ -349,6 +349,18 @@ describe('LeadsPage refresh behavior', () => {
     expect(content.indexOf('Property Basic Information')).toBeLessThan(content.indexOf('Property History'));
   });
 
+  it('shows the exact New Zealand send time in Lead Sent history', async () => {
+    render(<LeadsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('249 Sunset Road')).toBeTruthy();
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Lead' })[0]);
+
+    expect(await screen.findByText('18 Oct 2026, 1:00 pm')).toBeTruthy();
+    expect(screen.getByText('18 Jun 2026, 12:00 pm')).toBeTruthy();
+  });
+
   it('opens the appraisal PDF history from a lead card', async () => {
     render(<LeadsPage />);
 

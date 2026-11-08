@@ -28,7 +28,7 @@ import {
 import { aggregateLikedStreets, filterLikedItemsByStreet, extractStreetFromLikedItem } from '@/lib/liked-street-filter';
 import { SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import { openGoogleMaps, buildPropertyAddress } from '@/lib/clipboard';
-import { periodLabel, periodSortValue } from '@/lib/report-period';
+import { parsePeriodParts, periodLabel, periodSortValue } from '@/lib/report-period';
 import { getOutreachPageSize } from '@/lib/outreach-pagination';
 
 interface OutreachProperty {
@@ -111,6 +111,25 @@ function formatOutreachDateTime(value: string): string {
     timeStyle: 'short',
     timeZone: 'Pacific/Auckland',
   });
+}
+
+function getLatestSendPeriod(prop: OutreachProperty): string | null {
+  const quarter = prop.latest_send_quarter?.toUpperCase();
+  if (
+    prop.latest_send_year &&
+    quarter &&
+    (/^Q[1-4]$/.test(quarter) || /^M?(0[1-9]|1[0-2])$/.test(quarter))
+  ) {
+    return periodLabel(prop.latest_send_year, quarter);
+  }
+
+  const campaignPeriod = prop.latest_campaign?.match(
+    /^(\d{4})[_-](Q[1-4]|M?(?:0[1-9]|1[0-2]))(?:[_-]|$)/i
+  );
+  if (!campaignPeriod) return null;
+
+  const label = periodLabel(Number(campaignPeriod[1]), campaignPeriod[2]);
+  return parsePeriodParts(label)?.label ?? null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -3770,6 +3789,20 @@ export default function OutreachPage() {
                       }}
                     >
                       Sent · {activeQuarter} · {formatOutreachDateTime(prop.quarter_sent_at)}
+                    </div>
+                  ) : (activeTab === 'pending' || activeTab === 'sent') &&
+                    (prop.latest_send_title || prop.latest_campaign) &&
+                    prop.latest_sent_at &&
+                    getLatestSendPeriod(prop) ? (
+                    <div
+                      aria-label={`Sent · ${getLatestSendPeriod(prop)} · ${formatOutreachDateTime(prop.latest_sent_at)}`}
+                      style={{
+                        fontSize: '0.8rem', color: '#7c3aed', marginBottom: '14px',
+                        padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px',
+                        border: '1px solid #ede9fe',
+                      }}
+                    >
+                      Sent · {getLatestSendPeriod(prop)} · {formatOutreachDateTime(prop.latest_sent_at)}
                     </div>
                   ) : (activeTab === 'pending' || activeTab === 'sent') && prop.latest_send_title && (
                     <div style={{

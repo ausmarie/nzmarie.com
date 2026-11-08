@@ -65,7 +65,7 @@ export function SendHistoryTable({ history }: SendHistoryTableProps) {
     }}>
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '100px 90px 1fr 100px 80px',
+        gridTemplateColumns: '100px 150px 1fr 100px 80px',
         backgroundColor: '#edf2f7',
         fontWeight: '700',
         color: '#4a5568',
@@ -74,24 +74,24 @@ export function SendHistoryTable({ history }: SendHistoryTableProps) {
         fontSize: '0.75rem',
       }}>
         <span>Quarter</span>
-        <span>Sent Date</span>
+        <span>Sent Date &amp; Time</span>
         <span>Report / Campaign</span>
         <span>Sent By</span>
         <span style={{ textAlign: 'center' }}>Scans</span>
       </div>
       {history.map((log, i) => {
         const quarter = extractQuarter(log.campaign_key, log.sent_at);
-        const sentDate = new Date(log.sent_at).toLocaleDateString('en-NZ', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
+        const sentDateTime = new Date(log.sent_at).toLocaleString('en-NZ', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+          timeZone: 'Pacific/Auckland',
         });
         return (
           <div
             key={log.log_id || i}
             style={{
               display: 'grid',
-              gridTemplateColumns: '100px 90px 1fr 100px 80px',
+              gridTemplateColumns: '100px 150px 1fr 100px 80px',
               padding: '8px 12px',
               borderBottom: i < history.length - 1 ? '1px solid #edf2f7' : 'none',
               color: '#2D3748',
@@ -103,7 +103,7 @@ export function SendHistoryTable({ history }: SendHistoryTableProps) {
               {quarter}
             </span>
             <span style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
-              {sentDate}
+              {sentDateTime}
             </span>
             <div style={{ minWidth: 0 }}>
               <p style={{ fontWeight: '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

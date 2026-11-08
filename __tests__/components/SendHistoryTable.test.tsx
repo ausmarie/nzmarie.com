@@ -89,6 +89,16 @@ describe('SendHistoryTable', () => {
     expect(container.textContent).toContain('10 Feb 2026');
   });
 
+  it('displays the exact sent date and time in New Zealand local time', () => {
+    const history = [{
+      ...mockHistory[0],
+      sent_at: '2026-06-01T14:30:00.000Z',
+    }];
+    render(<SendHistoryTable history={history} />);
+
+    expect(screen.getByText('2 Jun 2026, 2:30 am')).toBeTruthy();
+  });
+
   it('displays report title and campaign key', () => {
     const { container } = render(<SendHistoryTable history={mockHistory} />);
     expect(container.textContent).toContain('Q3 Market Report – Torbay');
