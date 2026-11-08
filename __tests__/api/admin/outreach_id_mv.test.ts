@@ -212,7 +212,7 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
     const transactionCalls = transactionQuery.mock.calls;
     const quarterStatus = transactionCalls.find(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'));
     expect(quarterStatus?.[0]).toContain('is_junk');
-    expect(quarterStatus?.[0]).toContain('junk_at');
+    expect(quarterStatus?.[0]).toContain('junk_at = NOW()');
     expect(quarterStatus?.[1]).toEqual(['test-id', 'report-id', 'Torbay', 'Q3', 2026]);
     expect((await response.json()).quarter_junk_recorded).toBe(true);
     expect(transactionCalls.some(([query]) => String(query).includes('UPDATE properties SET no_junk_mail'))).toBe(true);

@@ -2400,6 +2400,132 @@ describe('Outreach page - Last Sold resets to All when default report applies', 
     expect(marketScope().getByRole('button', { name: 'All' }).style.backgroundColor).not.toBe('white');
     expect(propTypeScope().getByRole('button', { name: 'House' }).style.backgroundColor).toBe('white');
   });
+
+  it('requests quarter-specific junk marks in Pending Sent when No Junk is selected', async () => {
+    const calls: string[] = [];
+    defaultReportFetch(calls);
+    render(<OutreachPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    await screen.findByRole('button', { name: 'Oteha ★' });
+    fireEvent.click(screen.getByRole('button', { name: 'Sent ✓' }));
+    fireEvent.click(screen.getByRole('button', { name: 'No Junk' }));
+
+    await waitFor(() => {
+      const request = calls.find(
+        (url) =>
+          url.includes('/api/admin/outreach?') &&
+          url.includes('status=pending') &&
+          url.includes('sent_status=sent') &&
+          url.includes('report_quarter=2026-Q2') &&
+          url.includes('no_junk_mail=true')
+      );
+      expect(request).toContain('quarter_junk=true');
+    }, { timeout: 3000 });
+  });
+
+  it('shows the quarter and New Zealand junk time on Pending All No Junk cards', async () => {
+    const calls: string[] = [];
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const requestUrl = String(url || '');
+      calls.push(requestUrl);
+      if (requestUrl.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            reports: [{ id: 'r3', suburb: 'Albany', quarter: 'Q3', year: 2026, uploaded_at: '2026-07-01', label: '2026-Q3' }],
+          }),
+        });
+      }
+      if (requestUrl.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, defaultReport: { suburb: 'Albany', label: '2026-Q3' } }),
+        });
+      }
+      const isJunkFilter = requestUrl.includes('no_junk_mail=true');
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: isJunkFilter
+            ? [{
+                id: 'junk-1',
+                property_address: '4 Example Road',
+                suburb: 'Albany',
+                city: 'North Shore City',
+                region: 'Auckland',
+                status: 'pending',
+                no_junk_mail: true,
+                quarter_junk_at: '2026-06-01T14:30:00.000Z',
+              }]
+            : [],
+          pagination: { page: 1, limit: 50, total: isJunkFilter ? 1 : 0, totalPages: 1 },
+        }),
+      });
+    });
+
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+    await screen.findByRole('button', { name: 'Albany ★' });
+    fireEvent.click(screen.getByRole('button', { name: 'No Junk' }));
+
+    expect(await screen.findByText('4 Example Road')).toBeTruthy();
+    expect(await screen.findByText('Junk · 2026-Q3 · 2 Jun 2026, 2:30 am')).toBeTruthy();
+    await waitFor(() => {
+      expect(calls.some((url) =>
+        url.includes('status=pending') &&
+        url.includes('sent_status=all') &&
+        url.includes('report_quarter=2026-Q3') &&
+        url.includes('no_junk_mail=true')
+      )).toBe(true);
+    });
+  });
+
+  it('shows the selected-quarter sent time without the suburb in Pending cards', async () => {
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const requestUrl = String(url || '');
+      if (requestUrl.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            reports: [{ id: 'r2', suburb: 'Oteha', quarter: 'Q2', year: 2026, label: '2026-Q2' }],
+          }),
+        });
+      }
+      if (requestUrl.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ success: true, defaultReport: { suburb: 'Oteha', label: '2026-Q2' } }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [{
+            id: 'sent-quarter-1',
+            property_address: '4 Example Road',
+            suburb: 'Oteha',
+            city: 'North Shore City',
+            region: 'Auckland',
+            status: 'pending',
+            quarter_sent_at: '2026-06-01T14:30:00.000Z',
+            latest_send_title: 'Oteha · 2026-Q2 report',
+          }],
+          pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
+        }),
+      });
+    });
+
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+
+    expect(await screen.findByText('Sent · 2026-Q2 · 2 Jun 2026, 2:30 am')).toBeTruthy();
+    expect(screen.queryByText('Oteha · 2026-Q2 report')).toBeNull();
+  });
 });
 
 describe('Outreach page - scroll to top after actions', () => {

@@ -85,6 +85,8 @@ interface OutreachProperty {
   latest_send_quarter?: string | null;
   latest_send_year?: number | null;
   latest_send_report_suburb?: string | null;
+  quarter_sent_at?: string | null;
+  quarter_junk_at?: string | null;
   no_junk_mail?: boolean;
 }
 
@@ -102,6 +104,14 @@ const STATUS_LABELS: Record<string, string> = {
   interacted: 'Interacted',
   converted: 'Converted',
 };
+
+function formatOutreachDateTime(value: string): string {
+  return new Date(value).toLocaleString('en-NZ', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Pacific/Auckland',
+  });
+}
 
 const STATUS_COLORS: Record<string, string> = {
   liked: 'bg-pink-50 text-pink-600 border-pink-200',
@@ -265,6 +275,11 @@ export default function OutreachPage() {
   const [sortMode, setSortMode] = useState<'address' | 'time'>('address');
   const [sentDateFilter, setSentDateFilter] = useState<string[]>([todayDateKey()]);
   const [availableReports, setAvailableReports] = useState<Array<{ suburb: string; quarter: string; year: number; id: string; uploaded_at: string; label: string }>>([]);
+  const isQuarterJunkView =
+    activeTab === 'pending' &&
+    sentStatusFilter === 'sent' &&
+    junkFilter === 'no_junk' &&
+    Boolean(activeQuarter);
 
   // Today's Run: shared street-clusters data (fetched when Pending + Unsent).
   const [todayRunData, setTodayRunData] = useState<TodayRunData | null>(null);
@@ -863,6 +878,7 @@ export default function OutreachPage() {
     }
     if (sentStatusFilter) params.set('sent_status', sentStatusFilter);
     if (activeQuarter) params.set('report_quarter', activeQuarter);
+    if (isQuarterJunkView) params.set('quarter_junk', 'true');
     if (sortMode === 'time') params.set('sort_mode', 'time');
     if (activeTab === 'sent' && sentDateFilter.length > 0) params.set('sent_dates', sentDateFilter.join(','));
     if (activeTab === 'liked' && likedStreetModeApplied && likedStartStreet) params.set('start_street', likedStartStreet);
@@ -882,7 +898,7 @@ export default function OutreachPage() {
       pagination: data.pagination ?? null,
       effectiveLimit,
     };
-  }, [activeTab, suburbFilter, streetFilter, runStreetFilter, campaignFilter, debouncedSearch, sortOrder, propertyFilter, marketStatus, junkFilter, lastSoldPreset, reportSuburbFilter, sentStatusFilter, sortMode, sentDateFilter, likedStreetModeApplied, likedStartStreet, pageSize, activeQuarter]);
+  }, [activeTab, suburbFilter, streetFilter, runStreetFilter, campaignFilter, debouncedSearch, sortOrder, propertyFilter, marketStatus, junkFilter, lastSoldPreset, reportSuburbFilter, sentStatusFilter, sortMode, sentDateFilter, likedStreetModeApplied, likedStartStreet, pageSize, activeQuarter, isQuarterJunkView]);
 
   const waitingForTodayRun =
     activeTab === 'pending' &&
@@ -1209,6 +1225,7 @@ export default function OutreachPage() {
     if (suburb) params.set('suburb', suburb);
     if (sentStatusFilter) params.set('sent_status', sentStatusFilter);
     if (activeQuarter) params.set('report_quarter', activeQuarter);
+    if (isQuarterJunkView) params.set('quarter_junk', 'true');
     if (debouncedSearch) params.set('search', debouncedSearch);
     if (propertyFilter === 'house') params.set('standalone_only', 'true');
     if (propertyFilter === 'townhouse') params.set('townhouse_only', 'true');
@@ -1249,7 +1266,7 @@ export default function OutreachPage() {
         else setLoading(false);
       }
     }
-  }, [activeTab, sentStatusFilter, activeQuarter, viewMode, sortOrder, debouncedSearch, propertyFilter, marketStatus, junkFilter, sortMode, isClassic]);
+  }, [activeTab, sentStatusFilter, activeQuarter, viewMode, sortOrder, debouncedSearch, propertyFilter, marketStatus, junkFilter, sortMode, isClassic, isQuarterJunkView]);
 
   fetchStreetDataRef.current = fetchStreetData;
 
@@ -3722,7 +3739,39 @@ export default function OutreachPage() {
                     {prop.suburb}, {prop.city}
                   </div>
 
-                  {(activeTab === 'pending' || activeTab === 'sent') && prop.latest_send_title && (
+                  {prop.quarter_junk_at && (
+                    <div
+                      aria-label={`Junk · ${activeQuarter} · ${new Date(prop.quarter_junk_at).toLocaleString('en-NZ', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Pacific/Auckland' })}`}
+                      style={{
+                        fontSize: '0.8rem',
+                        color: '#b45309',
+                        marginBottom: '12px',
+                        padding: '7px 10px',
+                        backgroundColor: '#fffbeb',
+                        border: '1px solid #fde68a',
+                        borderRadius: '8px',
+                      }}
+                    >
+                      Junk · {activeQuarter} · {new Date(prop.quarter_junk_at).toLocaleString('en-NZ', {
+                        dateStyle: 'medium',
+                        timeStyle: 'short',
+                        timeZone: 'Pacific/Auckland',
+                      })}
+                    </div>
+                  )}
+
+                  {activeTab === 'pending' && prop.quarter_sent_at ? (
+                    <div
+                      aria-label={`Sent · ${activeQuarter} · ${formatOutreachDateTime(prop.quarter_sent_at)}`}
+                      style={{
+                        fontSize: '0.8rem', color: '#7c3aed', marginBottom: '14px',
+                        padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px',
+                        border: '1px solid #ede9fe',
+                      }}
+                    >
+                      Sent · {activeQuarter} · {formatOutreachDateTime(prop.quarter_sent_at)}
+                    </div>
+                  ) : (activeTab === 'pending' || activeTab === 'sent') && prop.latest_send_title && (
                     <div style={{
                       fontSize: '0.8rem', color: '#7c3aed', marginBottom: '14px',
                       padding: '8px 12px', backgroundColor: '#f5f3ff', borderRadius: '8px',

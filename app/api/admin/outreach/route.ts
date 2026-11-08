@@ -161,6 +161,16 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   const conditions: string[] = [];
   const params: unknown[] = [];
   const qi = parseReportQuarter(reportQuarter);
+  const quarterJunkView =
+    searchParams.get('quarter_junk') === 'true' &&
+    status === 'pending' &&
+    sentStatus === 'sent' &&
+    noJunkMail === 'true' &&
+    Boolean(qi);
+  const includeQuarterJunkTime =
+    status === 'pending' &&
+    noJunkMail === 'true' &&
+    Boolean(qi);
 
   if (status === 'sent') {
     if (qi) {
@@ -282,12 +292,36 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
     conditions.push('on_market_sale = false AND on_market_rent = false AND has_rental_history = false');
   }
   if (noJunkMail === 'true') {
-    conditions.push('no_junk_mail = true');
+    if (!quarterJunkView) conditions.push('no_junk_mail = true');
   } else if (noJunkMail === 'false') {
     conditions.push('(no_junk_mail = false OR no_junk_mail IS NULL)');
   }
 
-  if (sentStatus === 'sent' || sentStatus === 'unsent') {
+  let quarterJunkAtSelect = '';
+  let quarterJunkAtParams: { quarterParam: number; yearParam: number; suburbClause: string } | null = null;
+  if (quarterJunkView && qi) {
+    const quarterParam = params.length + 1;
+    const yearParam = quarterParam + 1;
+    params.push(qi.quarter, qi.year);
+    let suburbClause = '';
+    if (suburb) {
+      suburbClause = ` AND qj.suburb = $${params.length + 1}`;
+      params.push(suburb);
+    }
+    quarterJunkAtParams = { quarterParam, yearParam, suburbClause };
+    conditions.push(
+      `EXISTS (
+        SELECT 1 FROM outreach_property_quarter_status qj
+        WHERE qj.outreach_property_id = outreach_enriched.id
+          AND qj.quarter = $${quarterParam}
+          AND qj.year = $${yearParam}
+          AND qj.is_junk IS TRUE
+          AND qj.junk_at IS NOT NULL${suburbClause}
+      )`
+    );
+  }
+
+  if ((sentStatus === 'sent' || sentStatus === 'unsent') && !quarterJunkView) {
     const isSent = sentStatus === 'sent';
     const existsOp = isSent ? 'EXISTS' : 'NOT EXISTS';
     if (qi) {
@@ -331,7 +365,9 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
 
   const orderDirection = sortOrder === 'desc' ? 'DESC' : 'ASC';
   let orderClause: string;
-  if (sortMode === 'time') {
+  if (quarterJunkView) {
+    orderClause = 'ORDER BY quarter_junk_at DESC NULLS LAST, property_address ASC, id ASC';
+  } else if (sortMode === 'time') {
     const sentAtSort = "COALESCE(latest_sent_at, last_sent_at, sent_at AT TIME ZONE 'Pacific/Auckland')";
     orderClause = `ORDER BY ${sentAtSort} ${orderDirection} NULLS LAST, created_at DESC NULLS LAST, property_address ASC, id ASC`;
   } else {
@@ -368,6 +404,57 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
     }
     params.push(qi.quarter, qi.year, qi.campaignPattern);
   }
+  let quarterSentAtSelect = '';
+  if (status === 'pending' && qi) {
+    const quarterParam = params.length + 1;
+    const yearParam = quarterParam + 1;
+    const campaignParam = quarterParam + 2;
+    params.push(qi.quarter, qi.year, qi.campaignPattern);
+    let quarterSuburbClause = '';
+    let sendLogSuburbClause = '';
+    if (suburb) {
+      const suburbParam = params.length + 1;
+      params.push(suburb);
+      quarterSuburbClause = ` AND qss.suburb = $${suburbParam}`;
+      sendLogSuburbClause = ` AND (qsl.suburb = $${suburbParam} OR qsr.suburb = $${suburbParam} OR qsl.suburb IS NULL)`;
+    }
+    quarterSentAtSelect = `,
+      COALESCE(
+        (SELECT MAX(qss.last_sent_at)
+         FROM outreach_property_quarter_status qss
+         WHERE qss.outreach_property_id = outreach_enriched.id
+           AND qss.quarter = $${quarterParam}
+           AND qss.year = $${yearParam}${quarterSuburbClause}),
+        (SELECT MAX(qsl.sent_at)
+         FROM outreach_send_logs qsl
+         LEFT JOIN suburb_reports qsr ON qsl.suburb_report_id = qsr.id
+         WHERE qsl.outreach_property_id = outreach_enriched.id
+           AND ((qsr.quarter = $${quarterParam} AND qsr.year = $${yearParam})
+             OR qsl.campaign_key ~ $${campaignParam})${sendLogSuburbClause})
+      ) AS quarter_sent_at`;
+  }
+  if (includeQuarterJunkTime && qi) {
+    if (!quarterJunkAtParams) {
+      const quarterParam = params.length + 1;
+      const yearParam = quarterParam + 1;
+      params.push(qi.quarter, qi.year);
+      let suburbClause = '';
+      if (suburb) {
+        suburbClause = ` AND qj.suburb = $${params.length + 1}`;
+        params.push(suburb);
+      }
+      quarterJunkAtParams = { quarterParam, yearParam, suburbClause };
+    }
+    const { quarterParam, yearParam, suburbClause } = quarterJunkAtParams;
+    quarterJunkAtSelect = `,
+      (SELECT MAX(qj.junk_at)
+       FROM outreach_property_quarter_status qj
+       WHERE qj.outreach_property_id = outreach_enriched.id
+         AND qj.quarter = $${quarterParam}
+         AND qj.year = $${yearParam}
+         AND qj.is_junk IS TRUE
+         AND qj.junk_at IS NOT NULL${suburbClause}) AS quarter_junk_at`;
+  }
   const limitIdx = params.length + 1;
   params.push(limit, offset);
 
@@ -385,7 +472,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
     latest_send_quarter, latest_send_year, latest_send_report_suburb
   `;
 
-  const selectClause = (view === 'card' ? cardFields : '*') + quarterStatusSelect;
+  const selectClause = (view === 'card' ? cardFields : '*') + quarterStatusSelect + quarterSentAtSelect + quarterJunkAtSelect;
 
   const dataQuery = `
     SELECT ${selectClause}
@@ -474,6 +561,16 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   const sentStatus = searchParams.get('sent_status');
   const reportQuarter = searchParams.get('report_quarter');
   const qiLegacy = parseReportQuarter(reportQuarter);
+  const quarterJunkView =
+    searchParams.get('quarter_junk') === 'true' &&
+    status === 'pending' &&
+    sentStatus === 'sent' &&
+    noJunkMail === 'true' &&
+    Boolean(qiLegacy);
+  const includeQuarterJunkTime =
+    status === 'pending' &&
+    noJunkMail === 'true' &&
+    Boolean(qiLegacy);
   const sentDates = (searchParams.get('sent_dates') || '').split(',').map(s => s.trim()).filter(Boolean);
   const startStreet = searchParams.get('start_street')?.trim() || '';
   const includeTotal = searchParams.get('include_total') === 'true';
@@ -633,12 +730,34 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     query += ` AND re.id IS NULL AND rer.id IS NULL AND p.has_rental_history = false`;
   }
   if (noJunkMail === 'true') {
-    query += ` AND p.no_junk_mail = true`;
+    if (!quarterJunkView) query += ` AND p.no_junk_mail = true`;
   } else if (noJunkMail === 'false') {
     query += ` AND (p.no_junk_mail = false OR p.no_junk_mail IS NULL)`;
   }
 
-  if (sentStatus === 'sent' || sentStatus === 'unsent') {
+  let quarterJunkAtSelect = '';
+  let quarterJunkAtParams: { quarterParam: number; yearParam: number; suburbClause: string } | null = null;
+  if (quarterJunkView && qiLegacy) {
+    const quarterParam = idx++;
+    const yearParam = idx++;
+    params.push(qiLegacy.quarter, qiLegacy.year);
+    let suburbClause = '';
+    if (suburb) {
+      suburbClause = ` AND qj.suburb = $${idx++}`;
+      params.push(suburb);
+    }
+    quarterJunkAtParams = { quarterParam, yearParam, suburbClause };
+    query += ` AND EXISTS (
+      SELECT 1 FROM outreach_property_quarter_status qj
+      WHERE qj.outreach_property_id = op.id
+        AND qj.quarter = $${quarterParam}
+        AND qj.year = $${yearParam}
+        AND qj.is_junk IS TRUE
+        AND qj.junk_at IS NOT NULL${suburbClause}
+    )`;
+  }
+
+  if ((sentStatus === 'sent' || sentStatus === 'unsent') && !quarterJunkView) {
     const isSent = sentStatus === 'sent';
     const existsOp = isSent ? 'EXISTS' : 'NOT EXISTS';
     const quarterPredicate = qiLegacy
@@ -715,7 +834,10 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   // above also contains ORDER BY / LIMIT which would fool lastIndexOf).
   const ORDER_BY_SENTINEL = '/*__OUTER_ORDER_BY__*/';
 
-  if (sortMode === 'time') {
+  if (quarterJunkView) {
+    query += ` ${ORDER_BY_SENTINEL} ORDER BY quarter_junk_at DESC NULLS LAST, op.property_address ASC, op.id ASC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(limit, offset);
+  } else if (sortMode === 'time') {
     const sentAtSort = "COALESCE(ls.sent_at, op.last_sent_at, op.sent_at AT TIME ZONE 'Pacific/Auckland')";
     query += ` ${ORDER_BY_SENTINEL} ORDER BY ${sentAtSort} ${orderDirection} NULLS LAST, op.created_at DESC NULLS LAST, op.property_address ASC, op.id ASC LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
@@ -759,7 +881,58 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     }
     params.push(qiLegacy.quarter, qiLegacy.year, qiLegacy.campaignPattern);
   }
-  query = query.replace('@@QUARTER_STATUS@@', quarterStatusSelect);
+  let quarterSentAtSelect = '';
+  if (status === 'pending' && qiLegacy) {
+    const quarterParam = params.length + 1;
+    const yearParam = quarterParam + 1;
+    const campaignParam = quarterParam + 2;
+    params.push(qiLegacy.quarter, qiLegacy.year, qiLegacy.campaignPattern);
+    let quarterSuburbClause = '';
+    let sendLogSuburbClause = '';
+    if (suburb) {
+      const suburbParam = params.length + 1;
+      params.push(suburb);
+      quarterSuburbClause = ` AND qss.suburb = $${suburbParam}`;
+      sendLogSuburbClause = ` AND (qsl.suburb = $${suburbParam} OR qsr.suburb = $${suburbParam} OR qsl.suburb IS NULL)`;
+    }
+    quarterSentAtSelect = `,
+      COALESCE(
+        (SELECT MAX(qss.last_sent_at)
+         FROM outreach_property_quarter_status qss
+         WHERE qss.outreach_property_id = op.id
+           AND qss.quarter = $${quarterParam}
+           AND qss.year = $${yearParam}${quarterSuburbClause}),
+        (SELECT MAX(qsl.sent_at)
+         FROM outreach_send_logs qsl
+         LEFT JOIN suburb_reports qsr ON qsl.suburb_report_id = qsr.id
+         WHERE qsl.outreach_property_id = op.id
+           AND ((qsr.quarter = $${quarterParam} AND qsr.year = $${yearParam})
+             OR qsl.campaign_key ~ $${campaignParam})${sendLogSuburbClause})
+      ) AS quarter_sent_at`;
+  }
+  if (includeQuarterJunkTime && qiLegacy) {
+    if (!quarterJunkAtParams) {
+      const quarterParam = params.length + 1;
+      const yearParam = quarterParam + 1;
+      params.push(qiLegacy.quarter, qiLegacy.year);
+      let suburbClause = '';
+      if (suburb) {
+        suburbClause = ` AND qj.suburb = $${params.length + 1}`;
+        params.push(suburb);
+      }
+      quarterJunkAtParams = { quarterParam, yearParam, suburbClause };
+    }
+    const { quarterParam, yearParam, suburbClause } = quarterJunkAtParams;
+    quarterJunkAtSelect = `,
+      (SELECT MAX(qj.junk_at)
+       FROM outreach_property_quarter_status qj
+       WHERE qj.outreach_property_id = op.id
+         AND qj.quarter = $${quarterParam}
+         AND qj.year = $${yearParam}
+         AND qj.is_junk IS TRUE
+         AND qj.junk_at IS NOT NULL${suburbClause}) AS quarter_junk_at`;
+  }
+  query = query.replace('@@QUARTER_STATUS@@', quarterStatusSelect + quarterSentAtSelect + quarterJunkAtSelect);
 
   const result = await marieDB.query(query, params);
 

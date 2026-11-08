@@ -280,11 +280,13 @@ describe('DispatchStatsPanel', () => {
       expect(screen.getByRole('button', { name: '★ Default' })).toBeTruthy();
     });
 
-    const q1Call = fetchMock.mock.calls.some(
-      ([url]) =>
-        String(url).includes('campaign-stats') && String(url).includes('campaign=2026_Q1_Oteha')
-    );
-    expect(q1Call).toBe(true);
+    await waitFor(() => {
+      const q1Call = fetchMock.mock.calls.some(
+        ([url]) =>
+          String(url).includes('campaign-stats') && String(url).includes('campaign=2026_Q1_Oteha')
+      );
+      expect(q1Call).toBe(true);
+    });
   });
 
   it('optimistically loads stored campaign stats while the campaign list is still loading', async () => {

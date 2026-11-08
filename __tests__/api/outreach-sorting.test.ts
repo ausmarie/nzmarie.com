@@ -178,6 +178,109 @@ describe("Outreach API - Sorting", () => {
     }
   );
 
+  it.each([false, true])(
+    "lists current-quarter junk marks by latest junk time in Pending Sent (MV=%s)",
+    async (useMv) => {
+      vi.stubEnv("USE_OUTREACH_MV", String(useMv));
+      vi.mocked(parseReportQuarter).mockReturnValueOnce({
+        quarter: "Q3",
+        year: 2026,
+        key: "2026-Q3",
+        campaignPattern: "^2026[_-]Q3",
+      });
+      (marieDB.query as Mock)
+        .mockResolvedValueOnce({
+          rows: [{ id: "junk-1", quarter_junk_at: "2026-08-03T02:00:00.000Z" }],
+        })
+        .mockResolvedValueOnce({ rows: [{ total: "1" }] });
+
+      const request = new NextRequest(new URL(
+        "http://localhost/api/admin/outreach?status=pending&sent_status=sent&report_quarter=2026-Q3&suburb=Torbay&no_junk_mail=true&quarter_junk=true&sort_mode=time&sortOrder=desc"
+      ));
+      const response = await GET(request);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.data[0].quarter_junk_at).toBe("2026-08-03T02:00:00.000Z");
+      const [query, params] = (marieDB.query as Mock).mock.calls[0];
+      const querySql = String(query);
+      expect(querySql).toContain("qj.is_junk IS TRUE");
+      expect(querySql).toContain("qj.junk_at IS NOT NULL");
+      expect(querySql).toContain("AS quarter_junk_at");
+      expect(querySql).toContain("ORDER BY quarter_junk_at DESC NULLS LAST");
+      expect(querySql).not.toContain("sl3.outreach_property_id");
+      expect(JSON.stringify(params)).toContain('"Q3",2026,"Torbay"');
+    }
+  );
+
+  it.each([false, true])(
+    "returns the quarter junk timestamp for Pending All with the No Junk filter (MV=%s)",
+    async (useMv) => {
+      vi.stubEnv("USE_OUTREACH_MV", String(useMv));
+      vi.mocked(parseReportQuarter).mockReturnValueOnce({
+        quarter: "Q3",
+        year: 2026,
+        key: "2026-Q3",
+        campaignPattern: "^2026[_-]Q3",
+      });
+      (marieDB.query as Mock)
+        .mockResolvedValueOnce({
+          rows: [{ id: "junk-1", quarter_junk_at: "2026-08-03T02:00:00.000Z" }],
+        })
+        .mockResolvedValueOnce({ rows: [{ total: "1" }] });
+
+      const request = new NextRequest(new URL(
+        "http://localhost/api/admin/outreach?status=pending&sent_status=all&report_quarter=2026-Q3&suburb=Torbay&no_junk_mail=true"
+      ));
+      const response = await GET(request);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.data[0].quarter_junk_at).toBe("2026-08-03T02:00:00.000Z");
+      const [query, params] = (marieDB.query as Mock).mock.calls[0];
+      const querySql = String(query);
+      expect(querySql).toMatch(/(?:p\.)?no_junk_mail = true/);
+      expect(querySql).toContain("qj.is_junk IS TRUE");
+      expect(querySql).toContain("qj.junk_at IS NOT NULL");
+      expect(querySql).toContain("AS quarter_junk_at");
+      expect(querySql).not.toContain("AND EXISTS (\n      SELECT 1 FROM outreach_property_quarter_status qj");
+      expect(JSON.stringify(params)).toContain('"Q3",2026,"Torbay"');
+    }
+  );
+
+  it.each([false, true])(
+    "returns the selected-quarter send timestamp for Pending cards (MV=%s)",
+    async (useMv) => {
+      vi.stubEnv("USE_OUTREACH_MV", String(useMv));
+      vi.mocked(parseReportQuarter).mockReturnValueOnce({
+        quarter: "Q3",
+        year: 2026,
+        key: "2026-Q3",
+        campaignPattern: "^2026[_-]Q3",
+      });
+      (marieDB.query as Mock)
+        .mockResolvedValueOnce({
+          rows: [{ id: "sent-1", quarter_sent_at: "2026-06-01T14:30:00.000Z" }],
+        })
+        .mockResolvedValueOnce({ rows: [{ total: "1" }] });
+
+      const request = new NextRequest(new URL(
+        "http://localhost/api/admin/outreach?status=pending&sent_status=sent&report_quarter=2026-Q3&suburb=Torbay"
+      ));
+      const response = await GET(request);
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.data[0].quarter_sent_at).toBe("2026-06-01T14:30:00.000Z");
+      const [query, params] = (marieDB.query as Mock).mock.calls[0];
+      const querySql = String(query);
+      expect(querySql).toContain("AS quarter_sent_at");
+      expect(querySql).toContain("qss.last_sent_at");
+      expect(querySql).toContain("qsl.sent_at");
+      expect(JSON.stringify(params)).toContain('"Q3",2026,"^2026[_-]Q3","Torbay"');
+    }
+  );
+
   it("classifies a returned Q3 send as unsent even while its historical send log remains", async () => {
     vi.mocked(parseReportQuarter).mockReturnValueOnce({
       quarter: "Q3",
