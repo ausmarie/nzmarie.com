@@ -139,39 +139,17 @@ export async function PATCH(
         const client = await marieDB.connect();
         try {
           await client.query('BEGIN');
-          const sendWindowResult = noJunkMailValue
-            ? await client.query(
-              `SELECT CASE
-                 WHEN COUNT(*) = 0 THEN FALSE
-                 ELSE NOW() BETWEEN MIN(sent_at) AND MAX(sent_at)
-               END AS within_send_window
-               FROM (
-                 SELECT sl.sent_at
-                 FROM outreach_send_logs sl
-                 LEFT JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
-                 WHERE sl.suburb = $1
-                   AND sl.sent_at IS NOT NULL
-                   AND CASE
-                     WHEN sl.campaign_key ~ '^[0-9]{4}[_-]Q[1-4]'
-                       THEN substring(sl.campaign_key from '^([0-9]{4})') || '-Q' || substring(sl.campaign_key from '[_-]Q([1-4])')
-                     WHEN sr.quarter ~ '^Q[1-4]$' AND sr.year IS NOT NULL
-                       THEN sr.year || '-' || sr.quarter
-                   END = $2::text || '-' || $3
-                   AND NOT EXISTS (
-                     SELECT 1
-                     FROM outreach_property_quarter_status returned
-                     WHERE returned.outreach_property_id = sl.outreach_property_id
-                       AND returned.suburb_report_id = sl.suburb_report_id
-                       AND returned.status = 'pending'
-                   )
-               ) quarter_sends`,
-              [quarterContext.suburb, quarterContext.year, quarterContext.quarter]
-            )
-            : null;
-          const withinSendWindow = sendWindowResult?.rows[0]?.within_send_window;
-          quarterJunkRecorded = noJunkMailValue && (
-            withinSendWindow === true || withinSendWindow === 't' || withinSendWindow === 'true'
-          );
+          // Pending/map junk belongs to the report quarter currently selected
+          // in the UI. Without the old send-window gate, a mark made after the
+          // suburb's dispatch window still lands on that quarter's report.
+          const junkReportId = quarterReportId;
+          const junkSuburb = quarterContext.suburb;
+          const junkQuarter = quarterContext.quarter;
+          const junkYear = quarterContext.year;
+          // Marking junk must always be recorded against the selected report.
+          // The dashboard reads only this table for quarterly junk; the
+          // address-level properties flag is just basic filtering.
+          quarterJunkRecorded = noJunkMailValue;
 
           if (updatedProperty.property_id) {
             const pid = String(updatedProperty.property_id).replace(/-/g, '');
@@ -186,7 +164,7 @@ export async function PATCH(
               [noJunkMailValue, updatedProperty.property_address, updatedProperty.suburb]
             );
           }
-          if (quarterJunkRecorded) {
+          if (quarterJunkRecorded && junkReportId) {
             await client.query(
               `INSERT INTO outreach_property_quarter_status
                 (outreach_property_id, suburb_report_id, suburb, quarter, year, is_junk, junk_at)
@@ -195,14 +173,16 @@ export async function PATCH(
                  is_junk = TRUE,
                  junk_at = NOW(),
                  updated_at = NOW()`,
-              [id, quarterReportId, quarterContext.suburb, quarterContext.quarter, quarterContext.year]
+              [id, junkReportId, junkSuburb, junkQuarter, junkYear]
             );
-          } else {
+          } else if (!noJunkMailValue) {
+            // The flag is global, so removing it clears every quarter's junk
+            // marker for this address instead of only the selected report.
             await client.query(
               `UPDATE outreach_property_quarter_status
                SET is_junk = FALSE, junk_at = NULL, updated_at = NOW()
-               WHERE outreach_property_id = $1 AND suburb_report_id = $2`,
-              [id, quarterReportId]
+               WHERE outreach_property_id = $1`,
+              [id]
             );
           }
           await client.query('COMMIT');

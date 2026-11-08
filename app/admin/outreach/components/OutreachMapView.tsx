@@ -535,6 +535,21 @@ export default function OutreachMapView({
   const userMarkerRef = useRef<google.maps.Marker | null>(null);
   const userCircleRef = useRef<google.maps.Circle | null>(null);
   const lastFetchParamsRef = useRef<string>('');
+  const coordsDataRef = useRef(coordsData);
+  coordsDataRef.current = coordsData;
+  // Snapshot of the optimistic overrides at the moment the user locates.
+  // Reading them from a ref keeps the viewport effect dependent only on
+  // `userLocation`, so sending an address can never re-run the fit.
+  const optimisticSnapshotRef = useRef({
+    sent: optimisticSentIds ?? localOptimisticSentIds,
+    junk: optimisticJunkIds ?? localOptimisticJunkIds,
+    unjunk: optimisticUnjunkIds ?? localOptimisticUnjunkIds,
+  });
+  optimisticSnapshotRef.current = {
+    sent: optimisticSentIds ?? localOptimisticSentIds,
+    junk: optimisticJunkIds ?? localOptimisticJunkIds,
+    unjunk: optimisticUnjunkIds ?? localOptimisticUnjunkIds,
+  };
 
   useEffect(() => {
     if (!userLocation) return;
@@ -569,6 +584,9 @@ export default function OutreachMapView({
 
   const statusFilter = externalStatusFilter;
 
+  // Locating is the only action that may move the viewport from the user
+  // marker effect. Address status changes (e.g. marking a map address as sent)
+  // only recolour the marker and must never refit or recenter the map.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !userLocation) return;
@@ -604,13 +622,14 @@ export default function OutreachMapView({
       userCircleRef.current = circle;
     }
 
+    const snapshot = optimisticSnapshotRef.current;
     const nearestPoint = computeNearestUnsent(
       userLocation,
       applyOptimisticAddressStatuses(
-        coordsData,
-        optimisticSentIds ?? localOptimisticSentIds,
-        optimisticJunkIds ?? localOptimisticJunkIds,
-        optimisticUnjunkIds ?? localOptimisticUnjunkIds
+        coordsDataRef.current,
+        snapshot.sent,
+        snapshot.junk,
+        snapshot.unjunk
       )
     );
     setNearest(nearestPoint ? { address: nearestPoint.address, suburb: nearestPoint.suburb, distanceM: nearestPoint.distanceM } : null);
@@ -627,7 +646,7 @@ export default function OutreachMapView({
       userMarkerRef.current = null;
       userCircleRef.current = null;
     };
-  }, [userLocation, coordsData, optimisticSentIds, optimisticJunkIds, optimisticUnjunkIds, localOptimisticSentIds, localOptimisticJunkIds, localOptimisticUnjunkIds]);
+  }, [userLocation]);
 
   useEffect(() => {
     return () => {
@@ -640,8 +659,6 @@ export default function OutreachMapView({
 
   const onCoordsLoadedRef = useRef(onCoordsLoaded);
   onCoordsLoadedRef.current = onCoordsLoaded;
-  const coordsDataRef = useRef(coordsData);
-  coordsDataRef.current = coordsData;
   const displayedCoordsData = useMemo(
     () => applyOptimisticAddressStatuses(
       coordsData,
@@ -651,6 +668,29 @@ export default function OutreachMapView({
     ),
     [coordsData, optimisticSentIds, optimisticJunkIds, optimisticUnjunkIds, localOptimisticSentIds, localOptimisticJunkIds, localOptimisticUnjunkIds]
   );
+
+  // Keep the "nearest unsent" badge accurate as addresses are sent or marked
+  // as junk, without touching the viewport.
+  useEffect(() => {
+    if (!userLocation) return;
+    const nearestPoint = computeNearestUnsent(userLocation, displayedCoordsData);
+    setNearest((previous) => {
+      if (!nearestPoint) return previous === null ? previous : null;
+      if (
+        previous &&
+        previous.address === nearestPoint.address &&
+        previous.suburb === nearestPoint.suburb &&
+        previous.distanceM === nearestPoint.distanceM
+      ) {
+        return previous;
+      }
+      return {
+        address: nearestPoint.address,
+        suburb: nearestPoint.suburb,
+        distanceM: nearestPoint.distanceM,
+      };
+    });
+  }, [userLocation, displayedCoordsData]);
 
   const loadCoords = useCallback(async (force = false) => {
     if (!suburb) return;
@@ -844,16 +884,33 @@ export default function OutreachMapView({
     });
   }, [coordsData]);
 
+  const lastFocusedStreetRef = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedStreet && coordsData) focusStreet(selectedStreet);
-  }, [selectedStreet, coordsData, focusStreet]);
+    if (!selectedStreet) {
+      lastFocusedStreetRef.current = null;
+      return;
+    }
+    if (!coordsData) return;
+    const key = `${suburb}|${selectedStreet}`;
+    // Focus the street once per selection. Refreshes of the coordinate data
+    // (e.g. after a send) must not refit the map and make it jump.
+    if (lastFocusedStreetRef.current === key) return;
+    lastFocusedStreetRef.current = key;
+    focusStreet(selectedStreet);
+  }, [selectedStreet, coordsData, focusStreet, suburb]);
+
+  const autoFitKeyRef = useRef<string | null>(null);
+  const previousSelectedStreetRef = useRef<string | null>(null);
 
   const handleMapLoad = useCallback((map: google.maps.Map) => {
     if (!mapRef.current) {
       mapRef.current = map;
+      if (!selectedStreet && activeRunId == null && allPoints.length > 0) {
+        autoFitKeyRef.current = `${suburb}|${sentStatus}|${reportQuarter ?? ''}`;
+      }
       fitToBounds(allPoints);
     }
-  }, [allPoints, fitToBounds]);
+  }, [allPoints, fitToBounds, selectedStreet, activeRunId, suburb, sentStatus, reportQuarter]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -864,9 +921,22 @@ export default function OutreachMapView({
   }, [isVisible]);
 
   useEffect(() => {
+    const previousStreet = previousSelectedStreetRef.current;
+    previousSelectedStreetRef.current = selectedStreet ?? null;
     if (selectedStreet || activeRunId != null) return;
-    if (mapRef.current && allPoints.length > 0) fitToBounds(allPoints);
-  }, [activeRunId, allPoints, fitToBounds, selectedStreet]);
+    const map = mapRef.current;
+    if (!map || allPoints.length === 0) return;
+
+    const key = `${suburb}|${sentStatus}|${reportQuarter ?? ''}`;
+    const returnedFromStreet = previousStreet != null;
+    // Auto-fit only when the map first receives data for this suburb/report,
+    // or when the user leaves a street selection. Periodic data refreshes and
+    // optimistic status changes (such as confirming a send) must leave the
+    // current viewport untouched.
+    if (autoFitKeyRef.current === key && !returnedFromStreet) return;
+    autoFitKeyRef.current = key;
+    fitToBounds(allPoints);
+  }, [activeRunId, allPoints, fitToBounds, selectedStreet, suburb, sentStatus, reportQuarter]);
 
   if (!suburb) return (
     <div style={{ height: '100%', minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', background: '#f8fafc', borderRadius: 12 }}>

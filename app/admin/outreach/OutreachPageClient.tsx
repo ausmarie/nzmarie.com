@@ -1166,10 +1166,6 @@ export default function OutreachPage() {
         body: JSON.stringify(payload),
       });
       if (!response.ok) throw new Error('Failed to update No Junk Mail status');
-      const result = await response.json();
-      if (newValue && result.quarter_junk_recorded === false) {
-        showNotification('success', 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window');
-      }
     } catch {
       cacheRef.current.clear();
       setItems(previousItems);
@@ -2063,15 +2059,9 @@ export default function OutreachPage() {
                 }),
               });
               if (!res.ok) throw new Error(`Failed to ${shouldBeJunk ? 'mark as junk' : 'remove junk status'}`);
-              const result = await res.json();
               setMapRefreshKey((key) => key + 1);
               if (shouldBeJunk) {
-                showNotification(
-                  'success',
-                  result.quarter_junk_recorded === false
-                    ? 'Saved as No Junk Mail; not counted for this quarter because it is outside the dispatch send window'
-                    : 'Marked as junk for this quarter'
-                );
+                showNotification('success', 'Marked as junk for this quarter');
               } else {
                 showNotification('success', 'Junk status removed');
               }

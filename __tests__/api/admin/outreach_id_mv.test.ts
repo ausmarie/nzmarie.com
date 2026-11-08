@@ -172,9 +172,7 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
 
   it('records Pending junk against the selected active quarter report', async () => {
     mockAuth();
-    const transactionQuery = vi.fn().mockImplementation((query: string) => ({
-      rows: query.includes('within_send_window') ? [{ within_send_window: true }] : [],
-    }));
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
     vi.mocked(marieDB.connect).mockResolvedValueOnce({
       query: transactionQuery,
       release: vi.fn(),
@@ -212,11 +210,6 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
     const reportLookup = calls.find(([query]) => String(query).includes('FROM suburb_reports'));
     expect(reportLookup?.[0]).toContain("status = 'active'");
     const transactionCalls = transactionQuery.mock.calls;
-    const sendWindow = transactionCalls.find(([query]) => String(query).includes('within_send_window'));
-    expect(sendWindow?.[0]).toContain('MIN(sent_at)');
-    expect(sendWindow?.[0]).toContain('MAX(sent_at)');
-    expect(sendWindow?.[0]).toContain('campaign_key');
-    expect(sendWindow?.[1]).toEqual(['Torbay', 2026, 'Q3']);
     const quarterStatus = transactionCalls.find(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'));
     expect(quarterStatus?.[0]).toContain('is_junk');
     expect(quarterStatus?.[0]).toContain('junk_at');
@@ -227,11 +220,97 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
     expect(transactionCalls.at(-1)?.[0]).toBe('COMMIT');
   });
 
-  it('keeps out-of-window Pending junk global and clears any quarterly junk flag', async () => {
+  it('records junk for an address already sent in the selected report even after the send window', async () => {
     mockAuth();
-    const transactionQuery = vi.fn().mockImplementation((query: string) => ({
-      rows: query.includes('within_send_window') ? [{ within_send_window: false }] : [],
-    }));
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
+    vi.mocked(marieDB.connect).mockResolvedValueOnce({
+      query: transactionQuery,
+      release: vi.fn(),
+    } as any);
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'test-id',
+          suburb: 'Murrays Bay',
+          property_address: '500A Beach Road',
+          property_id: '945da4eb-ec11-7b3e-5a3d-b8585d672bf0',
+        }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'report-id' }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_junk_mail: true,
+          quarter: 'Q2',
+          year: 2026,
+          suburb_report_id: 'report-id',
+          suburb: 'Murrays Bay',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).quarter_junk_recorded).toBe(true);
+    const transactionCalls = transactionQuery.mock.calls;
+    const quarterStatus = transactionCalls.find(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'));
+    expect(quarterStatus?.[1]).toEqual(['test-id', 'report-id', 'Murrays Bay', 'Q2', 2026]);
+    expect(transactionCalls.some(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'))).toBe(false);
+  });
+
+  it('records a late map junk mark against the quarter selected in the UI', async () => {
+    mockAuth();
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
+    vi.mocked(marieDB.connect).mockResolvedValueOnce({
+      query: transactionQuery,
+      release: vi.fn(),
+    } as any);
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'test-id',
+          suburb: 'Murrays Bay',
+          property_address: '500A Beach Road',
+          property_id: '945da4eb-ec11-7b3e-5a3d-b8585d672bf0',
+        }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'q3-report-id' }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_junk_mail: true,
+          quarter: 'Q3',
+          year: 2026,
+          suburb_report_id: 'q3-report-id',
+          suburb: 'Murrays Bay',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).quarter_junk_recorded).toBe(true);
+    const quarterStatus = transactionQuery.mock.calls.find(
+      ([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status')
+    );
+    // The address may have been sent in Q2, but the map is showing the Q3
+    // Pending audience, so the junk mark must land on the selected Q3 report.
+    expect(quarterStatus?.[1]).toEqual(['test-id', 'q3-report-id', 'Murrays Bay', 'Q3', 2026]);
+  });
+
+  it('records out-of-window Pending junk against the selected report instead of dropping it', async () => {
+    mockAuth();
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
     vi.mocked(marieDB.connect).mockResolvedValueOnce({
       query: transactionQuery,
       release: vi.fn(),
@@ -265,15 +344,16 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
     );
 
     expect(response.status).toBe(200);
-    expect((await response.json()).quarter_junk_recorded).toBe(false);
+    expect((await response.json()).quarter_junk_recorded).toBe(true);
     const transactionCalls = transactionQuery.mock.calls;
-    expect(transactionCalls.some(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'))).toBe(false);
-    expect(transactionCalls.some(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'))).toBe(true);
+    const quarterStatus = transactionCalls.find(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'));
+    expect(quarterStatus?.[1]).toEqual(['test-id', 'report-id', 'Torbay', 'Q3', 2026]);
+    expect(transactionCalls.some(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'))).toBe(false);
     expect(transactionCalls.some(([query]) => String(query).includes('UPDATE properties SET no_junk_mail'))).toBe(true);
     expect(transactionCalls.at(-1)?.[0]).toBe('COMMIT');
   });
 
-  it('clears the selected quarter junk flag when No Junk Mail is removed', async () => {
+  it('clears junk in every report quarter when No Junk Mail is removed', async () => {
     mockAuth();
     const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
     vi.mocked(marieDB.connect).mockResolvedValueOnce({
@@ -310,9 +390,12 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
 
     expect(response.status).toBe(200);
     expect((await response.json()).quarter_junk_recorded).toBe(false);
-    expect(transactionQuery.mock.calls.some(([query]) => String(query).includes('within_send_window'))).toBe(false);
-    expect(transactionQuery.mock.calls.some(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'))).toBe(true);
-    expect(transactionQuery.mock.calls.some(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'))).toBe(false);
+    const transactionCalls = transactionQuery.mock.calls;
+    expect(transactionCalls.some(([query]) => String(query).includes('report.id AS report_id'))).toBe(false);
+    const clearJunk = transactionCalls.find(([query]) => String(query).includes('SET is_junk = FALSE, junk_at = NULL'));
+    expect(clearJunk?.[0]).toContain('WHERE outreach_property_id = $1');
+    expect(clearJunk?.[1]).toEqual(['test-id']);
+    expect(transactionCalls.some(([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status'))).toBe(false);
   });
 
   it('does not include no_junk_mail in the outreach UPDATE when combined with other fields', async () => {

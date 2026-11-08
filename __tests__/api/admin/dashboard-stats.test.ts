@@ -104,14 +104,14 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(ensureQuarterDispatchJunkSchema).toHaveBeenCalledOnce();
   });
 
-  it('uses a fresh cache version for the send-window quarterly junk data', async () => {
+  it('uses a fresh cache version for quarterly-table dispatch junk data', async () => {
     vi.mocked(db.execute).mockResolvedValue({ rows: [{}] } as any);
 
     const res = await GET(makeRequest());
 
     expect(res.status).toBe(200);
     expect(getDashboardStatsCached).toHaveBeenCalledWith(
-      'dashboard:stats:v17:all:all',
+      'dashboard:stats:v25:all:all',
       expect.any(Function),
       600
     );
@@ -995,12 +995,22 @@ describe('GET /api/admin/dashboard/stats', () => {
       .toBeLessThan(allSql.indexOf('dispatch_junk_periods AS MATERIALIZED'));
     const dispatchJunkSql = allSql.slice(
       allSql.indexOf('dispatch_junk_periods AS MATERIALIZED'),
-      allSql.indexOf('dispatch_junk_by_period AS MATERIALIZED')
+      allSql.indexOf('dispatch_prior_global_junk AS MATERIALIZED')
     );
     expect(dispatchJunkSql).toContain('AND junk.junk_at IS NOT NULL');
-    expect(dispatchJunkSql).toContain('JOIN dispatch_quarter_sent sent');
-    expect(dispatchJunkSql).toContain('junk.junk_at BETWEEN sent.first_sent_at AND sent.last_sent_at');
-    expect(allSql).toContain('FROM dispatch_junk_periods');
+    expect(dispatchJunkSql).toContain('FROM outreach_property_quarter_status junk');
+    // Quarter junk comes only from the report-linked status table. The
+    // address-level properties.no_junk_mail flag is basic filtering and must
+    // not be counted as quarterly junk.
+    expect(dispatchJunkSql).not.toContain('FROM properties p');
+    expect(allSql).not.toContain('dispatch_all_junk');
+    expect(allSql).not.toContain('dispatch_property_junk');
+    const junkByPeriodSql = allSql.slice(
+      allSql.indexOf('dispatch_junk_by_period AS MATERIALIZED'),
+      allSql.indexOf('dispatch_audience_props AS MATERIALIZED')
+    );
+    expect(junkByPeriodSql).toContain('FROM dispatch_junk_periods');
+    expect(junkByPeriodSql).not.toContain('FROM properties p');
     expect(allSql).toContain('dispatch_prior_global_junk AS MATERIALIZED');
     expect(allSql).toContain('AND p.no_junk_mail IS NOT TRUE');
     expect(allSql).toContain('COALESCE(pj.excluded_count, 0) AS prior_global_junk_count');
@@ -1492,9 +1502,10 @@ describe('GET /api/admin/dashboard/stats', () => {
     expect(allSql).toContain('outreach_canonical.period_key = rq.period_key');
     expect(allSql).toContain('returned.suburb_report_id = sl.suburb_report_id');
     expect(allSql).toContain("returned.status = 'pending'");
+    // The send log scan is shared by the timeline, quarterly summary and
+    // dispatch aggregates instead of being repeated (and billed) for every
+    // aggregate.
     expect(allSql.match(/returned\.outreach_property_id = sl\.outreach_property_id/g)).toHaveLength(1);
-    // The send log scan is now shared by the timeline, quarterly summary and
-    // dispatch aggregates instead of being repeated (and billed) three times.
     expect((allSql.match(/FROM outreach_send_logs sl/g) || []).length).toBeLessThanOrEqual(3);
     expect(allSql).toContain('returned.quarter_key = rq.period_key');
     expect(allSql).toContain('quarter_status_sent.status = \'sent\'');

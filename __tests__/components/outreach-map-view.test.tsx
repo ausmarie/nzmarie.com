@@ -732,6 +732,48 @@ describe('OutreachMapView', () => {
     expect(clusterRequests).toHaveLength(1);
   });
 
+  it('does not refit the selected street when coordinates refresh after a send', async () => {
+    installMockMap();
+    const sentMarkerTitles: string[] = [];
+    const OriginalMarker = (globalThis.google as any).maps.Marker;
+    (globalThis.google as any).maps.Marker = class extends OriginalMarker {
+      constructor(options: { title?: string }) {
+        super(options);
+        if (options.title) sentMarkerTitles.push(options.title);
+      }
+    };
+    const makePayload = (status: 'unsent' | 'sent') => {
+      const payload = coordsPayload([{ runId: 1, totalPending: 1 }]);
+      const address = payload.groups[0].streets[0].addressCoords![0];
+      address.status = status;
+      address.sent = status === 'sent';
+      return payload;
+    };
+    const fetchMock = vi.fn(async (_url: RequestInfo, _init?: RequestInit) => ({
+      ok: true,
+      json: async () => makePayload(fetchMock.mock.calls.length > 1 ? 'sent' : 'unsent'),
+    }));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const props = {
+      suburb: 'Torbay',
+      activeRunId: null,
+      selectedStreet: 'Glamorgan Drive',
+      sentStatus: 'all' as const,
+      onRunSelect: vi.fn(),
+      onStreetSelect: vi.fn(),
+    };
+    const { rerender } = render(<OutreachMapView {...props} refreshKey={0} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockFitBounds).toHaveBeenCalledTimes(1));
+
+    rerender(<OutreachMapView {...props} refreshKey={1} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(sentMarkerTitles.some((title) => title.includes('Sent'))).toBe(true));
+    expect(mockFitBounds).toHaveBeenCalledTimes(1);
+  });
+
   it('shows the nearest unsent address after locating', async () => {
     installMockMap();
     Object.defineProperty(globalThis.navigator, 'geolocation', {
