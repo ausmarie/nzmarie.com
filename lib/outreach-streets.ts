@@ -69,8 +69,34 @@ export function mergeAddressStatus(
 export function buildStreetSummaries(rows: AddressRow[], suburb: string, includeAddressCoords: boolean = false): StreetSummary[] {
   const map = new Map<string, StreetSummary>();
   const streetAddressKey = new Map<string, Map<string, { id: string | null; lat: number; lng: number; address: string; sent: boolean; status: 'unsent' | 'sent' | 'junk' }>>();
+  const uniqueRows = new Map<string, AddressRow>();
 
   for (const r of rows) {
+    const normalizedAddress = String(r.property_address ?? '').trim();
+    const addressKey = r.id == null
+      ? normalizedAddress.toLocaleLowerCase().replace(/\s+/g, ' ')
+      : String(r.id);
+    const rowKey = `${r.street}\u0000${addressKey}`;
+    const existing = uniqueRows.get(rowKey);
+    if (!existing) {
+      uniqueRows.set(rowKey, { ...r });
+      continue;
+    }
+
+    existing.no_junk_mail = Boolean(existing.no_junk_mail || r.no_junk_mail);
+    existing.sent = Boolean(existing.sent || r.sent || r.status === 'sent');
+    if (existing.status !== 'sent' && r.status === 'sent') existing.status = 'sent';
+    const existingHasCoords = existing.lat != null && existing.lng != null;
+    const nextHasCoords = r.lat != null && r.lng != null;
+    if (!existingHasCoords && nextHasCoords) {
+      existing.lat = r.lat;
+      existing.lng = r.lng;
+      existing.house_number = r.house_number ?? existing.house_number;
+    }
+  }
+
+  for (const r of uniqueRows.values()) {
+    const normalizedAddress = String(r.property_address ?? '').trim();
     let s = map.get(r.street);
     if (!s) {
       s = {
@@ -103,7 +129,6 @@ export function buildStreetSummaries(rows: AddressRow[], suburb: string, include
       }
       if (includeAddressCoords) {
         const status = resolveAddressStatus(r as Pick<AddressRow, 'no_junk_mail' | 'sent'> & { status?: string | null });
-        const normalizedAddress = String(r.property_address ?? '').trim();
         const dedupeKey = normalizedAddress.toLowerCase().replace(/\s+/g, ' ');
 
         if (!streetAddressKey.has(r.street)) {

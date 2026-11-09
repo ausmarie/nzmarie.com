@@ -233,5 +233,12 @@ describe('Outreach street-clusters GET - Start street ordering', () => {
     expect(data.runs[0].groups[0].streets[0].street).toBe('Zeta Street');
     expect(data.startStreet).toBe('Zeta Street');
     expect(setStreetClustersInCache).toHaveBeenCalled();
+
+    const addressQuery = String(vi.mocked(marieDB.query).mock.calls[0][0]);
+    expect(addressQuery).toContain('LEFT JOIN properties p_addr');
+    expect(addressQuery).toContain('p.id IS NULL');
+    expect(addressQuery).toContain('p_addr.address = op.property_address');
+    expect(addressQuery).not.toContain('LOWER(TRIM(p_addr.address))');
+    expect(addressQuery).not.toContain('JOIN LATERAL');
   });
 });

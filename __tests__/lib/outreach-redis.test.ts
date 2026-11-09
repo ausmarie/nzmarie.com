@@ -19,6 +19,7 @@ vi.mock('@upstash/redis', () => ({
 }));
 
 import {
+  streetClustersKey,
   outreachCardsKey,
   getOutreachCardsFromCache,
   setOutreachCardsInCache,
@@ -30,6 +31,11 @@ import {
 describe('Outreach Redis Cache Functions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('uses a fresh street-cluster cache version for corrected route counts', () => {
+    expect(streetClustersKey('Albany', 'pending', 'unsent', '2026-Q3', 30))
+      .toBe('street_clusters:albany:pending:unsent:2026-Q3:30:v3');
   });
 
   it('generates consistent outreach cards keys', () => {

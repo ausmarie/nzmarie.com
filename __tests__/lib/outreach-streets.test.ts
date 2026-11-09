@@ -133,5 +133,30 @@ describe('outreach-streets status resolution & deduplication', () => {
       expect(summaries[0].addressCoords![0].status).toBe('junk');
       expect(summaries[0].addressCoords![1].status).toBe('unsent');
     });
+
+    it('counts a repeated outreach row only once when a property join multiplies it', () => {
+      const row: AddressRow = {
+        id: 'outreach-1',
+        street: 'Fearnley Grove',
+        property_address: '20 Fearnley Grove',
+        house_number: 20,
+        lat: -36.7,
+        lng: 174.7,
+        no_junk_mail: false,
+        sent: false,
+        status: 'pending',
+      };
+
+      const [summary] = buildStreetSummaries([
+        row,
+        { ...row, no_junk_mail: true, lat: null, lng: null },
+      ], 'Albany', true);
+
+      expect(summary.address_count).toBe(1);
+      expect(summary.addresses).toEqual(['20 Fearnley Grove']);
+      expect(summary.addressCoords).toHaveLength(1);
+      expect(summary.addressCoords?.[0].status).toBe('junk');
+      expect(summary.addressCoords?.[0].lat).toBe(-36.7);
+    });
   });
 });

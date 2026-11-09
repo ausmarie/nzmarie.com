@@ -113,8 +113,10 @@ export async function GET(request: Request) {
              op.sent_at, op.last_sent_at, op.total_send_count, op.status, op.last_campaign
       FROM outreach_properties op
       LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
-      LEFT JOIN properties p_addr ON LOWER(TRIM(op.property_address)) = LOWER(TRIM(p_addr.address))
-            AND LOWER(TRIM(op.suburb)) = LOWER(TRIM(p_addr.suburb))
+      LEFT JOIN properties p_addr
+        ON p.id IS NULL
+        AND p_addr.address = op.property_address
+        AND p_addr.suburb = op.suburb
       WHERE ${where}
       ORDER BY op.street ASC, op.house_number ASC NULLS LAST, op.property_address ASC
       `,
