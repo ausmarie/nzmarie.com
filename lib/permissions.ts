@@ -14,11 +14,16 @@ export const USER_ACCOUNTS = {
   MARIE: 'nzmarie.com@gmail.com',
 } as const;
 
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
 /**
  * Get user role from email
  */
 export function getUserRole(email: string): UserRole | null {
-  if (email === USER_ACCOUNTS.LOUIS || email === USER_ACCOUNTS.MARIE) {
+  const normalizedEmail = normalizeEmail(email);
+  if (normalizedEmail === USER_ACCOUNTS.LOUIS || normalizedEmail === USER_ACCOUNTS.MARIE) {
     return UserRole.SUPER_ADMIN;
   }
   return null;
@@ -28,14 +33,16 @@ export function getUserRole(email: string): UserRole | null {
  * Check if user is super admin (Louis or Marie)
  */
 export function isSuperAdmin(email: string): boolean {
-  return email === USER_ACCOUNTS.LOUIS || email === USER_ACCOUNTS.MARIE;
+  const normalizedEmail = normalizeEmail(email);
+  return normalizedEmail === USER_ACCOUNTS.LOUIS || normalizedEmail === USER_ACCOUNTS.MARIE;
 }
 
 /**
  * Check if user is admin (Marie or Louis)
  */
 export function isAdmin(email: string): boolean {
-  return email === USER_ACCOUNTS.MARIE || email === USER_ACCOUNTS.LOUIS;
+  const normalizedEmail = normalizeEmail(email);
+  return normalizedEmail === USER_ACCOUNTS.MARIE || normalizedEmail === USER_ACCOUNTS.LOUIS;
 }
 
 /**
@@ -156,9 +163,10 @@ export function getUserInfo(email: string): {
   roleName: string;
 } {
   const role = getUserRole(email);
+  const normalizedEmail = normalizeEmail(email);
   
   return {
-    name: email === USER_ACCOUNTS.LOUIS ? 'Louis' : email === USER_ACCOUNTS.MARIE ? 'Marie' : 'Unknown',
+    name: normalizedEmail === USER_ACCOUNTS.LOUIS ? 'Louis' : normalizedEmail === USER_ACCOUNTS.MARIE ? 'Marie' : 'Unknown',
     role,
     roleName: role === UserRole.SUPER_ADMIN ? 'Super Admin' : role === UserRole.ADMIN ? 'Admin' : 'Unknown',
   };

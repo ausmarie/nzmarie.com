@@ -12,6 +12,7 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('@/lib/db', () => ({
   marieDB: {
     query: vi.fn(),
+    connect: vi.fn(),
     ensureOutreachTablesExist: vi.fn().mockResolvedValue(undefined),
   },
 }));
@@ -32,9 +33,11 @@ function mockSendQueries({
   properties: Array<{ id: string; suburb: string | null }>;
   reports?: Array<{ id: string; suburb: string }>;
 }) {
-  const mockQuery = vi.mocked(marieDB.query);
-  mockQuery.mockImplementation(async (sql: string) => {
+  const mockQuery = vi.fn(async (sql: string, _params?: unknown[]) => {
     if (sql.includes('FROM outreach_properties WHERE id = ANY')) {
+      return { rows: properties } as any;
+    }
+    if (sql.includes('FROM outreach_properties') && sql.includes('FOR UPDATE')) {
       return { rows: properties } as any;
     }
     if (sql.includes('INSERT INTO outreach_send_logs')) {
@@ -53,6 +56,11 @@ function mockSendQueries({
     }
     return { rows: [] } as any;
   });
+  vi.mocked(marieDB.connect).mockResolvedValue({
+    query: mockQuery,
+    release: vi.fn(),
+  } as any);
+  vi.mocked(marieDB.query).mockImplementation(mockQuery as any);
   return mockQuery;
 }
 
@@ -114,6 +122,12 @@ describe('Outreach Send and History API Routes', () => {
       expect(updateCall![0]).toContain('FROM unnest($1::uuid[], $3::text[])');
       expect(updateCall![0]).toContain("status = CASE WHEN op.status = 'pending' THEN 'sent' ELSE op.status END");
       expect(updateCall![1]).toEqual([['prop-1'], 'nzlouis.com@gmail.com', ['2026_Q2_Oteha']]);
+      expect(mockQuery.mock.calls[0][0]).toBe('BEGIN');
+      expect(mockQuery.mock.calls.some((call) => call[0] === 'COMMIT')).toBe(true);
+      const propertyLockCall = mockQuery.mock.calls.find((call) =>
+        String(call[0]).includes('FOR UPDATE')
+      );
+      expect(propertyLockCall?.[0]).toContain('ORDER BY id');
     });
 
     it('re-tags campaign keys per property suburb before the bulk insert', async () => {
@@ -176,6 +190,55 @@ describe('Outreach Send and History API Routes', () => {
         ['Oteha'],
         ['2026_Q3_Oteha'],
       ]);
+    });
+
+    it('changes an existing pending quarter status to sent even when it has historical sends', async () => {
+      const mockQuery = mockSendQueries({
+        properties: [{ id: 'prop-1', suburb: 'Oteha' }],
+      });
+
+      const response = await POST(
+        sendRequest({
+          property_ids: ['prop-1'],
+          suburb_report_id: 'report-3',
+          campaign_key: '2026_Q3_Oteha',
+        })
+      );
+      expect(response.status).toBe(200);
+
+      const upsertCall = mockQuery.mock.calls.find((call) =>
+        String(call[0]).includes('INSERT INTO outreach_property_quarter_status')
+      );
+      expect(upsertCall).toBeDefined();
+      expect(upsertCall![0]).toContain(
+        "WHEN outreach_property_quarter_status.status = 'pending' THEN 'sent'"
+      );
+      expect(upsertCall![0]).not.toContain('WHEN outreach_property_quarter_status.sent_count = 0');
+    });
+
+    it('rolls back the complete send when a quarter status update fails', async () => {
+      const mockQuery = mockSendQueries({
+        properties: [{ id: 'prop-1', suburb: 'Oteha' }],
+      });
+      const originalImplementation = mockQuery.getMockImplementation()!;
+      mockQuery.mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (sql.includes('INSERT INTO outreach_property_quarter_status')) {
+          throw new Error('Quarter status update failed');
+        }
+        return originalImplementation(sql, params);
+      });
+
+      const response = await POST(
+        sendRequest({
+          property_ids: ['prop-1'],
+          suburb_report_id: 'report-3',
+          campaign_key: '2026_Q3_Oteha',
+        })
+      );
+
+      expect(response.status).toBe(500);
+      expect(mockQuery.mock.calls.at(-1)?.[0]).toBe('ROLLBACK');
+      expect(mockQuery.mock.calls.some((call) => call[0] === 'COMMIT')).toBe(false);
     });
 
     it('looks up active reports once when no report id is supplied', async () => {
@@ -244,18 +307,21 @@ describe('Outreach Send and History API Routes', () => {
       );
       expect(response.status).toBe(200);
 
-      const statements = mockQuery.mock.calls.map((call) => String(call[0]));
+      const statements = [
+        ...mockQuery.mock.calls,
+        ...vi.mocked(marieDB.query).mock.calls,
+      ].map((call) => String(call[0]));
       expect(statements).toContain('REFRESH MATERIALIZED VIEW mv_suburb_quarter_summary');
       expect(statements).toContain('REFRESH MATERIALIZED VIEW mv_quarter_overview');
       expect(statements).toContain('REFRESH MATERIALIZED VIEW mv_dispatch_timeline');
       expect(statements.some((statement) => statement.includes('refresh_quarter_mv_incremental'))).toBe(false);
       expect(invalidateDashboardStatsCache).toHaveBeenCalledOnce();
       expect(invalidateStreetClustersForSuburb).toHaveBeenCalledWith('Oteha');
-      const lastRefreshCall = mockQuery.mock.calls.findIndex((call) =>
+      const lastRefreshCall = vi.mocked(marieDB.query).mock.calls.findIndex((call) =>
         String(call[0]).startsWith('REFRESH MATERIALIZED VIEW mv_dispatch_timeline')
       );
       expect(vi.mocked(invalidateDashboardStatsCache).mock.invocationCallOrder[0]).toBeGreaterThan(
-        mockQuery.mock.invocationCallOrder[lastRefreshCall]
+        vi.mocked(marieDB.query).mock.invocationCallOrder[lastRefreshCall]
       );
     });
   });

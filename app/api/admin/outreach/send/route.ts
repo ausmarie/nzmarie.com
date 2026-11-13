@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
 import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
+import type { PoolClient } from 'pg';
 
 // Forces the suburb segment of a campaign key (e.g. "2026_Q2_Fairview Heights")
 // to match the property being sent, so sends are never logged under the wrong
@@ -34,6 +35,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  let client: PoolClient | null = null;
+  let transactionStarted = false;
+
   try {
     await marieDB.ensureOutreachTablesExist?.();
     const body = await request.json() as {
@@ -59,12 +63,26 @@ export async function POST(request: Request) {
       );
     }
 
-    const propertiesResult = await marieDB.query(
-      `SELECT id, suburb FROM outreach_properties WHERE id = ANY($1::uuid[])`,
-      [property_ids]
+    const propertyIds = Array.from(new Set(property_ids));
+    const transactionClient = await marieDB.connect();
+    client = transactionClient;
+    await transactionClient.query('BEGIN');
+    transactionStarted = true;
+
+    const propertiesResult = await transactionClient.query(
+      `SELECT id, suburb
+       FROM outreach_properties
+       WHERE id = ANY($1::uuid[])
+       ORDER BY id
+       FOR UPDATE`,
+      [propertyIds]
     );
 
     if (propertiesResult.rows.length === 0) {
+      await transactionClient.query('ROLLBACK');
+      transactionStarted = false;
+      transactionClient.release();
+      client = null;
       return NextResponse.json(
         { error: 'No matching properties found' },
         { status: 404 }
@@ -73,14 +91,14 @@ export async function POST(request: Request) {
 
     const sendUser = session.user.email;
     const properties = propertiesResult.rows as Array<{ id: string; suburb: string | null }>;
-    const propertyIds = properties.map((property) => property.id);
+    const matchedPropertyIds = properties.map((property) => property.id);
     const campaignKeys = properties.map((property) =>
       campaignKeyForSuburb(campaign_key, property.suburb || '')
     );
     const suburbs = properties.map((property) => property.suburb);
     const affectedSuburbs = new Set(suburbs.filter((suburb): suburb is string => Boolean(suburb)));
 
-    const logResult = await marieDB.query(
+    const logResult = await transactionClient.query(
       `INSERT INTO outreach_send_logs (
         outreach_property_id,
         suburb_report_id,
@@ -104,7 +122,7 @@ export async function POST(request: Request) {
         AS t(outreach_property_id, campaign_key, suburb)
       RETURNING *`,
       [
-        propertyIds,
+        matchedPropertyIds,
         suburb_report_id || null,
         report_title,
         sendUser,
@@ -115,7 +133,7 @@ export async function POST(request: Request) {
     );
     const insertedLogs = logResult.rows;
 
-    await marieDB.query(
+    await transactionClient.query(
       `UPDATE outreach_properties AS op
        SET status = CASE WHEN op.status = 'pending' THEN 'sent' ELSE op.status END,
            total_send_count = COALESCE(op.total_send_count, 0) + 1,
@@ -125,7 +143,7 @@ export async function POST(request: Request) {
            sent_by = $2
        FROM unnest($1::uuid[], $3::text[]) AS t(id, campaign_key)
        WHERE op.id = t.id`,
-      [propertyIds, sendUser, campaignKeys]
+      [matchedPropertyIds, sendUser, campaignKeys]
     );
 
     const quarterInfo = extractQuarterInfo(campaign_key);
@@ -134,7 +152,7 @@ export async function POST(request: Request) {
       if (!suburb_report_id) {
         const reportSuburbs = [...new Set(affectedSuburbs)];
         if (reportSuburbs.length > 0) {
-          const reportResult = await marieDB.query(
+          const reportResult = await transactionClient.query(
             `SELECT id, suburb
              FROM suburb_reports
              WHERE status = 'active' AND quarter = $1 AND year = $2 AND suburb = ANY($3::text[])`,
@@ -162,7 +180,7 @@ export async function POST(request: Request) {
         );
 
       if (quarterRows.length > 0) {
-        await marieDB.query(
+        await transactionClient.query(
           `INSERT INTO outreach_property_quarter_status
             (outreach_property_id, suburb_report_id, suburb, quarter, year, status, sent_count, first_sent_at, last_sent_at, campaign_keys)
            SELECT
@@ -180,7 +198,7 @@ export async function POST(request: Request) {
              AS t(outreach_property_id, suburb_report_id, suburb, campaign_key)
            ON CONFLICT (outreach_property_id, suburb_report_id) DO UPDATE SET
              status = CASE
-               WHEN outreach_property_quarter_status.sent_count = 0 THEN 'sent'
+               WHEN outreach_property_quarter_status.status = 'pending' THEN 'sent'
                ELSE outreach_property_quarter_status.status
              END,
              sent_count = outreach_property_quarter_status.sent_count + 1,
@@ -201,6 +219,11 @@ export async function POST(request: Request) {
         );
       }
     }
+
+    await transactionClient.query('COMMIT');
+    transactionStarted = false;
+    transactionClient.release();
+    client = null;
 
     // Invalidate street-clusters cache for all affected suburbs
     await Promise.all(
@@ -230,6 +253,14 @@ export async function POST(request: Request) {
       logs: insertedLogs,
     });
   } catch (error) {
+    if (client && transactionStarted) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('Error rolling back outreach send:', rollbackError);
+      }
+    }
+    client?.release();
     console.error('Error logging outreach send:', error);
     return NextResponse.json(
       { error: 'Failed to record send log' },
