@@ -55,7 +55,7 @@ describe('GET /api/admin/outreach/suburb-sent-stats', () => {
     expect(body.stats.Torbay).toEqual({ total: 50, sent: 10, unsent: 35 });
   });
 
-  it('uses campaign regex and drops global sent heuristics when quarter is set', async () => {
+  it('uses indexed campaign ranges and drops global sent heuristics when a period is set', async () => {
     mockAuth();
     vi.mocked(marieDB.query).mockResolvedValueOnce({ rows: [] } as any);
 
@@ -66,14 +66,37 @@ describe('GET /api/admin/outreach/suburb-sent-stats', () => {
 
     const sql = vi.mocked(marieDB.query).mock.calls[0][0] as string;
     const params = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
-    expect(sql).toContain('campaign_key ~ $3');
-    expect(sql).toContain('op.last_campaign ~ $3');
+    expect(sql).toContain('WITH period_sent_properties AS');
+    expect(sql).toContain('sl.campaign_key >= $3 AND sl.campaign_key < $4');
+    expect(sql).toContain('op.last_campaign >= $7 AND op.last_campaign < $8');
     expect(sql).not.toContain("op.status = 'sent'");
     expect(sql).not.toContain('total_send_count');
     expect(sql).toContain('no_junk_mail');
     expect(params).toContain('Q3');
     expect(params).toContain(2026);
-    expect(params).toContain('^2026[_-]Q3');
+    expect(params).toContain('2026_Q3');
+    expect(params).toContain('2026-Q3');
+  });
+
+  it('uses indexed campaign prefix ranges for a monthly period', async () => {
+    mockAuth();
+    vi.mocked(marieDB.query).mockResolvedValueOnce({ rows: [] } as any);
+
+    const response = await GET(
+      new Request('http://localhost:3000/api/admin/outreach/suburb-sent-stats?quarter=2026-10')
+    );
+    expect(response.status).toBe(200);
+
+    const sql = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    const params = vi.mocked(marieDB.query).mock.calls[0][1] as unknown[];
+    expect(sql).toContain('sl.campaign_key >= $3 AND sl.campaign_key < $4');
+    expect(sql).not.toContain('campaign_key ~');
+    expect(params).toEqual(expect.arrayContaining([
+      '2026_M10', '2026_M11',
+      '2026-M10', '2026-M11',
+      '2026_10', '2026_11',
+      '2026-10', '2026-11',
+    ]));
   });
 
   it('keeps global sent heuristics when quarter is not set', async () => {

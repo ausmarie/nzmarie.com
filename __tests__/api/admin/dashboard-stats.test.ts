@@ -111,7 +111,7 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(getDashboardStatsCached).toHaveBeenCalledWith(
-      'dashboard:stats:v25:all:all',
+      'dashboard:stats:v27:all:all',
       expect.any(Function),
       600
     );
@@ -918,6 +918,65 @@ describe('GET /api/admin/dashboard/stats', () => {
     // no dispatch activity yet, otherwise the row above is all zeros.
     expect(allSql).toContain('dispatch_period_activity');
     expect(allSql).toContain('(prev.suburb IS NULL OR act.suburb IS NULL)');
+  });
+
+  it('builds monthly audiences from pending and period-specific sent addresses only', async () => {
+    const mockRow = {
+      total_leads: '0', month_leads: '0', leads_by_suburb: [],
+      high_priority_leads: '0', pending_outreach: '0', sent_outreach: '0',
+      today_followups: '0', overdue_followups: '0', today_downloads: '0',
+      total_downloads: '0', month_downloads: '0', total_bookings: '0',
+      month_bookings: '0', qr_codes_total: '0', pdf_reports_total: '0',
+      outreach_by_suburb: null, recent_downloads: null, sent_summary_suburbs: null,
+      sent_summary_suburb_count: '0', sent_summary_total_sent: '0',
+      quarterly_suburb_sent: [],
+      dispatch_by_suburb: [
+        {
+          suburb: 'Mairangi Bay',
+          campaign_key: '2026_M10_Mairangi Bay',
+          period_key: '2026-10',
+          sent_count: '0',
+          junk_count: '0',
+          total_count: '171',
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+      ],
+      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
+      sent_yearly: [], junk_yearly: [],
+    };
+
+    let capturedSql = '';
+    vi.mocked(db.execute).mockImplementation(((query: any) => {
+      const text = JSON.stringify(query?.queryChunks ?? []);
+      capturedSql += text;
+      return { rows: [mockRow] };
+    }) as any);
+
+    const res = await GET(makeRequest());
+    const body = await res.json();
+    const audienceSql = capturedSql.slice(
+      capturedSql.indexOf('dispatch_audience_props AS MATERIALIZED'),
+      capturedSql.indexOf('dispatch_audience_periods AS MATERIALIZED')
+    );
+    const audienceBranches = audienceSql.split('UNION');
+
+    expect(res.status).toBe(200);
+    expect(audienceBranches[3]).toContain("op.status IN ('pending', 'sent')");
+    expect(audienceBranches[3]).toContain('p.no_junk_mail IS NOT TRUE');
+    expect(audienceBranches[4]).toContain('outreach_canonical.period_key = rq.period_key');
+    expect(audienceBranches[4]).toContain("rq.period_type = 'month'");
+    expect(capturedSql).toContain('d.period_key');
+    expect(body.stats.dispatchTrend.bySuburb).toContainEqual(
+      expect.objectContaining({
+        suburb: 'Mairangi Bay-M10-2026',
+        quarter_key: '2026-10',
+        sent_count: 0,
+        unsent_count: 171,
+        total_count: 171,
+      })
+    );
   });
 
   it('reports junk mail per report quarter, not as one running total', async () => {

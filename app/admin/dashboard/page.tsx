@@ -150,7 +150,6 @@ export default function AdminDashboardPage() {
   const [scanLogDateFilter, setScanLogDateFilter] = useState('');
   const [scanLogCampaign, setScanLogCampaign] = useState('');
   const deferredTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fullStatsResolved = useRef(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -172,7 +171,6 @@ export default function AdminDashboardPage() {
   const fetchDashboardData = useCallback(async () => {
     setError(null);
     setShowDeferred(false);
-    fullStatsResolved.current = false;
     if (deferredTimer.current) {
       clearTimeout(deferredTimer.current);
       deferredTimer.current = null;
@@ -183,18 +181,13 @@ export default function AdminDashboardPage() {
       commonParams.set('suburb', suburbFilter);
     }
 
-    const summaryParams = new URLSearchParams(commonParams);
-    summaryParams.set('part', 'summary');
-
     const bookingsParams = new URLSearchParams({ page: '1', limit: '10' });
     if (suburbFilter && suburbFilter !== 'all') {
       bookingsParams.set('suburb', suburbFilter);
     }
 
-    // Summary, full stats and follow-ups are independent requests. The summary
-    // response is small, so the Total Sent / Total Appraisals cards can paint
-    // without waiting for the full dashboard aggregation.
-    const summaryPromise = fetch(`/api/admin/dashboard/stats?${summaryParams}`);
+    // The full response already contains the priority-card summary. Requesting
+    // the summary endpoint separately repeats expensive database aggregation.
     const fullStatsPromise = fetch(
       `/api/admin/dashboard/stats${commonParams.toString() ? `?${commonParams}` : ''}`
     );
@@ -206,26 +199,6 @@ export default function AdminDashboardPage() {
         setShowDeferred(true);
         deferredTimer.current = null;
       }, delayMs);
-    };
-
-    const loadSummary = async () => {
-      try {
-        const res = await summaryPromise;
-        if (!res?.ok) {
-          throw new Error("Failed to fetch dashboard data");
-        }
-        const data = await res.json();
-        if (data?.stats) mergeStats(data.stats);
-      } catch (err) {
-        console.error("Error fetching dashboard summary:", err);
-        setError((prev) =>
-          prev ?? (err instanceof Error ? err.message : "Failed to load dashboard")
-        );
-      } finally {
-        // Fallback in case the full stats request is slow or never resolves:
-        // still reveal the remaining sections shortly after the priority cards.
-        if (!fullStatsResolved.current) scheduleDeferred(600);
-      }
     };
 
     const loadFullStats = async () => {
@@ -242,7 +215,6 @@ export default function AdminDashboardPage() {
           prev ?? (err instanceof Error ? err.message : "Failed to load dashboard")
         );
       } finally {
-        fullStatsResolved.current = true;
         // Defer the heavy sections to the next task so the dispatch charts
         // (batch 2) paint before Scan Trends / scan logs / follow-ups mount.
         scheduleDeferred(0);
@@ -272,7 +244,7 @@ export default function AdminDashboardPage() {
       }
     };
 
-    await Promise.allSettled([loadSummary(), loadFullStats(), loadFollowUps()]);
+    await Promise.allSettled([loadFullStats(), loadFollowUps()]);
   }, [suburbFilter, mergeStats]);
 
   useEffect(() => {

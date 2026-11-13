@@ -425,7 +425,7 @@ export async function GET(request: Request) {
   // succession (e.g. a React effect firing twice) don't both run the heavy
   // aggregation and burn Registers twice. It also makes a stale cached payload
   // from before a fix impossible to keep serving for the whole TTL.
-  const cacheVersion = 25;
+  const cacheVersion = 27;
 
   try {
     await ensureCampaignTablesExist();
@@ -1129,6 +1129,18 @@ export async function GET(request: Request) {
               FROM dispatch_report_periods rq
               JOIN outreach_properties op
                 ON op.suburb = rq.suburb AND op.status IN ('pending', 'sent')
+              LEFT JOIN properties p
+                ON REPLACE(op.property_id::text, '-', '') = p.id
+              WHERE rq.period_type = 'month'
+                AND p.no_junk_mail IS NOT TRUE
+              UNION
+              -- Global sent status may belong to a different report period;
+              -- only add sends explicitly linked to this month.
+              SELECT rq.suburb, rq.period_key, outreach_canonical.pid
+              FROM dispatch_report_periods rq
+              JOIN outreach_canonical
+                ON outreach_canonical.suburb = rq.suburb
+               AND outreach_canonical.period_key = rq.period_key
               WHERE rq.period_type = 'month'
               UNION
               SELECT j.suburb, j.period_key, j.pid
@@ -1237,7 +1249,7 @@ export async function GET(request: Request) {
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(quarter_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, quarter_bucket ORDER BY quarter_bucket) s) as junk_quarterly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (SELECT suburb, campaign_key, TO_CHAR(year_bucket, 'YYYY-MM-DD') AS bucket, COUNT(DISTINCT property_id)::int AS junk FROM junk_props_buckets GROUP BY suburb, campaign_key, year_bucket ORDER BY year_bucket) s) as junk_yearly,
             (SELECT COALESCE(json_agg(row_to_json(s)), '[]') FROM (
-              SELECT d.suburb, d.campaign_key, d.sent_count, COALESCE(d.junk_count, 0) AS junk_count,
+              SELECT d.suburb, d.campaign_key, d.period_key, d.sent_count, COALESCE(d.junk_count, 0) AS junk_count,
                      COALESCE(d.prior_global_junk_count, 0) AS prior_global_junk_count,
                      GREATEST(0, d.total_count - d.sent_count - COALESCE(d.junk_count, 0)) AS unsent_count,
                      d.total_count, d.first_sent_at, d.last_sent_at

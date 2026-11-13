@@ -6,6 +6,7 @@ describe('useAppraisalAlerts', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('shares an in-flight request between initial, focus, and layout refresh triggers', async () => {
@@ -31,6 +32,50 @@ describe('useAppraisalAlerts', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     act(() => window.dispatchEvent(new Event('focus')));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it('polls every two minutes only while visible and refreshes on visibility return', async () => {
+    vi.useFakeTimers();
+    const visibilityState = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { unmount } = renderHook(() => useAppraisalAlerts());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(119_999);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    visibilityState.mockReturnValue('hidden');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    visibilityState.mockReturnValue('visible');
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     unmount();
   });

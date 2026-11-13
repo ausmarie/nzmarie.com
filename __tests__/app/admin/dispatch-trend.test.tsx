@@ -416,6 +416,42 @@ describe('DispatchTrendSection', () => {
     expect(screen.getByText('1 report')).toBeTruthy();
   });
 
+  it('shows October monthly dispatch data in its own period group', () => {
+    const trend: DispatchTrend = {
+      ...mockTrend,
+      bySuburb: [
+        {
+          suburb: 'Mairangi Bay-M10-2026',
+          quarter_key: '2026-10',
+          sent_count: 0,
+          junk_count: 0,
+          unsent_count: 128,
+          total_count: 128,
+          first_sent_at: null,
+          last_sent_at: null,
+        },
+        {
+          suburb: 'Mairangi Bay-Q3-2026',
+          quarter_key: '2026-Q3',
+          sent_count: 12,
+          junk_count: 0,
+          unsent_count: 0,
+          total_count: 12,
+          first_sent_at: '2026-10-01T00:00:00.000Z',
+          last_sent_at: '2026-10-11T00:00:00.000Z',
+        },
+      ],
+    };
+
+    render(<DispatchTrendSection trend={trend} />);
+
+    const rows = screen.getAllByRole('row');
+    expect(rows[1].textContent).toContain('2026-10');
+    expect(rows[2].textContent).toContain('Mairangi Bay');
+    expect(rows[2].textContent).toContain('128 (100%)');
+    expect(rows[3].textContent).toContain('2026-Q3');
+  });
+
   it('shows Pending as sent plus unsent plus junk', () => {
     // Totara Vale 2026-Q2: 158 properties in scope, 30 cannot be mailed because
     // of a No Junk Mail sign, 128 already sent -> Pending 158, Unsent 0.

@@ -55,12 +55,18 @@ export function useAppraisalAlerts() {
 
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000);
-    const onFocus = () => fetchAlerts();
-    window.addEventListener('focus', onFocus);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchAlerts();
+      }
+    };
+    const interval = setInterval(refreshIfVisible, 120_000);
+    window.addEventListener('focus', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
     return () => {
       clearInterval(interval);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
     };
   }, [fetchAlerts]);
 

@@ -952,6 +952,44 @@ describe('Outreach page - List view mobile layout', () => {
     expect(buttonNames.indexOf('Oteha')).toBeLessThan(buttonNames.indexOf('Albany'));
   });
 
+  it('orders report periods newest first, with October before Q3 and Q2', async () => {
+    (global.fetch as any) = vi.fn((url: RequestInfo) => {
+      const s = String(url || '');
+      if (s.includes('/api/admin/outreach/default-report')) {
+        return Promise.resolve({ ok: true, json: async () => ({ success: true, defaultReport: null }) });
+      }
+      if (s.includes('/api/admin/pdf/reports')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            reports: [
+              { suburb: 'Mairangi Bay', quarter: 'M10', year: 2026, id: 'r-oct', uploaded_at: '2026-08-01T00:00:00.000Z' },
+              { suburb: 'Mairangi Bay', quarter: 'Q3', year: 2026, id: 'r-q3', uploaded_at: '2026-11-01T00:00:00.000Z' },
+              { suburb: 'Mairangi Bay', quarter: 'Q2', year: 2026, id: 'r-q2', uploaded_at: '2026-10-01T00:00:00.000Z' },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ success: true, data: [], pagination: { page: 1, limit: 50, total: 0, totalPages: 0 } }) });
+    });
+
+    render(<OutreachPage />);
+    fireEvent.click(await screen.findByRole('button', { name: /Pending/i }));
+
+    const reportSection = (await screen.findByText('📋 Filter by Report')).closest('div') as HTMLElement;
+    await within(reportSection).findByRole('button', { name: /2026-10/ });
+    const periodButtons = within(reportSection).getAllByRole('button').filter((button) =>
+      /^2026-(?:10|Q[1-4])/.test(button.textContent?.trim() || '')
+    );
+
+    expect(periodButtons.map((button) => button.textContent?.trim()?.split(/\s+/)[0])).toEqual([
+      '2026-10',
+      '2026-Q3',
+      '2026-Q2',
+    ]);
+  });
+
   it('filters sent properties by sent date via calendar', async () => {
     const calls: string[] = [];
     (global.fetch as any) = vi.fn((url: RequestInfo) => {

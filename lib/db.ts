@@ -21,6 +21,7 @@ export const marieDB: MarieDBPool = mariePool as MarieDBPool;
 export const pool = mariePool;
 
 let _outreachTableEnsured = false;
+let _outreachTableEnsurePromise: Promise<void> | null = null;
 let _quarterDispatchJunkSchemaEnsured = false;
 let _quarterDispatchJunkSchemaPromise: Promise<void> | null = null;
 
@@ -58,6 +59,15 @@ export async function ensureQuarterDispatchJunkSchema(): Promise<void> {
 
 export async function ensureOutreachTablesExist(): Promise<void> {
   if (_outreachTableEnsured) return;
+  if (_outreachTableEnsurePromise) return _outreachTableEnsurePromise;
+
+  _outreachTableEnsurePromise = ensureOutreachTablesExistOnce().finally(() => {
+    _outreachTableEnsurePromise = null;
+  });
+  return _outreachTableEnsurePromise;
+}
+
+async function ensureOutreachTablesExistOnce(): Promise<void> {
   try {
     const check = await mariePool.query(`
       SELECT

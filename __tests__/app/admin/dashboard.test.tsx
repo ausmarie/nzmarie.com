@@ -923,7 +923,7 @@ describe('Dashboard Stats API', () => {
     }, { timeout: 3000 });
   });
 
-  it('paints the priority cards from the summary while full stats is pending', async () => {
+  it('loads the priority cards from full stats without a duplicate summary request', async () => {
     useSessionMock = vi.fn().mockReturnValue({
       data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
       status: 'authenticated',
@@ -935,37 +935,6 @@ describe('Dashboard Stats API', () => {
     });
 
     (global.fetch as any).mockImplementation((url: string) => {
-      if (String(url).includes('part=summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({
-            success: true,
-            part: 'summary',
-            stats: {
-              sentSummary: {
-                total_sent: 214,
-                suburb_count: 1,
-                suburbs: [{ suburb: 'Oteha', sent_count: 209 }],
-                today: { total_sent: 0, suburbs: [] },
-                quarterly: [],
-              },
-              totalBookings: 9,
-              recentAppraisals: [
-                {
-                  id: 'appraisal-1',
-                  client_name: 'Vi',
-                  email: 'vipleiku@gmail.com',
-                  phone: '',
-                  suburb: 'Sunnynook',
-                  property_address: '249 Sunset Road',
-                  contact_status: 'not_contacted',
-                  created_at: '2026-10-06T05:30:08.784Z',
-                },
-              ],
-            },
-          }),
-        });
-      }
       if (String(url).includes('/api/admin/bookings')) {
         return Promise.resolve({
           ok: true,
@@ -978,28 +947,49 @@ describe('Dashboard Stats API', () => {
     const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
     render(<DashboardPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText('Total Sent')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    expect(screen.getByText('214')).toBeTruthy();
-    expect(screen.getByText('Total Appraisals')).toBeTruthy();
-    expect(screen.getByText('9')).toBeTruthy();
-    expect(screen.getByText('Vi')).toBeTruthy();
-
     const urls = (global.fetch as any).mock.calls.map((call: any[]) => String(call[0]));
-    expect(urls[0]).toContain('part=summary');
-    expect(urls[1]).toBe('/api/admin/dashboard/stats');
+    expect(urls).toContain('/api/admin/dashboard/stats');
+    expect(urls.some((url: string) => url.includes('part=summary'))).toBe(false);
 
-    // Heavy sections stay deferred until the full stats request resolves.
+    // Both priority cards and heavy sections wait for the single stats request.
+    expect(screen.getByText('Total Sent')).toBeTruthy();
+    expect(screen.getByText('Total Appraisals')).toBeTruthy();
     expect(screen.queryByText('Scan Trends')).toBeNull();
 
     resolveFullStats!({
       ok: true,
-      json: () => Promise.resolve({ success: true, stats: {} }),
+      json: () => Promise.resolve({
+        success: true,
+        stats: {
+          sentSummary: {
+            total_sent: 214,
+            suburb_count: 1,
+            suburbs: [{ suburb: 'Oteha', sent_count: 209 }],
+            today: { total_sent: 0, suburbs: [] },
+            quarterly: [],
+          },
+          totalBookings: 9,
+          recentAppraisals: [
+            {
+              id: 'appraisal-1',
+              client_name: 'Vi',
+              email: 'vipleiku@gmail.com',
+              phone: '',
+              suburb: 'Sunnynook',
+              property_address: '249 Sunset Road',
+              contact_status: 'not_contacted',
+              created_at: '2026-10-06T05:30:08.784Z',
+            },
+          ],
+        },
+      }),
     });
 
     await waitFor(() => {
+      expect(screen.getByText('214')).toBeTruthy();
+      const appraisalCard = screen.getByText('Total Appraisals').closest('div.bg-white');
+      expect(appraisalCard?.textContent).toContain('9');
+      expect(screen.getByText('Vi')).toBeTruthy();
       expect(screen.getByText('Scan Trends')).toBeTruthy();
     }, { timeout: 3000 });
   });
@@ -1011,26 +1001,6 @@ describe('Dashboard Stats API', () => {
     });
 
     (global.fetch as any).mockImplementation((url: string) => {
-      if (String(url).includes('part=summary')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({
-            success: true,
-            part: 'summary',
-            stats: {
-              sentSummary: {
-                total_sent: 12,
-                suburb_count: 1,
-                suburbs: [{ suburb: 'Torbay', sent_count: 12 }],
-                today: { total_sent: 0, suburbs: [] },
-                quarterly: [],
-              },
-              totalBookings: 3,
-              recentAppraisals: [],
-            },
-          }),
-        });
-      }
       if (String(url).includes('/api/admin/bookings')) {
         return Promise.resolve({
           ok: true,
@@ -1043,14 +1013,11 @@ describe('Dashboard Stats API', () => {
     const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
     render(<DashboardPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText('Total Sent')).toBeTruthy();
-    }, { timeout: 3000 });
-
-    expect(screen.getByText('12')).toBeTruthy();
+    expect(screen.getByText('Total Sent')).toBeTruthy();
     expect(screen.getByText('Total Appraisals')).toBeTruthy();
     await waitFor(() => {
       expect(screen.getByText(/Failed to fetch dashboard data/i)).toBeTruthy();
     }, { timeout: 3000 });
+    expect(screen.queryByText('12')).toBeNull();
   });
 });

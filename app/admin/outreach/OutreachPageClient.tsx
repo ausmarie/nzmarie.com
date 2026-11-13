@@ -432,7 +432,7 @@ export default function OutreachPage() {
       if (cur === undefined || ts > cur) latestByQuarter.set(label, ts);
     }
     return [...latestByQuarter.entries()]
-      .sort((a, b) => (b[1] || '').localeCompare(a[1] || '') || periodSortValue(b[0]) - periodSortValue(a[0]))
+      .sort((a, b) => periodSortValue(b[0]) - periodSortValue(a[0]) || (b[1] || '').localeCompare(a[1] || ''))
       .map(([q]) => q);
   }, [availableReports]);
 
@@ -5010,7 +5010,7 @@ export function ReportFilterSection({
       if (cur === undefined || ts > cur) latestByQuarter.set(label, ts);
     }
     return [...latestByQuarter.entries()]
-      .sort((a, b) => (b[1] || '').localeCompare(a[1] || '') || periodSortValue(b[0]) - periodSortValue(a[0]))
+      .sort((a, b) => periodSortValue(b[0]) - periodSortValue(a[0]) || (b[1] || '').localeCompare(a[1] || ''))
       .map(([q]) => q);
   }, [availableReports]);
 

@@ -19,10 +19,13 @@ export interface CampaignStats {
 }
 
 let tablesEnsured = false;
+let tablesEnsurePromise: Promise<void> | null = null;
 
 export async function ensureCampaignTablesExist(): Promise<void> {
   if (tablesEnsured) return;
-  try {
+  if (tablesEnsurePromise) return tablesEnsurePromise;
+
+  tablesEnsurePromise = (async () => {
     await marieDB.query(`
       CREATE TABLE IF NOT EXISTS campaign_analytics (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -65,82 +68,17 @@ export async function ensureCampaignTablesExist(): Promise<void> {
     await marieDB.query(`ALTER TABLE campaign_visit_logs ADD COLUMN IF NOT EXISTS ip_subnet VARCHAR(60)`);
     await marieDB.query(`CREATE INDEX IF NOT EXISTS idx_visit_logs_ip_subnet ON campaign_visit_logs(ip_subnet, device_type)`);
 
-    await marieDB.query(`
-      UPDATE campaign_visit_logs
-      SET ip_subnet = CASE
-        WHEN ip_address LIKE '%:%' THEN
-          split_part(ip_address, ':', 1) || ':' || split_part(ip_address, ':', 2) || ':' || split_part(ip_address, ':', 3)
-        ELSE NULL
-      END
-    `);
-
-    await marieDB.query(`
-      UPDATE campaign_visit_logs
-      SET is_new_device = TRUE
-    `);
-
-    await marieDB.query(`
-      UPDATE campaign_visit_logs AS t
-      SET is_new_device = FALSE
-      FROM (
-        SELECT id,
-               ROW_NUMBER() OVER (PARTITION BY visitor_hash ORDER BY created_at ASC) AS rn
-        FROM campaign_visit_logs
-        WHERE visitor_hash IS NOT NULL AND visitor_hash != ''
-      ) ranked
-      WHERE t.id = ranked.id
-        AND ranked.rn > 1
-    `);
-
-    await marieDB.query(`
-      UPDATE campaign_visit_logs AS t
-      SET is_new_device = FALSE
-      FROM (
-        SELECT id,
-               ROW_NUMBER() OVER (PARTITION BY user_agent ORDER BY created_at ASC) AS rn
-        FROM campaign_visit_logs
-        WHERE user_agent IS NOT NULL AND user_agent != ''
-      ) ranked
-      WHERE t.id = ranked.id
-        AND ranked.rn > 1
-    `);
-
-    await marieDB.query(`
-      UPDATE campaign_visit_logs AS t
-      SET is_new_device = FALSE
-      FROM (
-        SELECT id,
-               ROW_NUMBER() OVER (
-                 PARTITION BY
-                   ip_subnet,
-                   device_type
-                 ORDER BY created_at ASC
-               ) AS rn
-        FROM campaign_visit_logs
-        WHERE ip_subnet IS NOT NULL AND ip_subnet LIKE '%:%' AND device_type IS NOT NULL AND device_type != ''
-      ) ranked
-      WHERE t.id = ranked.id
-        AND ranked.rn > 1
-    `);
-
-    await marieDB.query(`
-      UPDATE campaign_analytics ca
-      SET total_uv = COALESCE(sub.uv_count, 0),
-          total_pv = COALESCE(sub.pv_count, 0)
-      FROM (
-        SELECT campaign_key,
-               COUNT(DISTINCT visitor_hash)::int as uv_count,
-               COUNT(*)::int as pv_count
-        FROM campaign_visit_logs
-        GROUP BY campaign_key
-      ) sub
-      WHERE ca.campaign_key = sub.campaign_key
-    `);
-
     tablesEnsured = true;
-  } catch (err) {
-    console.error('Failed to ensure campaign tables exist:', err);
-  }
+  })()
+    .catch((err) => {
+      console.error('Failed to ensure campaign tables exist:', err);
+      throw err;
+    })
+    .finally(() => {
+      tablesEnsurePromise = null;
+    });
+
+  return tablesEnsurePromise;
 }
 
 export function extractIPSubnet(ip: string = ''): string {

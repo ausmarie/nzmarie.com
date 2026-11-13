@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
-import { parseReportQuarter } from '@/lib/outreach-quarter';
+import { campaignPeriodRangePredicate, parseReportQuarter } from '@/lib/outreach-quarter';
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -22,25 +22,58 @@ export async function GET(request: Request) {
     let junkClause = '';
 
     if (qi) {
-      params.push(qi.quarter, qi.year, qi.campaignPattern);      sentClause = `EXISTS (
-        SELECT 1 FROM outreach_send_logs sl
+      params.push(qi.quarter, qi.year);
+      const campaignPredicate = campaignPeriodRangePredicate('sl.campaign_key', qi, params);
+      const lastCampaignPredicate = campaignPeriodRangePredicate('op.last_campaign', qi, params);
+      const suburbMatch = '(sl.suburb = op.suburb OR sr.suburb = op.suburb OR sl.suburb IS NULL)';
+      const periodSent = `WITH period_sent_properties AS (
+        SELECT sl.outreach_property_id
+        FROM outreach_send_logs sl
         LEFT JOIN suburb_reports sr ON sl.suburb_report_id = sr.id
-        WHERE sl.outreach_property_id = op.id
-          AND (sl.suburb = op.suburb OR sr.suburb = op.suburb OR sl.suburb IS NULL)
-          AND ((sr.quarter = $1 AND sr.year = $2) OR sl.campaign_key ~ $3 OR op.last_campaign ~ $3)
-      )`;
-      unsentClause = `NOT EXISTS (
-        SELECT 1 FROM outreach_send_logs sl
+        JOIN outreach_properties op ON op.id = sl.outreach_property_id
+        WHERE sr.quarter = $1 AND sr.year = $2 AND ${suburbMatch}
+        UNION
+        SELECT sl.outreach_property_id
+        FROM outreach_send_logs sl
         LEFT JOIN suburb_reports sr ON sl.suburb_report_id = sr.id
-        WHERE sl.outreach_property_id = op.id
-          AND (sl.suburb = op.suburb OR sr.suburb = op.suburb OR sl.suburb IS NULL)
-          AND ((sr.quarter = $1 AND sr.year = $2) OR sl.campaign_key ~ $3 OR op.last_campaign ~ $3)
+        JOIN outreach_properties op ON op.id = sl.outreach_property_id
+        WHERE ${campaignPredicate} AND ${suburbMatch}
+        UNION
+        SELECT op.id AS outreach_property_id
+        FROM outreach_properties op
+        WHERE ${lastCampaignPredicate}
       )`;
-      junkClause = `AND NOT EXISTS (
-        SELECT 1 FROM properties p
-        WHERE REPLACE(op.property_id::text, '-', '') = p.id
-          AND p.no_junk_mail = true
-      )`;
+      const result = await marieDB.query(
+        `${periodSent}
+        SELECT
+          op.suburb,
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (
+            WHERE sent.outreach_property_id IS NOT NULL
+          )::int AS sent,
+          COUNT(*) FILTER (
+            WHERE sent.outreach_property_id IS NULL
+              AND properties.no_junk_mail IS NOT TRUE
+          )::int AS unsent
+        FROM outreach_properties op
+        LEFT JOIN period_sent_properties sent ON sent.outreach_property_id = op.id
+        LEFT JOIN properties ON REPLACE(op.property_id::text, '-', '') = properties.id
+        WHERE op.suburb IS NOT NULL AND op.suburb <> ''
+          AND op.status IN ('pending', 'sent')
+        GROUP BY op.suburb`,
+        params
+      );
+
+      const stats: Record<string, { total: number; sent: number; unsent: number }> = {};
+      for (const row of result.rows as Record<string, unknown>[]) {
+        stats[String(row.suburb)] = {
+          total: Number(row.total),
+          sent: Number(row.sent),
+          unsent: Number(row.unsent),
+        };
+      }
+
+      return NextResponse.json({ stats });
     } else {
       sentClause = `EXISTS (
         SELECT 1 FROM outreach_send_logs sl
