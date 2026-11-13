@@ -472,6 +472,38 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     expect(dataQuery).not.toContain('CASE WHEN EXISTS');
     expect(dataQuery).not.toContain('@@QUARTER_STATUS@@');
   });
+
+  it('omits listing joins from legacy count queries unless the filter needs them', async () => {
+    process.env.USE_OUTREACH_MV = 'false';
+    mockAuth();
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any);
+
+    const response = await GET(new Request('http://localhost:3000/api/admin/outreach?limit=10'));
+    expect(response.status).toBe(200);
+
+    const countQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[1][0] as string);
+    expect(countQuery).toContain('COUNT(DISTINCT op.id)');
+    expect(countQuery).toContain('LEFT JOIN properties p');
+    expect(countQuery).not.toContain('JOIN real_estate');
+    expect(countQuery).not.toContain('JOIN real_estate_rent');
+  });
+
+  it('only adds the listing table needed by a legacy market-status count filter', async () => {
+    process.env.USE_OUTREACH_MV = 'false';
+    mockAuth();
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any);
+
+    const response = await GET(new Request('http://localhost:3000/api/admin/outreach?market_status=for_sale&limit=10'));
+    expect(response.status).toBe(200);
+
+    const countQuery = normalizeSql(vi.mocked(marieDB.query).mock.calls[1][0] as string);
+    expect(countQuery).toContain('LEFT JOIN real_estate re');
+    expect(countQuery).not.toContain('JOIN real_estate_rent');
+  });
 });
 
 describe('Outreach MV POST /api/admin/outreach (add property)', () => {

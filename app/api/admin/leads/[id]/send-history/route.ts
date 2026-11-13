@@ -47,57 +47,79 @@ export async function GET(
            LOWER(REGEXP_REPLACE(TRIM(COALESCE(NULLIF($6, ''), $4)), '[^[:alnum:]]', '', 'g')) AS suburb
        ),
        property_matches AS (
-         SELECT p.id::text AS id, p.address, p.suburb
+         SELECT
+           p.id::text AS id,
+           LOWER(REGEXP_REPLACE(
+             REGEXP_REPLACE(
+               REGEXP_REPLACE(TRIM(SPLIT_PART(p.address, ',', 1)), '[0-9]{7,}$', ''),
+               '[[:space:]]*/[[:space:]]*', '/', 'g'
+             ),
+             '[^[:alnum:]/]', '', 'g'
+           )) AS street,
+           LOWER(REGEXP_REPLACE(TRIM(p.suburb), '[^[:alnum:]]', '', 'g')) AS suburb
          FROM properties p
          CROSS JOIN target t
-         WHERE ($2::text IS NOT NULL AND REPLACE(p.id::text, '-', '') = REPLACE($2::text, '-', ''))
-            OR (
-              LOWER(REGEXP_REPLACE(
-                REGEXP_REPLACE(
-                  REGEXP_REPLACE(TRIM(SPLIT_PART(p.address, ',', 1)), '[0-9]{7,}$', ''),
-                  '[[:space:]]*/[[:space:]]*', '/', 'g'
-                ),
-                '[^[:alnum:]/]', '', 'g'
-              )) = t.street
-              AND LOWER(REGEXP_REPLACE(TRIM(p.suburb), '[^[:alnum:]]', '', 'g')) = t.suburb
-            )
+         WHERE $2::text IS NOT NULL
+           AND REPLACE(p.id::text, '-', '') = REPLACE($2::text, '-', '')
+         UNION
+         SELECT
+           p.id::text AS id,
+           LOWER(REGEXP_REPLACE(
+             REGEXP_REPLACE(
+               REGEXP_REPLACE(TRIM(SPLIT_PART(p.address, ',', 1)), '[0-9]{7,}$', ''),
+               '[[:space:]]*/[[:space:]]*', '/', 'g'
+             ),
+             '[^[:alnum:]/]', '', 'g'
+           )) AS street,
+           LOWER(REGEXP_REPLACE(TRIM(p.suburb), '[^[:alnum:]]', '', 'g')) AS suburb
+         FROM properties p
+         CROSS JOIN target t
+         WHERE LOWER(REGEXP_REPLACE(
+                 REGEXP_REPLACE(
+                   REGEXP_REPLACE(TRIM(SPLIT_PART(p.address, ',', 1)), '[0-9]{7,}$', ''),
+                   '[[:space:]]*/[[:space:]]*', '/', 'g'
+                 ),
+                 '[^[:alnum:]/]', '', 'g'
+               )) = t.street
+           AND LOWER(REGEXP_REPLACE(TRIM(p.suburb), '[^[:alnum:]]', '', 'g')) = t.suburb
        )
-       SELECT op.id FROM outreach_properties op
+       SELECT op.id
+       FROM outreach_properties op
+       WHERE $1::text IS NOT NULL AND op.id::text = $1::text
+       UNION
+       SELECT op.id
+       FROM outreach_properties op
+       WHERE $2::text IS NOT NULL
+         AND REPLACE(op.property_id::text, '-', '') = REPLACE($2::text, '-', '')
+       UNION
+       SELECT op.id
+       FROM outreach_properties op
        CROSS JOIN target t
-       WHERE ($1::text IS NOT NULL AND op.id::text = $1::text)
-          OR ($2::text IS NOT NULL AND REPLACE(op.property_id::text, '-', '') = REPLACE($2::text, '-', ''))
-          OR (
-            LOWER(REGEXP_REPLACE(
+       WHERE LOWER(REGEXP_REPLACE(
+               REGEXP_REPLACE(
+                 REGEXP_REPLACE(TRIM(SPLIT_PART(op.property_address, ',', 1)), '[0-9]{7,}$', ''),
+                 '[[:space:]]*/[[:space:]]*', '/', 'g'
+               ),
+               '[^[:alnum:]/]', '', 'g'
+             )) = t.street
+         AND LOWER(REGEXP_REPLACE(TRIM(op.suburb), '[^[:alnum:]]', '', 'g')) = t.suburb
+       UNION
+       SELECT op.id
+       FROM outreach_properties op
+       JOIN property_matches p
+         ON REPLACE(op.property_id::text, '-', '') = REPLACE(p.id, '-', '')
+       UNION
+       SELECT op.id
+       FROM outreach_properties op
+       JOIN property_matches p
+         ON LOWER(REGEXP_REPLACE(
               REGEXP_REPLACE(
                 REGEXP_REPLACE(TRIM(SPLIT_PART(op.property_address, ',', 1)), '[0-9]{7,}$', ''),
                 '[[:space:]]*/[[:space:]]*', '/', 'g'
               ),
               '[^[:alnum:]/]', '', 'g'
-            )) = t.street
-            AND LOWER(REGEXP_REPLACE(TRIM(op.suburb), '[^[:alnum:]]', '', 'g')) = t.suburb
-          )
-          OR EXISTS (
-            SELECT 1 FROM property_matches p
-            WHERE REPLACE(op.property_id::text, '-', '') = REPLACE(p.id, '-', '')
-               OR (
-                 LOWER(REGEXP_REPLACE(
-                   REGEXP_REPLACE(
-                     REGEXP_REPLACE(TRIM(SPLIT_PART(op.property_address, ',', 1)), '[0-9]{7,}$', ''),
-                     '[[:space:]]*/[[:space:]]*', '/', 'g'
-                   ),
-                   '[^[:alnum:]/]', '', 'g'
-                 )) =
-                   LOWER(REGEXP_REPLACE(
-                     REGEXP_REPLACE(
-                       REGEXP_REPLACE(TRIM(SPLIT_PART(p.address, ',', 1)), '[0-9]{7,}$', ''),
-                       '[[:space:]]*/[[:space:]]*', '/', 'g'
-                     ),
-                     '[^[:alnum:]/]', '', 'g'
-                   ))
-                 AND LOWER(REGEXP_REPLACE(TRIM(op.suburb), '[^[:alnum:]]', '', 'g')) =
-                   LOWER(REGEXP_REPLACE(TRIM(p.suburb), '[^[:alnum:]]', '', 'g'))
-               )
-          )`,
+            )) = p.street
+        AND LOWER(REGEXP_REPLACE(TRIM(op.suburb), '[^[:alnum:]]', '', 'g')) = p.suburb`,
       [
         lead.source_outreach_id || null,
         lead.property_id || null,

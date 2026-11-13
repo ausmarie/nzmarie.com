@@ -971,12 +971,18 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     const whereStart = query.indexOf('WHERE 1=1');
     const sentinelPos = query.indexOf(ORDER_BY_SENTINEL);
     const whereClause = query.substring(whereStart, sentinelPos);
+    const countNeedsSaleJoin = marketStatus === 'for_sale' || marketStatus === 'not_listed';
+    const countNeedsRentJoin = marketStatus === 'for_rent' || marketStatus === 'not_listed';
     const countBaseQuery = `
-      SELECT COUNT(*) AS total
+      SELECT COUNT(DISTINCT op.id) AS total
       FROM outreach_properties op
       LEFT JOIN properties p ON REPLACE(op.property_id::text, '-', '') = p.id
-      LEFT JOIN real_estate re ON TRIM(LOWER(SPLIT_PART(re.address, ',', 1))) = TRIM(LOWER(p.address)) AND TRIM(LOWER(re.suburb)) = TRIM(LOWER(p.suburb))
-      LEFT JOIN real_estate_rent rer ON TRIM(LOWER(SPLIT_PART(rer.address, ',', 1))) = TRIM(LOWER(p.address)) AND TRIM(LOWER(rer.suburb)) = TRIM(LOWER(p.suburb))
+      ${countNeedsSaleJoin
+        ? "LEFT JOIN real_estate re ON TRIM(LOWER(SPLIT_PART(re.address, ',', 1))) = TRIM(LOWER(p.address)) AND TRIM(LOWER(re.suburb)) = TRIM(LOWER(p.suburb))"
+        : ''}
+      ${countNeedsRentJoin
+        ? "LEFT JOIN real_estate_rent rer ON TRIM(LOWER(SPLIT_PART(rer.address, ',', 1))) = TRIM(LOWER(p.address)) AND TRIM(LOWER(rer.suburb)) = TRIM(LOWER(p.suburb))"
+        : ''}
       ${whereClause}
     `;
     // Use only the WHERE-clause params — excludes startStreet/LIMIT/OFFSET

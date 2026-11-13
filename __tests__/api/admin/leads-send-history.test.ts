@@ -196,6 +196,8 @@ describe('GET /api/admin/leads/[id]/send-history', () => {
     expect(String(matchCall?.[0])).toContain('FROM properties p');
     expect(String(matchCall?.[0])).toContain('property_matches');
     expect(String(matchCall?.[0])).toContain("'[^[:alnum:]/]'");
+    expect(String(matchCall?.[0]).match(/\bUNION\b/g)).toHaveLength(5);
+    expect(String(matchCall?.[0])).not.toContain('OR EXISTS');
     expect(matchCall?.[1]).toEqual([
       null,
       'property-uuid',
@@ -207,6 +209,28 @@ describe('GET /api/admin/leads/[id]/send-history', () => {
 
     const json = await res.json();
     expect(json.history).toHaveLength(1);
+  });
+
+  it('uses separate indexed match branches instead of combining address matches with broad OR predicates', async () => {
+    mockQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          property_address: '4 Carnmore Place, Torbay, Auckland 0630',
+          property_id: null,
+          suburb: 'Torbay',
+          source_outreach_id: null,
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id: 'out-1' }] })
+      .mockResolvedValueOnce({ rows: [{ log_id: 'log-1' }] });
+
+    await GET(sendHistoryRequest('lead-1'), { params: Promise.resolve({ id: 'lead-1' }) });
+
+    const matchQuery = String(mockQuery.mock.calls[1][0]);
+    expect(matchQuery).toContain('UNION');
+    expect(matchQuery).toContain('REPLACE(op.property_id::text, \'-\', \'\')');
+    expect(matchQuery).toContain('LOWER(REGEXP_REPLACE(TRIM(op.suburb)');
+    expect(matchQuery).not.toContain('OR EXISTS');
   });
 
   it('deduplicates outreach_property_ids from source_outreach_id and address match', async () => {
