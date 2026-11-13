@@ -573,6 +573,14 @@ describe('buildMarketPulseHTML', () => {
     }
   });
 
+  it('keeps the comparison bar closely grouped with the KPI cards', () => {
+    const container = document.createElement('div');
+    container.innerHTML = buildMarketPulseHTML(baseProps);
+    const kpiRow = container.firstElementChild?.firstElementChild as HTMLElement;
+
+    expect(kpiRow.style.marginBottom).toBe('8px');
+  });
+
   it('styles the compare bar with the legacy light blue background', () => {
     const container = document.createElement('div');
     container.innerHTML = buildMarketPulseHTML(baseProps);

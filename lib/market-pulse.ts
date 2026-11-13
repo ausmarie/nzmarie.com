@@ -282,7 +282,7 @@ export function buildMarketPulseHTML(props: MarketPulseProps): string {
 
   return `
     <div style="font-family:inherit;">
-      <div style="display:flex;gap:12px;margin-bottom:16px;">
+      <div style="display:flex;gap:12px;margin-bottom:8px;">
         ${kpiCard('medianLabel', 'medianPrice', 'priceNote')}
         ${kpiCard('salesLabel', 'salesCount', 'card2Note')}
         ${kpiCard('daysLabel', 'daysToSell', 'districtLine')}
