@@ -57,10 +57,10 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
             <Image
               src="/img/nzmarie-logo.png"
               alt="Marie Nian | Residential Sales, Barfoot & Thompson"
-              width={120}
-              height={40}
+              width={76}
+              height={26}
               priority
-              className="h-auto w-auto max-h-10"
+              className="h-auto w-auto max-h-7"
             />
           </Link>
 
