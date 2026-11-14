@@ -85,6 +85,13 @@ describe("PropertyListings", () => {
     expect(within(card).getAllByText("Sold").length).toBeGreaterThan(0);
   });
 
+  it("shows only Sold on 62 Lord Street card without the deadline date", () => {
+    render(<PropertyListings />);
+    const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("62 Lord Street"))!;
+    expect(within(card).getAllByText("Sold", { exact: true })).toHaveLength(2);
+    expect(within(card).queryByText(/Sold Wednesday 12 November 2025/)).toBeNull();
+  });
+
   it("shows Negotiation price, For Sale badge, Lifestyle Section and land area on 1 Wake Road card", () => {
     render(<PropertyListings />);
     const card = getCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("1 Wake Road"))!;
@@ -226,6 +233,8 @@ describe("PropertyListings zh (/cn)", () => {
     const card = getZhCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("62 Lord Street"))!;
     expect(within(card).getByText(/属于您的一片自然天地/)).toBeTruthy();
     expect(within(card).getByText(/估值/)).toBeTruthy();
+    expect(within(card).getAllByText("已售", { exact: true })).toHaveLength(2);
+    expect(within(card).queryByText(/已售 2025年11月12日/)).toBeNull();
   });
 
   it("hides 198 Sievers Grove", () => {

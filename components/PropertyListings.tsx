@@ -694,7 +694,11 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
                     $
                   </div>
                   <Text size="2" style={{ color: "var(--gray-11)", fontWeight: 500 }}>
-                    {property.deadline ? `${getStatusText(property.status)} ${property.deadline}` : getStatusText(property.status)}
+                    {property.status === "Sold"
+                      ? getStatusText(property.status)
+                      : property.deadline
+                        ? `${getStatusText(property.status)} ${property.deadline}`
+                        : getStatusText(property.status)}
                   </Text>
                 </Flex>
 
