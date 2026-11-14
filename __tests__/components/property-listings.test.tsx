@@ -29,11 +29,12 @@ function getCardTitles(): string[] {
 }
 
 describe("PropertyListings", () => {
-  it("renders 5 property cards with 2/21 Birdwood Crescent first (top-left)", () => {
+  it("renders 4 property cards with 2/21 Birdwood Crescent first (top-left)", () => {
     render(<PropertyListings />);
     const titles = getCardTitles();
-    expect(titles).toHaveLength(5);
+    expect(titles).toHaveLength(4);
     expect(titles[0]).toBe("2/21 Birdwood Crescent, Parnell, Auckland");
+    expect(titles).not.toContain("198 Sievers Grove, Cannons Creek, Porirua");
   });
 
   it("keeps the existing properties in order after the new card", () => {
@@ -42,7 +43,11 @@ describe("PropertyListings", () => {
     expect(titles[1]).toBe("1 Wake Road, Coatesville, Rodney");
     expect(titles[2]).toBe("62 Lord Street, STOKES VALLEY, Lower Hutt City");
     expect(titles[3]).toBe("1b Arawa Road, Hataitai, Wellington");
-    expect(titles[4]).toBe("198 Sievers Grove, Cannons Creek, Porirua");
+  });
+
+  it("uses the updated section heading", () => {
+    render(<PropertyListings />);
+    expect(screen.getByRole("heading", { level: 2, name: "Selected Track Record & Active Listings" })).toBeTruthy();
   });
 
   it("shows 10 distinct Birdwood gallery images", () => {
@@ -190,7 +195,13 @@ describe("PropertyListings zh (/cn)", () => {
     expect(titles[1]).toBe("1 Wake Road, Coatesville, Rodney");
     expect(titles[2]).toBe("62 Lord Street, STOKES VALLEY, Lower Hutt City");
     expect(titles[3]).toBe("1b Arawa Road, Hataitai, Wellington");
-    expect(titles[4]).toBe("198 Sievers Grove, Cannons Creek, Porirua");
+    expect(titles).toHaveLength(4);
+    expect(titles).not.toContain("198 Sievers Grove, Cannons Creek, Porirua");
+  });
+
+  it("uses the translated section heading", () => {
+    render(<PropertyListings lang="zh" />);
+    expect(screen.getByRole("heading", { level: 2, name: "精选成交与在售房源" })).toBeTruthy();
   });
 
   it("translates 1 Wake Road card: Negotiation→价格面议, Lifestyle Section→生活区分契土地, Chinese description", () => {
@@ -217,10 +228,9 @@ describe("PropertyListings zh (/cn)", () => {
     expect(within(card).getByText(/估值/)).toBeTruthy();
   });
 
-  it("translates 198 Sievers Grove card as 已撤回", () => {
+  it("hides 198 Sievers Grove", () => {
     render(<PropertyListings lang="zh" />);
-    const card = getZhCards().find(c => within(c).getByRole("heading", { level: 3 }).textContent?.includes("198 Sievers Grove"))!;
-    expect(within(card).getByText("已撤回")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 3, name: "198 Sievers Grove, Cannons Creek, Porirua" })).toBeNull();
   });
 
   it("opens modal with Chinese details for 1 Wake Road, title stays English, video/link preserved", () => {

@@ -32,7 +32,7 @@ export const translations = {
             title: "About Me",
             license: "Licensed Residential Sales, Barfoot & Thompson (Under REAA 2008)",
             p1: "With over a decade of experience in finance as a broker for a Hong Kong-listed securities company, I've developed a deep understanding of market trends, negotiation strategies, and decision-making. These skills have seamlessly transitioned into my real estate career, where I guide both buyers and sellers with confidence and expertise.",
-            p2: "Since moving to New Zealand, I've immersed myself in the country's vibrant real estate market, combining my international expertise with a deep understanding of local trends and community dynamics. Having recently relocated to Auckland's North Shore to support my son's education, I bring my proven Wellington success and sharp analytical skills to the dynamic Auckland market.",
+            p2: "Since establishing my real estate career in New Zealand, I have immersed myself in the country's dynamic property market, combining international financial expertise with sharp analytical precision. Based on Auckland's North Shore where my son attends school, I am deeply invested in our local communities and school zones. I bring a proven New Zealand sales track record and data-driven market intelligence to help North Shore homeowners achieve standout results.",
             footer: "Let's work together to make your next move the best one yet. Get in touch with me today!",
             experienceTitle: "Experience",
             skills: [
@@ -80,8 +80,8 @@ export const translations = {
             ],
         },
         properties: {
-            title: "Featured Properties for Sale",
-            subtitle: "Discover premium properties from modern apartments to traditional homes. Marie provides the finest property selections across the Auckland and Wellington regions, ensuring both investment value and living comfort.",
+            title: "Selected Track Record & Active Listings",
+            subtitle: "Discover curated properties from modern coastal residences to classic family homes. Marie provides premier property selections across Auckland's North Shore and Greater Auckland, focusing on long-term capital growth and lifestyle appeal.",
             viewDetails: "View Details",
             bed: "Bedrooms",
             bath: "Bathrooms",
@@ -241,7 +241,7 @@ export const translations = {
             title: "关于我",
             license: "持牌房地产销售人员, Barfoot & Thompson (REAA 2008)",
             p1: "我在金融领域拥有超过十年的经验，曾担任香港上市证券公司的经纪人。这使我对市场趋势、谈判策略和决策制定有深入的理解。这些技能已完美转化为我的房地产事业，让我能以专业和自信指导买卖双方。",
-            p2: "移居新西兰后，我全身心投入到这个充满活力的房地产市场，将国际视野与本地趋势和社区动态相结合。最近，为了支持儿子在当地初中的教育，我搬到了奥克兰北岸。我带着在惠灵顿证明过的成功经验和敏锐的分析能力，致力于服务奥克兰多元化的市场。",
+            p2: "自在新西兰开启房地产职业生涯以来，我全身心投入充满活力的本地房产市场，将国际金融专业背景与敏锐的数据分析能力融为一体。我定居在奥克兰北岸，孩子也在本地就读，因此我对北岸的社区氛围和学区价值有着切身的深入了解。我以经过验证的新西兰房产销售业绩和数据驱动的市场洞察，助力北岸房东实现卓越的成交回报。",
             footer: "让我们共同努力，让您的下一次搬迁成为最明智的选择。今天就联系我吧！",
             experienceTitle: "专业经验",
             skills: [
@@ -289,8 +289,8 @@ export const translations = {
             ],
         },
         properties: {
-            title: "精选待售房源",
-            subtitle: "发现从现代公寓到传统住宅的优质房产。Marie 在奥克兰和惠灵顿地区提供最精选的房产选择，确保投资价值与居住舒适度。",
+            title: "精选成交与在售房源",
+            subtitle: "探索从现代海滨住宅到经典家庭别墅的精选房源。Marie 专注于奥克兰北岸及大奥克兰地区的优质房产，为您甄选兼具长期资本增值潜力与高品质居住体验的理想物业。",
             viewDetails: "查看详情",
             bed: "卧室",
             bath: "卫浴",

@@ -27,6 +27,7 @@ interface PropertyZh {
 
 interface Property {
   id: number;
+  hidden?: boolean;
   title: string;
   price: string;
   location: string;
@@ -270,6 +271,7 @@ If you have a similar property to sell, contact Marie Nian today.`,
   },
   {
     id: 4,
+    hidden: true,
     title: "198 Sievers Grove, Cannons Creek, Porirua",
     price: "Withdrawn",
     location: "198 Sievers Grove, Cannons Creek, Porirua 5024",
@@ -403,7 +405,7 @@ export default function PropertyListings({ lang = "en" }: { lang?: Language }) {
 
         {/* Properties Grid */}
         <Grid columns={{ initial: "1", md: "2" }} gap="6" justify="center">
-          {properties.map((rawProperty) => {
+          {properties.filter((property) => !property.hidden).map((rawProperty) => {
             const property = localizeProperty(rawProperty, lang);
             return (
             <Card
