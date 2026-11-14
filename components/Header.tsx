@@ -11,6 +11,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
   const [open, setOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("home");
   const t = translations[lang].nav;
+  const homeHref = lang === "zh" ? "/cn" : "/";
 
   useEffect(() => {
     const sections = ["home", "about", "appraisal", "service", "properties", "contact"];
@@ -53,7 +54,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
     <header className="default-header sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100">
       <div className="container mx-auto px-4">
         <nav className="flex items-center justify-between py-4">
-          <Link href="#home" aria-label="Go to home" className="navbar-brand">
+          <Link href={homeHref} aria-label="Go to home" className="navbar-brand">
             <Image
               src="/img/nzmarie-logo.png"
               alt="Marie Nian | Residential Sales, Barfoot & Thompson"
@@ -66,35 +67,28 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
 
           <div className="hidden lg:flex items-center space-x-8 text-sm tracking-wider font-medium">
             <Link
-              href="#home"
-              className={linkCls("home")}
-              onClick={() => setActiveSection("home")}
-            >
-              {t.home}
-            </Link>
-            <Link
-              href="#about"
+              href={`${homeHref}#about`}
               className={linkCls("about")}
               onClick={() => setActiveSection("about")}
             >
               {t.about}
             </Link>
             <Link
-              href="#appraisal"
+              href={`${homeHref}#appraisal`}
               className={`hover:text-blue-600 transition-colors duration-300 ${activeSection === "appraisal" || activeSection === "service" ? "text-blue-600 font-semibold" : "text-gray-700"}`}
               onClick={() => setActiveSection("appraisal")}
             >
               {t.service}
             </Link>
             <Link
-              href="#properties"
+              href={`${homeHref}#properties`}
               className={linkCls("properties")}
               onClick={() => setActiveSection("properties")}
             >
               {t.properties}
             </Link>
             <Link
-              href="#contact"
+              href={`${homeHref}#contact`}
               className={linkCls("contact")}
               onClick={() => setActiveSection("contact")}
             >
@@ -140,17 +134,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
         <div className="lg:hidden border-t border-gray-200 bg-white/95">
           <div className="container mx-auto px-4 py-4 flex flex-col space-y-4 font-medium text-sm tracking-wide">
             <Link
-              href="#home"
-              onClick={() => {
-                setActiveSection("home");
-                setOpen(false);
-              }}
-              className={linkCls("home")}
-            >
-              {t.home}
-            </Link>
-            <Link
-              href="#about"
+              href={`${homeHref}#about`}
               onClick={() => {
                 setActiveSection("about");
                 setOpen(false);
@@ -160,7 +144,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.about}
             </Link>
             <Link
-              href="#appraisal"
+              href={`${homeHref}#appraisal`}
               onClick={() => {
                 setActiveSection("appraisal");
                 setOpen(false);
@@ -170,7 +154,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.service}
             </Link>
             <Link
-              href="#properties"
+              href={`${homeHref}#properties`}
               onClick={() => {
                 setActiveSection("properties");
                 setOpen(false);
@@ -180,7 +164,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.properties}
             </Link>
             <Link
-              href="#contact"
+              href={`${homeHref}#contact`}
               onClick={() => {
                 setActiveSection("contact");
                 setOpen(false);
