@@ -64,7 +64,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
             />
           </Link>
 
-          <div className="hidden lg:flex items-center space-x-8 text-sm uppercase tracking-wider font-medium">
+          <div className="hidden lg:flex items-center space-x-8 text-sm tracking-wider font-medium">
             <Link
               href="#home"
               className={linkCls("home")}
@@ -138,7 +138,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
 
       {open && (
         <div className="lg:hidden border-t border-gray-200 bg-white/95">
-          <div className="container mx-auto px-4 py-4 flex flex-col space-y-4 font-medium uppercase text-sm tracking-wide">
+          <div className="container mx-auto px-4 py-4 flex flex-col space-y-4 font-medium text-sm tracking-wide">
             <Link
               href="#home"
               onClick={() => {
