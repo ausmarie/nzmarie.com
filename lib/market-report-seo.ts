@@ -26,8 +26,17 @@ interface PublishedReportRow {
   published_at?: string | Date | null;
 }
 
+const MARKET_REPORT_COVER_IMAGE = `${SITE_URL}/images/north_shore_house.png`;
+const MARKET_REPORT_LOGO = `${SITE_URL}/img/nzmarie-logo.png`;
+
 function absoluteReportUrl(report: PublishedReportRow): string {
   return new URL(marketReportUrl({ ...report, status: 'published' }), SITE_URL).toString();
+}
+
+function validPublishedDate(value: string | Date | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 
 function reportDescription(
@@ -71,7 +80,7 @@ export async function getPublishedMarketReportMetadata(
   }
 
   const result = await query<PublishedReportRow>(
-    `SELECT period_type, period_key, language, published_data_snapshot
+    `SELECT period_type, period_key, language, published_data_snapshot, published_at
      FROM north_shore_market_reports
      WHERE period_type = $1 AND period_key = $2 AND status = 'published'
        AND language = $3
@@ -93,6 +102,8 @@ export async function getPublishedMarketReportMetadata(
   const description = reportDescription(periodLabel, language, report.published_data_snapshot);
   const url = absoluteReportUrl(report);
   const locale = language === 'zh' ? 'zh_CN' : 'en_NZ';
+  const imageAlt = language === 'zh' ? '奥克兰北岸住宅市场报告封面' : 'North Shore property market report cover';
+  const publishedTime = validPublishedDate(report.published_at);
 
   return {
     title,
@@ -105,13 +116,47 @@ export async function getPublishedMarketReportMetadata(
       siteName: 'NZ Marie',
       locale,
       type: 'article',
+      images: [{ url: MARKET_REPORT_COVER_IMAGE, width: 1024, height: 1024, alt: imageAlt }],
+      ...(publishedTime ? { publishedTime } : {}),
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
+      images: [MARKET_REPORT_COVER_IMAGE],
     },
     robots: { index: true, follow: true },
+  };
+}
+
+export function buildMarketReportArticleStructuredData(
+  report: PublishedReportRow,
+  language: MarketReportLanguage,
+): Record<string, unknown> | null {
+  const publishedTime = validPublishedDate(report.published_at);
+  if (!publishedTime) return null;
+
+  const periodLabel = getMarketReportPeriodLabel(report.period_type, report.period_key, language);
+  const url = absoluteReportUrl(report);
+  const headline = language === 'zh'
+    ? `奥克兰北岸房地产市场报告（${periodLabel}）`
+    : `North Shore Market Report (${periodLabel})`;
+  const description = reportDescription(periodLabel, language, report.published_data_snapshot);
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline,
+    description,
+    image: [MARKET_REPORT_COVER_IMAGE],
+    datePublished: publishedTime,
+    author: { '@type': 'Person', name: 'Marie Nian' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'Barfoot & Thompson / NZ Marie',
+      logo: { '@type': 'ImageObject', url: MARKET_REPORT_LOGO },
+    },
+    mainEntityOfPage: { '@type': 'WebPage', '@id': url },
   };
 }
 

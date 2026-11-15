@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
 import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
 import { buildMarketPulseHTML, type MarketPulseProps } from '@/lib/market-pulse';
 import { marketReportChartName } from '@/lib/market-report-document';
@@ -53,11 +53,103 @@ function safeHref(value: unknown): string | null {
   return /^(https?:|mailto:|tel:|\/|#|\?)/i.test(href) ? href : null;
 }
 
-function renderInline(content: RichTextInline[] | string | undefined, key: string): ReactNode {
-  if (typeof content === 'string') return content;
+function reportContactHref(text: string): string | null {
+  const label = text.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (label === 'request a free property appraisal') return '/#appraisal';
+  if (label === 'download your suburb report') return '/#download-report';
+  if (label === '预约免费房产评估') return '/cn#appraisal';
+  if (label === '下载专属子区报告') return '/cn#download-report';
+  if (label === 'm.nian@barfoot.co.nz') return 'mailto:m.nian@barfoot.co.nz';
+  if (/^021(?:[\s-]?0693)(?:[\s-]?089)$/.test(label)) return 'tel:+64210693089';
+  return null;
+}
+
+function normalizeReportPunctuation(content: RichTextInline[]): RichTextInline[] {
+  let precedingText = '';
+  return content.map((item) => {
+    if (item.type === 'text' && typeof item.text === 'string') {
+      let text = item.text.replace(/Report\s+\./g, 'Report.');
+      if (/Download Your Suburb Report\s*$/i.test(precedingText) && /^\s+\./.test(text)) {
+        text = text.replace(/^\s+(?=\.)/, '');
+      }
+      precedingText += item.text;
+      return text === item.text ? item : { ...item, text };
+    }
+
+    precedingText += item.text ?? plainText(item.content);
+    return item;
+  });
+}
+
+function unitalicizedCharacterIndexes(content: RichTextInline[]): Map<number, Set<number>> {
+  const textRuns = content.map((item) => item.text ?? plainText(item.content));
+  const starts: number[] = [];
+  let fullText = '';
+  for (const text of textRuns) {
+    starts.push(fullText.length);
+    fullText += text;
+  }
+
+  const targetIndexes: number[] = [];
+  for (const match of fullText.matchAll(/pre-election/gi)) {
+    targetIndexes.push(match.index! + match[0].indexOf('-'));
+  }
+  for (const match of fullText.matchAll(/021(?:[\s-]?0693)(?:[\s-]?089)\s*\./g)) {
+    targetIndexes.push(match.index! + match[0].lastIndexOf('.'));
+  }
+
+  const result = new Map<number, Set<number>>();
+  for (const targetIndex of targetIndexes) {
+    const itemIndex = textRuns.findIndex((text, index) =>
+      targetIndex >= starts[index] && targetIndex < starts[index] + text.length,
+    );
+    if (itemIndex < 0 || content[itemIndex].type !== 'text') continue;
+    const indexes = result.get(itemIndex) ?? new Set<number>();
+    indexes.add(targetIndex - starts[itemIndex]);
+    result.set(itemIndex, indexes);
+  }
+  return result;
+}
+
+function reportTextWithLinks(text: string, key: string): ReactNode {
+  const normalizedText = text.replace(/Report\s+\./g, 'Report.');
+  const linkPattern = /(Request a Free Property Appraisal|Download Your Suburb Report|预约免费房产评估|下载专属子区报告|m\.nian@barfoot\.co\.nz|021(?:\s|-)?0693(?:\s|-)?089)/gi;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = linkPattern.exec(normalizedText)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(normalizedText.slice(lastIndex, match.index));
+    }
+
+    const href = reportContactHref(match[0])!;
+    parts.push(
+      <a key={`${key}-contact-${match.index}`} href={href} className="text-blue-700 underline">
+        {match[0]}
+      </a>,
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (parts.length === 0) return normalizedText;
+  if (lastIndex < normalizedText.length) parts.push(normalizedText.slice(lastIndex));
+  return parts;
+}
+
+function renderInline(
+  content: RichTextInline[] | string | undefined,
+  key: string,
+  allowContactLinks = true,
+): ReactNode {
+  if (typeof content === 'string') {
+    return allowContactLinks ? reportTextWithLinks(content, key) : content.replace(/Report\s+\./g, 'Report.');
+  }
   if (!content) return null;
 
-  return content.map((item, index) => {
+  const normalizedContent = normalizeReportPunctuation(content);
+  const unitalicizedIndexes = unitalicizedCharacterIndexes(normalizedContent);
+  return normalizedContent.map((item, index) => {
     const itemKey = `${key}-${index}`;
     if (item.type === 'delta') {
       const height = typeof item.props?.height === 'string' ? item.props.height : '36px';
@@ -70,7 +162,42 @@ function renderInline(content: RichTextInline[] | string | undefined, key: strin
       );
     }
 
-    let node: ReactNode = item.text ?? renderInline(item.content, itemKey);
+    if (item.type === 'text' && typeof item.text === 'string') {
+      const exceptionIndexes = unitalicizedIndexes.get(index) ?? new Set<number>();
+      const pieces: Array<{ text: string; suppressItalic: boolean }> = [];
+      let start = 0;
+      for (const position of [...exceptionIndexes].sort((a, b) => a - b)) {
+        if (position > start) pieces.push({ text: item.text.slice(start, position), suppressItalic: false });
+        pieces.push({ text: item.text[position], suppressItalic: true });
+        start = position + 1;
+      }
+      if (start < item.text.length || pieces.length === 0) {
+        pieces.push({ text: item.text.slice(start), suppressItalic: false });
+      }
+
+      return (
+        <span key={itemKey}>
+          {pieces.map((piece, pieceIndex) => {
+            let node: ReactNode = allowContactLinks
+              ? reportTextWithLinks(piece.text, `${itemKey}-${pieceIndex}`)
+              : piece.text.replace(/Report\s+\./g, 'Report.');
+            for (const [style, tag] of TEXT_STYLE_TAGS) {
+              if (item.styles?.[style] === true && !(piece.suppressItalic && style === 'italic')) {
+                const Tag = tag;
+                node = <Tag key={`${itemKey}-${pieceIndex}-${style}`}>{node}</Tag>;
+              }
+            }
+            return <Fragment key={`${itemKey}-piece-${pieceIndex}`}>{node}</Fragment>;
+          })}
+        </span>
+      );
+    }
+
+    let node: ReactNode = item.type === 'text' && typeof item.text === 'string'
+      ? allowContactLinks
+        ? reportTextWithLinks(item.text, itemKey)
+        : item.text.replace(/Report\s+\./g, 'Report.')
+      : item.text ?? renderInline(item.content, itemKey, allowContactLinks && item.type !== 'link');
     for (const [style, tag] of TEXT_STYLE_TAGS) {
       if (item.styles?.[style] === true) {
         const Tag = tag;
@@ -79,7 +206,7 @@ function renderInline(content: RichTextInline[] | string | undefined, key: strin
     }
 
     if (item.type === 'link') {
-      const href = safeHref(item.props?.url);
+      const href = reportContactHref(plainText(item.content)) ?? safeHref(item.props?.url);
       if (href) {
         node = <a key={`${itemKey}-link`} href={href} rel={href.startsWith('http') ? 'noopener noreferrer' : undefined}>{node}</a>;
       }
@@ -142,6 +269,7 @@ function renderBlock(
   index: number,
   snapshot: MarketReportSnapshot,
   language: MarketReportLanguage,
+  headingState: { primaryHeadingRendered: boolean },
 ): ReactNode {
   const key = `${block.type ?? 'block'}-${index}`;
   const alignment = block.props?.textAlignment;
@@ -157,15 +285,28 @@ function renderBlock(
     ? renderInline(block.content, key)
     : null;
   const nested = block.children?.map((child, childIndex) =>
-    renderBlock(child, childIndex, snapshot, language),
+    renderBlock(child, childIndex, snapshot, language, headingState),
   );
 
   let content: ReactNode;
+  let preserveHeadingLevelOneStyle = false;
   switch (block.type) {
     case 'heading': {
-      const level = Number(block.props?.level);
+      const originalLevel = Number(block.props?.level);
+      let level = originalLevel;
+      if (originalLevel === 1) {
+        level = headingState.primaryHeadingRendered ? 2 : 1;
+        preserveHeadingLevelOneStyle = level === 2;
+        headingState.primaryHeadingRendered = true;
+      }
       if (level === 1) content = <h1 className="bn-inline-content">{children}</h1>;
-      else if (level === 2) content = <h2 className="bn-inline-content">{children}</h2>;
+      else if (level === 2) {
+        content = (
+          <h2 className={`bn-inline-content${preserveHeadingLevelOneStyle ? ' market-report-heading-level-1' : ''}`}>
+            {children}
+          </h2>
+        );
+      }
       else if (level === 3) content = <h3 className="bn-inline-content">{children}</h3>;
       else content = <h4 className="bn-inline-content">{children}</h4>;
       break;
@@ -290,9 +431,12 @@ export default function MarketReportStaticContent({
   snapshot: MarketReportSnapshot;
   language: MarketReportLanguage;
 }) {
+  const headingState = { primaryHeadingRendered: false };
   return (
     <div className="market-report-richtext bn-default-styles">
-      {(content as RichTextBlock[]).map((block, index) => renderBlock(block, index, snapshot, language))}
+      {(content as RichTextBlock[]).map((block, index) =>
+        renderBlock(block, index, snapshot, language, headingState),
+      )}
     </div>
   );
 }

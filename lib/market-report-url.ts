@@ -70,7 +70,7 @@ export function parseMarketReportSlug(
 export function marketReportUrl(report: MarketReportRoute): string {
   const slug = marketReportSlug(report.period_type, report.period_key);
   return report.status === 'published'
-    ? `/market-reports/${slug}${publishedLanguagePath(report)}`
+    ? `/market-reports/${slug.toLowerCase()}${publishedLanguagePath(report)}`
     : `/market-reports/preview/${slug}${languageQuery(report)}`;
 }
 

@@ -13,11 +13,18 @@ function looksLikeSessionToken(value: string): boolean {
 }
 
 export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const publicMarketReportPath = /^\/market-reports\/([^/]+)(\/cn)?$/i.exec(pathname);
+  if (publicMarketReportPath && publicMarketReportPath[1] !== publicMarketReportPath[1].toLowerCase()) {
+    const url = request.nextUrl.clone();
+    url.pathname = pathname.replace(publicMarketReportPath[1], publicMarketReportPath[1].toLowerCase());
+    return NextResponse.redirect(url, 301);
+  }
+
   const sessionValue =
     SESSION_COOKIE_NAMES.map((name) => request.cookies.get(name)?.value).find((v) => !!v) ?? '';
 
   const isLoggedIn = !!sessionValue && looksLikeSessionToken(sessionValue);
-  const { pathname } = request.nextUrl;
   const isOnAdminPages = pathname.startsWith('/admin');
   const isOnLoginPage = pathname === '/admin/login';
 
@@ -36,5 +43,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*'],
+  matcher: ['/admin/:path*', '/market-reports/:path*'],
 };

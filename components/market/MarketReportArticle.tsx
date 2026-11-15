@@ -4,11 +4,13 @@ import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-re
 import { ensureMarketReportRichTextContent, ensureMarketReportTitleIcon } from '@/lib/market-report-document';
 import { getDefaultMarketReportFooter } from '@/lib/market-report-footer';
 import { marketReportUrl } from '@/lib/market-report-url';
+import { buildMarketReportArticleStructuredData } from '@/lib/market-report-seo';
 import MarketReportStaticContent from './MarketReportStaticContent';
 
 export interface MarketReportArticleData {
   language?: MarketReportLanguage;
   footer?: string | null;
+  publishedAt?: string | Date | null;
   content: ReportEditorContent;
   dataSnapshot: MarketReportSnapshot;
 }
@@ -26,6 +28,15 @@ export default function MarketReportArticle({
     ensureMarketReportRichTextContent(report.content ?? [], snapshot, language),
   );
   const footer = report.footer ?? getDefaultMarketReportFooter(snapshot, language);
+  const structuredData = !preview
+    ? buildMarketReportArticleStructuredData({
+        period_type: snapshot.periodType,
+        period_key: snapshot.periodKey,
+        language,
+        published_at: report.publishedAt,
+        published_data_snapshot: { metrics: snapshot.metrics },
+      }, language)
+    : null;
   const marketReportsHref = marketReportUrl({
     period_type: snapshot.periodType,
     period_key: snapshot.periodKey,
@@ -35,6 +46,12 @@ export default function MarketReportArticle({
   return (
     <div className={`${preview ? 'absolute inset-0 overflow-y-auto' : 'min-h-screen'} bg-white text-slate-900`}>
       {!preview && <Header lang={language} marketReportsHref={marketReportsHref} />}
+      {structuredData && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }}
+        />
+      )}
       {preview && (
         <div className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-900">
           {language === 'zh' ? '仅供预览 — 此草稿尚未公开。' : 'Preview only — this draft is not public.'}

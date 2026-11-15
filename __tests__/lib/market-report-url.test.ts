@@ -25,7 +25,7 @@ describe('Market report URLs', () => {
       period_type: 'quarterly',
       period_key: '2026-Q3',
       status: 'published',
-    })).toBe('/market-reports/Q3-2026');
+    })).toBe('/market-reports/q3-2026');
   });
 
   it('creates admin editor, draft preview, and published-version URLs', () => {
@@ -51,11 +51,15 @@ describe('Market report URLs', () => {
     expect(marketReportDraftUrl(report)).toBe('/admin/market/draft/October-2026?lang=zh');
     expect(marketReportDraftPreviewUrl(report)).toBe('/admin/market/draft/October-2026/preview?lang=zh');
     expect(marketReportAdminPublicUrl(report)).toBe('/admin/market/public/October-2026?lang=zh');
-    expect(marketReportUrl(report)).toBe('/market-reports/October-2026/cn');
+    expect(marketReportUrl(report)).toBe('/market-reports/october-2026/cn');
   });
 
   it('parses month and quarter slugs and rejects invalid periods', () => {
     expect(parseMarketReportSlug('October-2026')).toEqual({
+      periodType: 'monthly',
+      periodKey: '2026-10',
+    });
+    expect(parseMarketReportSlug('october-2026')).toEqual({
       periodType: 'monthly',
       periodKey: '2026-10',
     });

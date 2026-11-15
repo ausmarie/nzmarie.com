@@ -58,6 +58,11 @@ body {
   min-height: 1.5em;
 }
 
+.market-report-richtext .market-report-heading-level-1 {
+  font-size: 3em;
+  line-height: 1.5;
+}
+
 /* Custom styles for Marie website */
 .section-gap {
   padding: 100px 0;

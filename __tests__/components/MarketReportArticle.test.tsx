@@ -70,6 +70,120 @@ describe('MarketReportArticle', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'North Shore Market Report' })).toBeTruthy();
   });
 
+  it('keeps only the report title as h1 and demotes later level-one headings to h2', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [
+            'North Shore Market Report',
+            'October 2026 Housing Market Update (Spring Edition)',
+            'North Shore Market Pulse (October 2026)',
+            'REINZ Market Trends',
+          ].map((text) => ({
+            type: 'heading',
+            props: { level: 1 },
+            content: [{ type: 'text', text, styles: {} }],
+          })) as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    expect(document.querySelectorAll('h1')).toHaveLength(1);
+    expect(screen.getByRole('heading', { level: 1, name: 'North Shore Market Report' })).toBeTruthy();
+    const pulseHeading = screen.getByRole('heading', { level: 2, name: 'North Shore Market Pulse (October 2026)' });
+    expect(pulseHeading.className).toContain('market-report-heading-level-1');
+    expect(screen.getByRole('heading', { level: 2, name: 'REINZ Market Trends' }).className)
+      .toContain('market-report-heading-level-1');
+  });
+
+  it('links report note actions and contact details and fixes the extra punctuation space', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [{
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: 'Request a Free Property Appraisal, ',
+                styles: { italic: true },
+              },
+              {
+                type: 'link',
+                props: { url: 'http://localhost:3000/#download-report' },
+                content: [{ type: 'text', text: 'Download Your Suburb Report', styles: { italic: true } }],
+              },
+              {
+                type: 'text',
+                text: ' . Contact m.nian@barfoot.co.nz or call 021 0693 089.',
+                styles: { italic: true },
+              },
+            ],
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Request a Free Property Appraisal' }).getAttribute('href')).toBe('/#appraisal');
+    expect(screen.getByRole('link', { name: 'Download Your Suburb Report' }).getAttribute('href')).toBe('/#download-report');
+    expect(screen.getByRole('link', { name: 'm.nian@barfoot.co.nz' }).getAttribute('href')).toBe('mailto:m.nian@barfoot.co.nz');
+    const phoneLink = screen.getByRole('link', { name: '021 0693 089' });
+    expect(phoneLink.getAttribute('href')).toBe('tel:+64210693089');
+    const renderedNote = document.querySelector('.market-report-richtext')?.textContent ?? '';
+    expect(renderedNote).toContain('Download Your Suburb Report. Contact');
+    expect(renderedNote).not.toContain('Report .');
+    expect([...document.querySelectorAll('.market-report-richtext em')].some((em) =>
+      em.textContent?.trimEnd().endsWith('021 0693 089.'),
+    )).toBe(false);
+  });
+
+  it('removes italics from only the hyphen in pre-election', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [{
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Sales Volume Insight: pre', styles: { italic: true } },
+              { type: 'text', text: '-', styles: { italic: true } },
+              { type: 'text', text: 'election activity', styles: { italic: true } },
+            ],
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    const paragraph = [...document.querySelectorAll('.market-report-richtext p')]
+      .find((element) => element.textContent?.includes('pre-election'));
+    expect(paragraph?.textContent).toContain('pre-election');
+    expect([...paragraph?.querySelectorAll('em') ?? []].some((em) => em.textContent?.includes('-'))).toBe(false);
+  });
+
+  it('links the Chinese appraisal and suburb report actions to Chinese homepage sections', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          language: 'zh',
+          content: [{
+            type: 'paragraph',
+            content: [{
+              type: 'text',
+              text: '预约免费房产评估 或 下载专属子区报告',
+              styles: {},
+            }],
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: '预约免费房产评估' }).getAttribute('href')).toBe('/cn#appraisal');
+    expect(screen.getByRole('link', { name: '下载专属子区报告' }).getAttribute('href')).toBe('/cn#download-report');
+  });
+
   it('includes report text and descriptive chart alt text in server-rendered HTML', () => {
     const html = renderToStaticMarkup(
       <MarketReportArticle
@@ -91,6 +205,20 @@ describe('MarketReportArticle', () => {
 
     expect(html).toContain('North Shore market commentary');
     expect(html).toContain('alt="North Shore vs Auckland Region median sale price trend chart, October 2026"');
+  });
+
+  it('renders Article structured data for public reports but not previews', () => {
+    const publicHtml = renderToStaticMarkup(
+      <MarketReportArticle report={{ ...report, publishedAt: '2026-11-15T12:00:00.000Z' }} />,
+    );
+    const previewHtml = renderToStaticMarkup(
+      <MarketReportArticle report={{ ...report, publishedAt: '2026-11-15T12:00:00.000Z' }} preview />,
+    );
+
+    expect(publicHtml).toContain('"@type":"Article"');
+    expect(publicHtml).toContain('"datePublished":"2026-11-15T12:00:00.000Z"');
+    expect(publicHtml).toContain('"name":"Marie Nian"');
+    expect(previewHtml).not.toContain('"@type":"Article"');
   });
 
   it('preserves empty editor paragraphs as visible spacing between report paragraphs', () => {
