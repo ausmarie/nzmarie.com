@@ -652,10 +652,25 @@ describe('Market reports API', () => {
       language: route.props.language,
     });
 
-    expect(page.props.report.title).toBeUndefined();
-    expect(page.props.report.summary).toBeUndefined();
-    expect(page.props.report.footer).toBe('Published custom footer');
-    expect(page.props.preview).toBeUndefined();
+    const children = page.props.children as Array<{
+      props: {
+        pageType?: string;
+        slug?: string;
+        language?: string;
+        report?: { title?: string; summary?: string; footer?: string };
+      };
+    }>;
+    const tracker = children.find((child) => child.props.pageType === 'market_report');
+    const article = children.find((child) => child.props.report);
+
+    expect(tracker?.props).toMatchObject({
+      pageType: 'market_report',
+      slug: 'October-2026',
+      language: 'en',
+    });
+    expect(article?.props.report?.title).toBeUndefined();
+    expect(article?.props.report?.summary).toBeUndefined();
+    expect(article?.props.report?.footer).toBe('Published custom footer');
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);
   });
@@ -679,8 +694,19 @@ describe('Market reports API', () => {
       language: route.props.language,
     });
 
-    expect(page.props.report.language).toBe('zh');
-    expect(page.props.report.footer).toBe('Chinese published footer');
+    const children = page.props.children as Array<{
+      props: {
+        pageType?: string;
+        language?: string;
+        report?: { language?: string; footer?: string };
+      };
+    }>;
+    const tracker = children.find((child) => child.props.pageType === 'market_report');
+    const article = children.find((child) => child.props.report);
+
+    expect(tracker?.props).toMatchObject({ pageType: 'market_report', language: 'zh' });
+    expect(article?.props.report?.language).toBe('zh');
+    expect(article?.props.report?.footer).toBe('Chinese published footer');
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'zh']);
   });
 

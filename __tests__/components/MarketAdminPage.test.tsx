@@ -21,6 +21,7 @@ vi.mock('@/components/market/MarketGenerateReportModal', () => ({
 }));
 
 vi.mock('@/lib/market-report-document', () => ({
+  ensureMarketReportTitleIcon: (content: unknown) => content,
   refreshMarketReportGeneratedBlocks: (content: unknown) => content,
 }));
 
@@ -58,6 +59,26 @@ const report = {
 function configureFetch(reports = [reportSummary]) {
   const savedBodies: Record<string, unknown>[] = [];
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+    if (input === '/api/admin/analytics/page-views') {
+      return {
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: {
+            home: { total: 100, week: 10, month: 25, year: 100 },
+            market: { total: 50, week: 5, month: 12, year: 50 },
+            reports: reports.map((item) => ({
+              id: item.id,
+              period_type: item.period_type,
+              period_key: item.period_key,
+              language: item.language,
+              status: item.status,
+              views: { total: 31, week: 4, month: 9, year: 31 },
+            })),
+          },
+        }),
+      };
+    }
     if (input === '/api/admin/market-reports') {
       return {
         ok: true,
@@ -129,6 +150,18 @@ describe('MarketAdminPage report editing', () => {
     await waitFor(() => expect(savedBodies).toHaveLength(1), { timeout: 3000 });
     expect(savedBodies[0].summary).toBe('Existing introduction');
     expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
+  });
+
+  it('shows selected report views for all requested time ranges', async () => {
+    configureFetch();
+    render(<MarketAdminPage initialSlug="October-2026" />);
+
+    expect(await screen.findByRole('region', { name: 'Report views' })).toBeTruthy();
+    expect(await screen.findByText('Total: 31')).toBeTruthy();
+    expect(screen.getByText('This week')).toBeTruthy();
+    expect(screen.getByText('This month')).toBeTruthy();
+    expect(screen.getByText('This year')).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Report views' }).textContent).toContain('English');
   });
 
   it('saves footer edits with Ctrl+S while keeping Title out of the editor and Edit dialog', async () => {

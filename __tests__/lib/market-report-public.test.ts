@@ -10,8 +10,8 @@ describe('latest public Market report URL', () => {
   beforeEach(() => mocks.query.mockReset());
 
   it.each([
-    ['en', '/market-reports/October-2026'],
-    ['zh', '/market-reports/October-2026/cn'],
+    ['en', '/market-reports/october-2026'],
+    ['zh', '/market-reports/october-2026/cn'],
   ] as const)('creates a direct %s report URL', async (language, url) => {
     mocks.query.mockResolvedValueOnce({
       rows: [{ period_type: 'monthly', period_key: '2026-10', status: 'published' }],

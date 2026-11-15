@@ -9,6 +9,7 @@ import { SuburbFilter } from "@/components/admin/SuburbFilter";
 import DispatchTrendSection, { DispatchTrend } from "@/components/admin/DispatchTrendSection";
 import ScanTrendsChart from "@/components/admin/ScanTrendsChart";
 import CampaignScanLogsPanel from "@/components/admin/CampaignScanLogsPanel";
+import PageViewsCard from "@/components/admin/PageViewsCard";
 import { SUBURB_PRIORITY_ORDER } from "@/lib/suburb-order";
 
 interface SentSummaryItem {
@@ -445,6 +446,7 @@ export default function AdminDashboardPage() {
             )}
           </div>
         </div>
+        <PageViewsCard />
         <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
           <div>
             <div className="flex items-center justify-between mb-4">

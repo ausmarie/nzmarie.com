@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import MainPageContent from "../../components/MainPageContent";
+import PageViewTracker from "@/components/PageViewTracker";
 import { getLatestMarketReportUrl } from "@/lib/market-report-public";
 
 export const revalidate = 300;
@@ -11,5 +12,10 @@ export const metadata: Metadata = {
 
 export default async function HomeCN() {
     const marketReportsHref = await getLatestMarketReportUrl('zh');
-    return <MainPageContent lang="zh" marketReportsHref={marketReportsHref ?? '/market-reports?lang=zh'} />;
+    return (
+        <>
+            <PageViewTracker pageType="home" language="zh" />
+            <MainPageContent lang="zh" marketReportsHref={marketReportsHref ?? '/market-reports?lang=zh'} />
+        </>
+    );
 }

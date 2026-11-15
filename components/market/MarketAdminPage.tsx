@@ -7,6 +7,8 @@ import MarketReportEditor from '@/components/market/MarketReportEditor';
 import MarketGenerateReportModal from '@/components/market/MarketGenerateReportModal';
 import type { MarketReportLanguage, MarketReportSnapshot, MarketReportPeriodType } from '@/lib/market-report-data';
 import { ensureMarketReportTitleIcon, refreshMarketReportGeneratedBlocks } from '@/lib/market-report-document';
+import type { PageViewAnalytics } from '@/lib/page-view-analytics';
+import { pageViewPeriodLabel } from '@/lib/page-view-analytics';
 import {
   marketReportAdminPublicUrl,
   marketReportDraftPreviewUrl,
@@ -59,6 +61,19 @@ function initialContent(value: unknown): ReportEditorContent {
   return Array.isArray(value) ? value as ReportEditorContent : [{ type: 'paragraph' }];
 }
 
+function formatViewCount(value: number): string {
+  return value.toLocaleString('en-NZ');
+}
+
+function ViewMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg bg-white px-3 py-2">
+      <p className="text-[11px] text-slate-500">{label}</p>
+      <p className="mt-0.5 text-lg font-semibold text-slate-900">{formatViewCount(value)}</p>
+    </div>
+  );
+}
+
 export default function MarketAdminPage({
   initialSlug,
   initialLanguage = 'en',
@@ -83,6 +98,10 @@ export default function MarketAdminPage({
   const [footer, setFooter] = useState('');
   const [footerDraft, setFooterDraft] = useState('');
   const [footerDialogOpen, setFooterDialogOpen] = useState(false);
+  const [pageViews, setPageViews] = useState<PageViewAnalytics | null>(null);
+  const [pageViewsError, setPageViewsError] = useState<string | null>(null);
+  const [pageViewsLoading, setPageViewsLoading] = useState(true);
+  const [pageViewsReloadKey, setPageViewsReloadKey] = useState(0);
   const [content, setContent] = useState<ReportEditorContent>([{ type: 'paragraph' }]);
   const [editorRevision, setEditorRevision] = useState(0);
   const [draftRevision, setDraftRevision] = useState(0);
@@ -147,6 +166,36 @@ export default function MarketAdminPage({
   useEffect(() => {
     void loadList();
   }, [loadList]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadPageViews = async () => {
+      setPageViewsLoading(true);
+      setPageViewsError(null);
+      try {
+        const response = await fetch('/api/admin/analytics/page-views', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const result = await response.json() as {
+          success: boolean;
+          data?: PageViewAnalytics;
+          error?: string;
+        };
+        if (!response.ok || !result.success || !result.data) {
+          throw new Error(result.error || 'Failed to load report views.');
+        }
+        setPageViews(result.data);
+      } catch (caught) {
+        if (controller.signal.aborted) return;
+        setPageViewsError(caught instanceof Error ? caught.message : 'Failed to load report views.');
+      } finally {
+        if (!controller.signal.aborted) setPageViewsLoading(false);
+      }
+    };
+    void loadPageViews();
+    return () => controller.abort();
+  }, [pageViewsReloadKey]);
 
   useEffect(() => {
     if (!initialSlug) return;
@@ -369,6 +418,7 @@ export default function MarketAdminPage({
   const statusLabel = active?.status === 'published' && active.has_unpublished_changes
     ? 'Published · draft changes'
     : active?.status || '';
+  const activePageViews = active && pageViews?.reports.find((report) => report.id === active.id);
 
   return (
     <div className="flex h-full min-h-0 overflow-hidden bg-white">
@@ -468,6 +518,11 @@ export default function MarketAdminPage({
                             {report.status}{report.has_unpublished_changes ? ' · edited' : ''}
                           </span>
                         </span>
+                        <span className="mt-1 block text-[10px] text-slate-500">
+                          {pageViewsLoading && !pageViews
+                            ? 'Loading views…'
+                            : `Views: ${formatViewCount(pageViews?.reports.find((item) => item.id === report.id)?.views.total ?? 0)}`}
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -564,6 +619,45 @@ export default function MarketAdminPage({
                 <p className="py-12 text-center text-sm text-slate-500">Loading report…</p>
               ) : (
                 <>
+                  <section aria-label="Report views" className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h2 className="font-semibold text-slate-900">Report Views</h2>
+                        <p className="text-xs text-slate-600">
+                          {pageViewPeriodLabel(active)} · {active.language === 'zh' ? 'Chinese' : 'English'}
+                        </p>
+                      </div>
+                      {activePageViews && (
+                        <p className="text-sm font-semibold text-blue-900">
+                          Total: {formatViewCount(activePageViews.views.total)}
+                        </p>
+                      )}
+                    </div>
+                    {pageViewsError ? (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-red-700">
+                        <span role="alert">Views unavailable: {pageViewsError}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPageViewsReloadKey((key) => key + 1)}
+                          className="font-medium underline"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : pageViewsLoading && !pageViews ? (
+                      <p role="status" className="mt-3 text-sm text-slate-500">Loading views…</p>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {([
+                          ['This week', 'week'],
+                          ['This month', 'month'],
+                          ['This year', 'year'],
+                        ] as const).map(([label, key]) => (
+                          <ViewMetric key={key} label={label} value={activePageViews?.views[key] ?? 0} />
+                        ))}
+                      </div>
+                    )}
+                  </section>
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4">
                     <div>
                       <h2 className="font-semibold text-slate-900">REINZ Analytics data</h2>

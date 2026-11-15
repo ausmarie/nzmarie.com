@@ -1,0 +1,50 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
+import type { MarketReportLanguage } from '@/lib/market-report-data';
+
+type PageViewTrackerProps =
+  | { pageType: 'home'; language: MarketReportLanguage }
+  | { pageType: 'market_report'; language: MarketReportLanguage; slug: string };
+
+export default function PageViewTracker(props: PageViewTrackerProps) {
+  const lastTrackedKey = useRef<string | null>(null);
+  const { pageType, language } = props;
+  const slug = props.pageType === 'market_report' ? props.slug : undefined;
+
+  useEffect(() => {
+    const key = `${pageType}:${language}:${slug ?? ''}`;
+    if (lastTrackedKey.current === key) return;
+    lastTrackedKey.current = key;
+
+    const payload = {
+      eventId: crypto.randomUUID(),
+      pageType,
+      language,
+      ...(pageType === 'market_report' && slug ? { slug } : {}),
+    };
+    const body = JSON.stringify(payload);
+    try {
+      if (navigator.sendBeacon?.('/api/track-page-view', new Blob([body], { type: 'application/json' }))) {
+        return;
+      }
+    } catch (error) {
+      console.warn('Page-view beacon failed:', error);
+    }
+
+    void fetch('/api/track-page-view', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    }).then((response) => {
+      if (!response.ok) {
+        console.warn(`Page-view tracking returned HTTP ${response.status}.`);
+      }
+    }).catch((error: unknown) => {
+      console.warn('Page-view tracking request failed:', error);
+    });
+  }, [language, pageType, slug]);
+
+  return null;
+}
