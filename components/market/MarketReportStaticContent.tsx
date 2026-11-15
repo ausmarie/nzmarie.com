@@ -337,9 +337,15 @@ function renderBlock(
         </div>
       );
       break;
-    case 'quote':
-      content = <blockquote className="bn-inline-content">{children}</blockquote>;
+    case 'quote': {
+      const isNote = /^(?:note\s*:|提示\s*[:：])/i.test(inlineText(block.content).trim());
+      content = (
+        <blockquote className={`bn-inline-content${isNote ? ' market-report-note' : ''}`}>
+          {children}
+        </blockquote>
+      );
       break;
+    }
     case 'codeBlock':
       content = <pre className="bn-inline-content"><code>{inlineText(block.content)}</code></pre>;
       break;

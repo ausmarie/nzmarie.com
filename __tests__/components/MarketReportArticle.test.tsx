@@ -70,6 +70,36 @@ describe('MarketReportArticle', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'North Shore Market Report' })).toBeTruthy();
   });
 
+  it('applies the same Note styling hook to English and Chinese note quotes only', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [
+            {
+              type: 'quote',
+              content: [{ type: 'text', text: 'Note: Market data reflects broad trends.', styles: {} }],
+            },
+            {
+              type: 'quote',
+              content: [{ type: 'text', text: '提示：数据反映整体市场趋势。', styles: {} }],
+            },
+            {
+              type: 'quote',
+              content: [{ type: 'text', text: 'A quoted market observation.', styles: {} }],
+            },
+          ] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    const quotes = [...document.querySelectorAll('.market-report-richtext blockquote')];
+    expect(quotes).toHaveLength(3);
+    expect(quotes[0].classList.contains('market-report-note')).toBe(true);
+    expect(quotes[1].classList.contains('market-report-note')).toBe(true);
+    expect(quotes[2].classList.contains('market-report-note')).toBe(false);
+  });
+
   it('keeps only the report title as h1 and demotes later level-one headings to h2', () => {
     render(
       <MarketReportArticle
