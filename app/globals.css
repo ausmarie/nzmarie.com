@@ -45,6 +45,27 @@ body {
   font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+.market-report-body,
+.market-report-body :not(.market-report-pulse, .market-report-pulse *) {
+  color: #0f172a !important;
+}
+
+/* BlockNote adds 54px of inline padding to its editor content. */
+.market-report-title {
+  padding-left: calc(1rem + 54px);
+}
+
+.market-report-footer {
+  padding-left: calc(1rem + 54px);
+}
+
+@media (min-width: 640px) {
+  .market-report-title,
+  .market-report-footer {
+    padding-left: calc(2rem + 54px);
+  }
+}
+
 /* Custom styles for Marie website */
 .section-gap {
   padding: 100px 0;

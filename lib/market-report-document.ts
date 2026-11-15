@@ -1,6 +1,6 @@
 import { formatMillions } from '@/lib/market-pulse';
 import type { ReportEditorContent } from '@/types/report';
-import type { MarketReportPoint, MarketReportSnapshot } from '@/lib/market-report-data';
+import { getMarketReportComparisonLabel, type MarketReportPoint, type MarketReportSnapshot } from '@/lib/market-report-data';
 import type { MarketPulseProps } from '@/lib/market-pulse';
 import { monotonePath } from '@/lib/monotone-chart-path';
 
@@ -159,7 +159,7 @@ function createMarketPulseProps(snapshot: MarketReportSnapshot): MarketPulseProp
     card2Note: `Auckland Region Sold: ${districtMetrics?.salesCount?.toLocaleString('en-NZ') ?? '—'}`,
     districtLine: `Auckland Region Avg: ${districtMetrics?.daysToSell == null ? '—' : `${districtMetrics.daysToSell} Days`}`,
     priceNote: `Auckland Region Price: ${formatMillions(districtMetrics?.medianPrice)}`,
-    compareLabel: comparison?.label ?? 'Compared to Previous Period',
+    compareLabel: getMarketReportComparisonLabel(snapshot.periodType, snapshot.periodKey),
     comparePrice: comparison?.medianPriceChange ?? '—',
     compareSales: comparison?.salesCountChange ?? '—',
     compareDays: comparison?.daysToSellChange ?? '—',
@@ -213,7 +213,12 @@ export function ensureMarketReportRichTextContent(
   snapshot: MarketReportSnapshot,
 ): ReportEditorContent {
   const blocks = content as unknown as MarketDocumentBlock[];
-  if (blocks.some((block) => block.type === 'marketPulse')) return content;
+  if (blocks.some((block) => block.type === 'marketPulse')) {
+    const compareLabel = getMarketReportComparisonLabel(snapshot.periodType, snapshot.periodKey);
+    return blocks.map((block) => block.type === 'marketPulse'
+      ? { ...block, props: { ...block.props, compareLabel } }
+      : block) as unknown as ReportEditorContent;
+  }
   const generated = buildMarketReportRichTextContent(snapshot);
   return [
     ...generated,

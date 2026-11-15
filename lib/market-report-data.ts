@@ -300,7 +300,10 @@ function percentageChange(current: number | null, previous: number | null): stri
   return `${change > 0 ? '+' : ''}${change.toFixed(1)}%`;
 }
 
-function comparisonLabel(periodType: MarketReportPeriodType, periodKey: string): string {
+export function getMarketReportComparisonLabel(
+  periodType: MarketReportPeriodType,
+  periodKey: string,
+): string {
   const previousKey = periodKeyFromIndex(periodType, periodIndex(periodType, periodKey) - 1);
   const previousLabel = periodLabel(periodType, previousKey);
   const isSameYear = periodKey.slice(0, 4) === previousKey.slice(0, 4);
@@ -308,7 +311,7 @@ function comparisonLabel(periodType: MarketReportPeriodType, periodKey: string):
     ? MONTH_NAMES[Number(previousKey.slice(5, 7)) - 1]
     : `Q${previousKey.slice(-1)}`;
   if (periodType === 'monthly') {
-    return `Compared to ${isSameYear ? shortLabel : previousLabel}`;
+    return `Compared to Previous Month (${isSameYear ? shortLabel : previousLabel})`;
   }
   return `Compared to Previous Quarter (${isSameYear ? shortLabel : previousLabel})`;
 }
@@ -370,7 +373,7 @@ export function buildMarketReportSnapshot(
     daysToSell: selectedPoint.daysToSell,
   };
   const comparison = {
-    label: comparisonLabel(periodType, periodKey),
+    label: getMarketReportComparisonLabel(periodType, periodKey),
     medianPriceChange: percentageChange(metrics.medianPrice, previousPoint.medianPrice),
     salesCountChange: percentageChange(metrics.salesCount, previousPoint.salesCount),
     daysToSellChange: metrics.daysToSell === null || previousPoint.daysToSell === null

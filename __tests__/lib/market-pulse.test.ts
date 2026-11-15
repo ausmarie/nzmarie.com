@@ -548,6 +548,16 @@ describe('buildMarketPulseHTML', () => {
     expect(daysArrow![1]).toBe('');
   });
 
+  it('preserves the original comparison label and metric label colors', () => {
+    const container = document.createElement('div');
+    container.innerHTML = buildMarketPulseHTML(baseProps);
+
+    const compareLabel = container.querySelector<HTMLElement>('[data-prop="compareLabel"]');
+    const metricLabel = container.querySelector<HTMLElement>('[data-prop="statPriceLabel"]');
+    expect(compareLabel?.parentElement?.style.color).toBe('rgb(30, 64, 175)');
+    expect(metricLabel?.parentElement?.style.color).toBe('rgb(148, 163, 184)');
+  });
+
   it('keeps median price semantics non-inverted so a rise stays green', () => {
     const html = buildMarketPulseHTML({ ...baseProps, comparePrice: '+8.0%' });
     const priceCol = html.match(/data-value-col="comparePrice" style="([^"]*)"/);

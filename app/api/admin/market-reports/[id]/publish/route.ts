@@ -27,7 +27,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   try {
     const existing = await query(
-      `SELECT title, summary, content, data_snapshot, updated_at
+      `SELECT title, summary, content, footer, data_snapshot, updated_at
        FROM north_shore_market_reports
        WHERE id = $1`,
       [id]
@@ -48,6 +48,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
            published_title = title,
            published_summary = summary,
            published_content = content,
+           published_footer = footer,
            published_data_snapshot = data_snapshot,
            published_at = NOW(),
            withdrawn_at = NULL,

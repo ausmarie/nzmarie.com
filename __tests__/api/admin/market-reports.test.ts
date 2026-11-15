@@ -20,6 +20,10 @@ import { POST as regenerateReport } from '@/app/api/admin/market-reports/[id]/re
 import { POST as withdrawReport } from '@/app/api/admin/market-reports/[id]/withdraw/route';
 import { GET as getPublicMarketReports } from '@/app/api/market-reports/route';
 import MarketReportPreviewPage from '@/app/market-reports/preview/[id]/page';
+import PublishedMarketReportPage from '@/app/market-reports/[slug]/page';
+import AdminMarketReportDraftPage from '@/app/admin/market/draft/[slug]/page';
+import AdminMarketReportDraftPreviewPage from '@/app/admin/market/draft/[slug]/preview/page';
+import AdminMarketReportPublicPage from '@/app/admin/market/public/[slug]/page';
 
 const reportId = '11111111-1111-4111-8111-111111111111';
 const validContent = [{ type: 'paragraph', content: [{ type: 'text', text: 'North Shore market commentary', styles: {} }] }];
@@ -152,7 +156,7 @@ describe('Market reports API', () => {
     expect(response.status).toBe(201);
     expect(body.snapshot.metrics).toEqual({ medianPrice: 1130000, salesCount: 260, daysToSell: 43 });
     expect(body.snapshot.comparison).toEqual({
-      label: 'Compared to September',
+      label: 'Compared to Previous Month (September)',
       medianPriceChange: '-2.4%',
       salesCountChange: '-8.8%',
       daysToSellChange: '-7',
@@ -194,7 +198,7 @@ describe('Market reports API', () => {
 
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ success: true, id: reportId, reused: true });
-    expect(body.snapshot.comparison.label).toBe('Compared to September');
+    expect(body.snapshot.comparison.label).toBe('Compared to Previous Month (September)');
     expect(mocks.query.mock.calls[1][1]).toEqual(['monthly', '2026-10']);
     expect(mocks.query.mock.calls[2][0]).toContain("has_unpublished_changes = CASE WHEN status = 'draft' THEN FALSE ELSE TRUE END");
     expect(mocks.query.mock.calls[2][0]).not.toContain('published_content =');
@@ -203,7 +207,7 @@ describe('Market reports API', () => {
       block.content?.some((item) => item.text === 'North Shore market commentary'),
     )).toBe(true);
     expect(updatedContent.find((block: { type: string }) => block.type === 'marketPulse').props.compareLabel)
-      .toBe('Compared to September');
+      .toBe('Compared to Previous Month (September)');
   });
 
   it('generates a report using the selected data range and report name', async () => {
@@ -320,13 +324,28 @@ describe('Market reports API', () => {
     const response = await PUT(request({
       title: 'Updated report',
       summary: 'Updated summary',
+      footer: 'Custom footer text',
       content: validContent,
     }, 'PUT'), context());
 
     expect(response.status).toBe(200);
     const [sql] = mocks.query.mock.calls[0];
     expect(sql).toContain('has_unpublished_changes = CASE WHEN status =');
+    expect(sql).toContain('footer = COALESCE($5, footer)');
+    expect(mocks.query.mock.calls[0][1][4]).toBe('Custom footer text');
     expect(sql).not.toContain('published_content =');
+  });
+
+  it('rejects footers longer than 4,000 characters before database access', async () => {
+    const response = await PUT(request({
+      title: 'October report',
+      summary: 'Summary',
+      footer: 'x'.repeat(4001),
+      content: validContent,
+    }, 'PUT'), context());
+
+    expect(response.status).toBe(400);
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 
   it('deletes a report only for an authorized admin and validates its id', async () => {
@@ -386,6 +405,7 @@ describe('Market reports API', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.query.mock.calls[1][0]).toContain('published_content = content');
+    expect(mocks.query.mock.calls[1][0]).toContain('published_footer = footer');
     expect(mocks.query.mock.calls[1][0]).toContain('published_data_snapshot = data_snapshot');
   });
 
@@ -476,20 +496,97 @@ describe('Market reports API', () => {
     expect(JSON.stringify(body)).not.toContain('Private withdrawn summary');
   });
 
-  it('renders the authenticated preview from the dedicated North Shore report table', async () => {
+  it('renders the authenticated preview from a month-based report URL', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         title: 'October preview',
         summary: 'Preview summary',
         content: validContent,
+        footer: 'Custom draft footer',
         data_snapshot: { periodKey: '2026-10' },
         published_at: null,
       }],
     });
 
-    const page = await MarketReportPreviewPage({ params: Promise.resolve({ id: reportId }) });
+    const page = await MarketReportPreviewPage({ params: Promise.resolve({ id: 'October-2026' }) });
 
     expect(page.props.report.title).toBe('October preview');
+    expect(page.props.report.footer).toBe('Custom draft footer');
     expect(mocks.query.mock.calls[0][0]).toContain('FROM north_shore_market_reports');
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+  });
+
+  it('loads the editor for an authenticated admin draft URL', async () => {
+    const page = await AdminMarketReportDraftPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+    });
+
+    expect(page.props.initialSlug).toBe('October-2026');
+    expect(mocks.query).not.toHaveBeenCalled();
+  });
+
+  it('renders an authenticated draft preview from its admin preview URL', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        title: 'October draft',
+        summary: 'Draft summary',
+        content: validContent,
+        footer: 'Draft footer',
+        data_snapshot: { periodKey: '2026-10' },
+      }],
+    });
+
+    const page = await AdminMarketReportDraftPreviewPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+    });
+
+    expect(page.props.preview).toBe(true);
+    expect(page.props.report.title).toBe('October draft');
+    expect(page.props.report.footer).toBe('Draft footer');
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+  });
+
+  it('renders published reports from their month-based public URL', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        published_title: 'October 2026',
+        published_summary: 'Published summary',
+        published_content: validContent,
+        published_footer: 'Published custom footer',
+        published_data_snapshot: { periodKey: '2026-10' },
+      }],
+    });
+
+    const page = await PublishedMarketReportPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+    });
+
+    expect(page.props.report.title).toBe('October 2026');
+    expect(page.props.report.footer).toBe('Published custom footer');
+    expect(page.props.preview).toBeUndefined();
+    expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+  });
+
+  it('renders the published revision from the authenticated admin public URL', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        published_title: 'October 2026',
+        published_summary: 'Published summary',
+        published_content: validContent,
+        published_footer: 'Published footer',
+        published_data_snapshot: { periodKey: '2026-10' },
+      }],
+    });
+
+    const page = await AdminMarketReportPublicPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+    });
+
+    expect(page.props.preview).toBeUndefined();
+    expect(page.props.report.title).toBe('October 2026');
+    expect(page.props.report.footer).toBe('Published footer');
+    expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
   });
 });

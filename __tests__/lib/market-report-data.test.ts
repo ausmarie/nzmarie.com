@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildMarketReportSnapshot,
   getDefaultMarketReportDataRange,
+  getMarketReportComparisonLabel,
   getMarketReportWindow,
   isValidMarketReportPeriod,
   type MarketReportSourceRow,
@@ -118,11 +119,22 @@ describe('market report data', () => {
       { startPeriodKey: '2026-10', endPeriodKey: '2026-10' },
     )).toMatchObject({ from: '2026-09-01', to: '2026-11-01' });
     expect(snapshot.comparison).toEqual({
-      label: 'Compared to September',
+      label: 'Compared to Previous Month (September)',
       medianPriceChange: '+13.0%',
       salesCountChange: '-8.8%',
       daysToSellChange: '-7',
     });
+  });
+
+  it('labels monthly and quarterly comparisons with the previous period and year when needed', () => {
+    expect(getMarketReportComparisonLabel('monthly', '2026-10'))
+      .toBe('Compared to Previous Month (September)');
+    expect(getMarketReportComparisonLabel('monthly', '2026-01'))
+      .toBe('Compared to Previous Month (December 2025)');
+    expect(getMarketReportComparisonLabel('quarterly', '2026-Q2'))
+      .toBe('Compared to Previous Quarter (Q1)');
+    expect(getMarketReportComparisonLabel('quarterly', '2026-Q1'))
+      .toBe('Compared to Previous Quarter (Q4 2025)');
   });
 
   it('keeps North Shore cards and adds Auckland Region chart comparison data', () => {

@@ -40,11 +40,22 @@ export async function PUT(request: Request, { params }: RouteContext) {
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   const summary = typeof body.summary === 'string' ? body.summary.trim() : '';
   const content = body.content;
+  const footer = body.footer === undefined
+    ? null
+    : typeof body.footer === 'string'
+      ? body.footer
+      : null;
   if (!title || title.length > 255) {
     return NextResponse.json({ success: false, error: 'Title is required and must be 255 characters or fewer.' }, { status: 400 });
   }
   if (summary.length > 4000) {
     return NextResponse.json({ success: false, error: 'Summary must be 4,000 characters or fewer.' }, { status: 400 });
+  }
+  if (body.footer !== undefined && typeof body.footer !== 'string') {
+    return NextResponse.json({ success: false, error: 'Footer must be text.' }, { status: 400 });
+  }
+  if (footer !== null && footer.length > 4000) {
+    return NextResponse.json({ success: false, error: 'Footer must be 4,000 characters or fewer.' }, { status: 400 });
   }
   if (!Array.isArray(content)) {
     return NextResponse.json({ success: false, error: 'Report content must be a rich-text block array.' }, { status: 400 });
@@ -56,12 +67,13 @@ export async function PUT(request: Request, { params }: RouteContext) {
        SET title = $2,
            summary = $3,
            content = $4::jsonb,
+           footer = COALESCE($5, footer),
            has_unpublished_changes = CASE WHEN status = 'draft' THEN FALSE ELSE TRUE END,
-           updated_by = $5,
+           updated_by = $6,
            updated_at = NOW()
        WHERE id = $1
        RETURNING updated_at, status, has_unpublished_changes`,
-      [id, title, summary, JSON.stringify(content), email]
+      [id, title, summary, JSON.stringify(content), footer, email]
     );
     if (result.rows.length === 0) return NextResponse.json({ success: false, error: 'Report not found.' }, { status: 404 });
     return NextResponse.json({ success: true, ...result.rows[0] });

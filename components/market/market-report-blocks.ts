@@ -3,7 +3,11 @@ import { buildMarketPulseHTML, statDirection, type MarketPulseProps } from '@/li
 
 export type MarketPulseFlushRegistry = Map<string, () => void>;
 
-function createMarketPulseBlock(editable: boolean, flushRegistry?: MarketPulseFlushRegistry) {
+function createMarketPulseBlock(
+  editable: boolean,
+  flushRegistry?: MarketPulseFlushRegistry,
+  onEdit?: () => void,
+) {
   return createBlockSpec(
     {
       type: 'marketPulse' as const,
@@ -31,6 +35,7 @@ function createMarketPulseBlock(editable: boolean, flushRegistry?: MarketPulseFl
       render: (block, editor) => {
         const blockId = block.id;
         const container = document.createElement('div');
+        container.classList.add('market-report-pulse');
         container.style.cssText = 'width:100%;min-width:0;box-sizing:border-box;font-family:inherit;';
         container.innerHTML = buildMarketPulseHTML(block.props as MarketPulseProps, editable);
 
@@ -71,6 +76,7 @@ function createMarketPulseBlock(editable: boolean, flushRegistry?: MarketPulseFl
             flush();
           });
           container.addEventListener('input', (event) => {
+            onEdit?.();
             const target = event.target as HTMLElement | null;
             const prop = target?.dataset.prop;
             if (prop === 'comparePrice' || prop === 'compareSales' || prop === 'compareDays') updateArrow(prop);
@@ -87,11 +93,15 @@ function createMarketPulseBlock(editable: boolean, flushRegistry?: MarketPulseFl
   );
 }
 
-export function createMarketReportSchema(editable: boolean, flushRegistry?: MarketPulseFlushRegistry) {
+export function createMarketReportSchema(
+  editable: boolean,
+  flushRegistry?: MarketPulseFlushRegistry,
+  onEdit?: () => void,
+) {
   return BlockNoteSchema.create({
     blockSpecs: {
       ...defaultBlockSpecs,
-      marketPulse: createMarketPulseBlock(editable, flushRegistry)(),
+      marketPulse: createMarketPulseBlock(editable, flushRegistry, onEdit)(),
     },
   });
 }

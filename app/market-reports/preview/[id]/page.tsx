@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import MarketReportArticle from '@/components/market/MarketReportArticle';
-import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
+import { getMarketReportAdminEmail } from '@/lib/market-report-access';
+import { parseMarketReportSlug } from '@/lib/market-report-url';
 import { query } from '@/lib/db';
 import type { MarketReportSnapshot } from '@/lib/market-report-data';
 import type { ReportEditorContent } from '@/types/report';
@@ -15,14 +16,15 @@ export default async function MarketReportPreviewPage({
   const email = await getMarketReportAdminEmail();
   if (!email) redirect('/admin/login');
 
-  const { id } = await params;
-  if (!isUuid(id)) notFound();
+  const { id: slug } = await params;
+  const period = parseMarketReportSlug(slug);
+  if (!period) notFound();
 
   const result = await query(
-    `SELECT title, summary, content, data_snapshot, published_at
+    `SELECT title, summary, content, footer, data_snapshot, published_at
      FROM north_shore_market_reports
-     WHERE id = $1`,
-    [id]
+     WHERE period_type = $1 AND period_key = $2`,
+    [period.periodType, period.periodKey]
   );
   const report = result.rows[0];
   if (!report) notFound();
@@ -34,8 +36,8 @@ export default async function MarketReportPreviewPage({
         title: String(report.title),
         summary: String(report.summary || ''),
         content: Array.isArray(report.content) ? report.content as ReportEditorContent : [],
+        footer: typeof report.footer === 'string' ? report.footer : null,
         dataSnapshot: report.data_snapshot as MarketReportSnapshot,
-        publishedAt: null,
       }}
     />
   );
