@@ -1,20 +1,11 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import Header from '@/components/Header';
-import { query } from '@/lib/db';
-import {
-  type MarketReportLanguage,
-  type MarketReportPeriodType,
-} from '@/lib/market-report-data';
-import { marketReportUrl, parseMarketReportLanguage } from '@/lib/market-report-url';
+import type { MarketReportLanguage } from '@/lib/market-report-data';
+import { getLatestMarketReportUrl } from '@/lib/market-report-public';
+import { parseMarketReportLanguage } from '@/lib/market-report-url';
 
 export const dynamic = 'force-dynamic';
-
-interface LatestMarketReport {
-  period_type: MarketReportPeriodType;
-  period_key: string;
-  status: 'published' | 'withdrawn';
-}
 
 interface MarketReportsPageProps {
   searchParams?: Promise<{ lang?: string | string[] }>;
@@ -41,25 +32,9 @@ export async function generateMetadata({ searchParams }: MarketReportsPageProps)
 
 export default async function MarketReportsPage({ searchParams }: MarketReportsPageProps) {
   const language = getLanguage(await searchParams);
-  const result = await query<LatestMarketReport>(
-    `SELECT period_type, period_key, status
-     FROM north_shore_market_reports
-     WHERE language = $1 AND status IN ('published', 'withdrawn')
-     ORDER BY
-       CASE
-         WHEN period_type = 'monthly'
-           THEN split_part(period_key, '-', 1)::integer * 12
-             + split_part(period_key, '-', 2)::integer
-         ELSE split_part(period_key, '-Q', 1)::integer * 12
-           + split_part(period_key, '-Q', 2)::integer * 3
-       END DESC,
-       CASE WHEN period_type = 'monthly' THEN 1 ELSE 0 END DESC
-     LIMIT 1`,
-    [language],
-  );
-  const latest = result.rows[0]?.status === 'published' ? result.rows[0] : null;
+  const reportUrl = await getLatestMarketReportUrl(language);
   const chinese = language === 'zh';
-  if (latest) redirect(marketReportUrl({ ...latest, language }));
+  if (reportUrl) redirect(reportUrl);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">

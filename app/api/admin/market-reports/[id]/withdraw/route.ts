@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
+import { revalidateMarketReportHomePages } from '@/lib/market-report-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (result.rows.length === 0) {
       return NextResponse.json({ success: false, error: 'Only a published report can be withdrawn.' }, { status: 409 });
     }
+    revalidateMarketReportHomePages();
     return NextResponse.json({ success: true, ...result.rows[0] });
   } catch (error) {
     console.error('Failed to withdraw Market report:', error);

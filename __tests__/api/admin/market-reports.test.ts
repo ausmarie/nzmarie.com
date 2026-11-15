@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   query: vi.fn(),
   isSuperAdmin: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/db', () => ({ query: mocks.query }));
 vi.mock('@/lib/permissions', () => ({ isSuperAdmin: mocks.isSuperAdmin }));
+vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock('@/components/market/MarketReportArticle', () => ({
   default: (props: unknown) => props,
 }));
@@ -47,6 +49,7 @@ describe('Market reports API', () => {
     mocks.auth.mockReset();
     mocks.query.mockReset();
     mocks.isSuperAdmin.mockReset();
+    mocks.revalidatePath.mockReset();
     mocks.auth.mockResolvedValue({ user: { email: 'admin@example.com' } });
     mocks.isSuperAdmin.mockReturnValue(true);
   });
@@ -401,6 +404,10 @@ describe('Market reports API', () => {
     expect(await response.json()).toEqual({ success: true });
     expect(mocks.query.mock.calls[0][0]).toContain('DELETE FROM north_shore_market_reports WHERE id = $1');
     expect(mocks.query.mock.calls[0][1]).toEqual([reportId]);
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      ['/', 'page'],
+      ['/cn', 'page'],
+    ]);
 
     mocks.query.mockResolvedValueOnce({ rows: [] });
     const missing = await deleteMarketReport(new Request('http://localhost'), context());
@@ -450,6 +457,10 @@ describe('Market reports API', () => {
     expect(mocks.query.mock.calls[1][0]).toContain('published_footer = footer');
     expect(mocks.query.mock.calls[1][0]).toContain('published_data_snapshot = data_snapshot');
     expect(mocks.query.mock.calls[1][1]).toEqual([reportId, updatedAt, 'admin@example.com']);
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      ['/', 'page'],
+      ['/cn', 'page'],
+    ]);
   });
 
   it('only withdraws published reports and preserves their saved content', async () => {
@@ -461,6 +472,18 @@ describe('Market reports API', () => {
     expect(response.status).toBe(409);
     expect(body.error).toContain('Only a published report');
     expect(mocks.query.mock.calls[0][0]).toContain("WHERE id = $1 AND status = 'published'");
+  });
+
+  it('revalidates both localized homepages after withdrawing a report', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: reportId, status: 'withdrawn' }] });
+
+    const response = await withdrawReport(new Request('http://localhost'), context());
+
+    expect(response.status).toBe(200);
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      ['/', 'page'],
+      ['/cn', 'page'],
+    ]);
     expect(mocks.query.mock.calls[0][0]).not.toContain('DELETE');
   });
 

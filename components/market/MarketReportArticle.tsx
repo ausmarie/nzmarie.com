@@ -6,6 +6,7 @@ import type { ReportEditorContent } from '@/types/report';
 import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
 import { ensureMarketReportRichTextContent, ensureMarketReportTitleIcon } from '@/lib/market-report-document';
 import { getDefaultMarketReportFooter } from '@/lib/market-report-footer';
+import { marketReportUrl } from '@/lib/market-report-url';
 
 const MarketReportRichText = dynamic(() => import('./MarketReportRichText'), {
   ssr: false,
@@ -31,9 +32,15 @@ export default function MarketReportArticle({
     ensureMarketReportRichTextContent(report.content ?? [], snapshot, language),
   );
   const footer = report.footer ?? getDefaultMarketReportFooter(snapshot, language);
+  const marketReportsHref = marketReportUrl({
+    period_type: snapshot.periodType,
+    period_key: snapshot.periodKey,
+    status: 'published',
+    language,
+  });
   return (
     <div className={`${preview ? 'absolute inset-0 overflow-y-auto' : 'min-h-screen'} bg-white text-slate-900`}>
-      {!preview && <Header lang={language} />}
+      {!preview && <Header lang={language} marketReportsHref={marketReportsHref} />}
       {preview && (
         <div className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-900">
           {language === 'zh' ? '仅供预览 — 此草稿尚未公开。' : 'Preview only — this draft is not public.'}

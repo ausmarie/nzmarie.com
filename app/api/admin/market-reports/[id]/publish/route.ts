@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
+import { revalidateMarketReportHomePages } from '@/lib/market-report-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,6 +73,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (published.rows.length === 0) {
       return NextResponse.json({ success: false, error: 'The report changed while publishing. Reload and try again.' }, { status: 409 });
     }
+    revalidateMarketReportHomePages();
     return NextResponse.json({ success: true, ...published.rows[0] });
   } catch (error) {
     console.error('Failed to publish Market report:', error);

@@ -56,4 +56,15 @@ describe('public Header Market Reports link', () => {
     expect(languageLinks).toHaveLength(2);
     expect(languageLinks.every((link) => link.getAttribute('href') === href)).toBe(true);
   });
+
+  it('marks Market Reports as active on a published report page and uses its direct link', () => {
+    mocks.usePathname.mockReturnValue('/market-reports/October-2026');
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+
+    render(<Header lang="en" marketReportsHref="/market-reports/October-2026" />);
+
+    const reportsLink = screen.getByRole('link', { name: 'Market Reports' });
+    expect(reportsLink.getAttribute('href')).toBe('/market-reports/October-2026');
+    expect(reportsLink.className).toContain('text-blue-600');
+  });
 });

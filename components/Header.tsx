@@ -9,13 +9,20 @@ import { HamburgerMenuIcon, Cross2Icon } from "@radix-ui/react-icons";
 import { translations, Language } from "../lib/translations";
 import { parseMarketReportSlug } from "@/lib/market-report-url";
 
-export default function Header({ lang = "en" }: { lang?: Language }) {
+export default function Header({
+  lang = "en",
+  marketReportsHref,
+}: {
+  lang?: Language;
+  marketReportsHref?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("home");
   const pathname = usePathname();
   const t = translations[lang].nav;
   const homeHref = lang === "zh" ? "/cn" : "/";
   const marketReportSlug = pathname?.match(/^\/market-reports\/([^/]+)(?:\/cn)?$/)?.[1];
+  const marketReportsActive = pathname?.startsWith('/market-reports') ?? false;
   const langHref = marketReportSlug && parseMarketReportSlug(marketReportSlug)
     ? lang === "zh"
       ? `/market-reports/${marketReportSlug}`
@@ -58,6 +65,8 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
   const linkCls = (id: string) =>
     `hover:text-blue-600 transition-colors duration-300 ${activeSection === id ? "text-blue-600 font-semibold" : "text-gray-700"
     }`;
+  const marketReportsLinkCls =
+    `hover:text-blue-600 transition-colors duration-300 ${marketReportsActive ? "text-blue-600 font-semibold" : "text-gray-700"}`;
 
   return (
     <header className="default-header sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-gray-100">
@@ -90,8 +99,8 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.service}
             </Link>
             <Link
-              href={`/market-reports?lang=${lang}`}
-              className="hover:text-blue-600 transition-colors duration-300 text-gray-700"
+              href={marketReportsHref ?? `/market-reports?lang=${lang}`}
+              className={marketReportsLinkCls}
             >
               {t.marketReports}
             </Link>
@@ -169,9 +178,9 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.service}
             </Link>
             <Link
-              href={`/market-reports?lang=${lang}`}
+              href={marketReportsHref ?? `/market-reports?lang=${lang}`}
               onClick={() => setOpen(false)}
-              className="hover:text-blue-600 transition-colors duration-300 text-gray-700"
+              className={marketReportsLinkCls}
             >
               {t.marketReports}
             </Link>

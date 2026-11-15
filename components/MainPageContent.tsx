@@ -15,11 +15,17 @@ import QRScanTracker from "./QRScanTracker";
 import SectionTracker from "./SectionTracker";
 import { Language } from "../lib/translations";
 
-export default function MainPageContent({ lang = "en" }: { lang?: Language }) {
+export default function MainPageContent({
+    lang = "en",
+    marketReportsHref,
+}: {
+    lang?: Language;
+    marketReportsHref?: string;
+}) {
     return (
         <main>
             <QRScanTracker />
-            <Header lang={lang} />
+            <Header lang={lang} marketReportsHref={marketReportsHref} />
             <SectionTracker name="hero">
                 <Hero lang={lang} />
             </SectionTracker>

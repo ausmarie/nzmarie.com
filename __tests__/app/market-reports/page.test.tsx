@@ -2,9 +2,11 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
-const mocks = vi.hoisted(() => ({ query: vi.fn(), redirect: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getLatestMarketReportUrl: vi.fn(), redirect: vi.fn() }));
 
-vi.mock('@/lib/db', () => ({ query: mocks.query }));
+vi.mock('@/lib/market-report-public', () => ({
+  getLatestMarketReportUrl: mocks.getLatestMarketReportUrl,
+}));
 vi.mock('next/navigation', () => ({
   notFound: () => { throw new Error('NOT_FOUND'); },
   redirect: (url: string) => {
@@ -20,38 +22,34 @@ import MarketReportsPage, { generateMetadata } from '@/app/market-reports/page';
 
 describe('public Market Reports landing page', () => {
   beforeEach(() => {
-    mocks.query.mockReset();
+    mocks.getLatestMarketReportUrl.mockReset();
     mocks.redirect.mockReset();
   });
   afterEach(cleanup);
 
   it('redirects directly to the latest English public report', async () => {
-    mocks.query.mockResolvedValueOnce({
-      rows: [{ period_type: 'monthly', period_key: '2026-10', status: 'published' }],
-    });
+    mocks.getLatestMarketReportUrl.mockResolvedValueOnce('/market-reports/October-2026');
 
     await expect(MarketReportsPage({ searchParams: Promise.resolve({ lang: 'en' }) }))
       .rejects.toThrow('NEXT_REDIRECT:/market-reports/October-2026');
     expect(mocks.redirect).toHaveBeenCalledWith('/market-reports/October-2026');
-    expect(mocks.query.mock.calls[0][1]).toEqual(['en']);
+    expect(mocks.getLatestMarketReportUrl).toHaveBeenCalledWith('en');
   });
 
   it('redirects directly to the latest Chinese public report URL', async () => {
-    mocks.query.mockResolvedValueOnce({
-      rows: [{ period_type: 'monthly', period_key: '2026-10', status: 'published' }],
-    });
+    mocks.getLatestMarketReportUrl.mockResolvedValueOnce('/market-reports/October-2026/cn');
 
     await expect(MarketReportsPage({ searchParams: Promise.resolve({ lang: 'zh' }) }))
       .rejects.toThrow('NEXT_REDIRECT:/market-reports/October-2026/cn');
     expect(mocks.redirect).toHaveBeenCalledWith('/market-reports/October-2026/cn');
-    expect(mocks.query.mock.calls[0][1]).toEqual(['zh']);
+    expect(mocks.getLatestMarketReportUrl).toHaveBeenCalledWith('zh');
   });
 
   it.each([
     ['en', 'Marie is preparing a report based on the latest data. Please check back soon.'],
     ['zh', 'Marie 正在根据最新的数据编写报告，敬请期待。'],
   ] as const)('shows the %s preparation notice when no report is public', async (language, notice) => {
-    mocks.query.mockResolvedValueOnce({ rows: [] });
+    mocks.getLatestMarketReportUrl.mockResolvedValueOnce(null);
 
     render(await MarketReportsPage({ searchParams: Promise.resolve({ lang: language }) }));
 
@@ -60,9 +58,7 @@ describe('public Market Reports landing page', () => {
   });
 
   it('does not present a withdrawn latest report as public', async () => {
-    mocks.query.mockResolvedValueOnce({
-      rows: [{ period_type: 'monthly', period_key: '2026-10', status: 'withdrawn' }],
-    });
+    mocks.getLatestMarketReportUrl.mockResolvedValueOnce(null);
 
     render(await MarketReportsPage({ searchParams: Promise.resolve({ lang: 'en' }) }));
 
