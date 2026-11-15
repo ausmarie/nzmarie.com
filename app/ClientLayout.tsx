@@ -2,21 +2,17 @@
 
 import { Theme } from "@radix-ui/themes";
 import { ChatProvider } from "./ChatProvider";
-import Chatbot from "@/components/Chatbot";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { useState } from "react";
-import { usePathname } from "next/navigation";
 
 export default function ClientLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const isAdmin = pathname?.startsWith("/admin");
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -32,7 +28,6 @@ export default function ClientLayout({
         <ChatProvider>
           <GoogleAnalytics />
           {children}
-          {!isAdmin && <Chatbot />}
           <ToastContainer
             position="bottom-center"
             autoClose={4000}
