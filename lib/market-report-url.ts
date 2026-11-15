@@ -1,5 +1,6 @@
 import {
   isValidMarketReportPeriod,
+  type MarketReportLanguage,
   type MarketReportPeriodType,
 } from '@/lib/market-report-data';
 
@@ -12,6 +13,20 @@ export interface MarketReportRoute {
   period_type: MarketReportPeriodType;
   period_key: string;
   status: string;
+  language?: MarketReportLanguage;
+}
+
+export function parseMarketReportLanguage(value: unknown): MarketReportLanguage | null {
+  if (value === undefined || value === 'en') return 'en';
+  return value === 'zh' ? 'zh' : null;
+}
+
+function languageQuery(report: MarketReportRoute): string {
+  return report.language === 'zh' ? '?lang=zh' : '';
+}
+
+function publishedLanguagePath(report: MarketReportRoute): string {
+  return report.language === 'zh' ? '/cn' : '';
 }
 
 export function marketReportSlug(
@@ -55,18 +70,18 @@ export function parseMarketReportSlug(
 export function marketReportUrl(report: MarketReportRoute): string {
   const slug = marketReportSlug(report.period_type, report.period_key);
   return report.status === 'published'
-    ? `/market-reports/${slug}`
-    : `/market-reports/preview/${slug}`;
+    ? `/market-reports/${slug}${publishedLanguagePath(report)}`
+    : `/market-reports/preview/${slug}${languageQuery(report)}`;
 }
 
 export function marketReportDraftUrl(report: MarketReportRoute): string {
-  return `/admin/market/draft/${marketReportSlug(report.period_type, report.period_key)}`;
+  return `/admin/market/draft/${marketReportSlug(report.period_type, report.period_key)}${languageQuery(report)}`;
 }
 
 export function marketReportDraftPreviewUrl(report: MarketReportRoute): string {
-  return `${marketReportDraftUrl(report)}/preview`;
+  return `/admin/market/draft/${marketReportSlug(report.period_type, report.period_key)}/preview${languageQuery(report)}`;
 }
 
 export function marketReportAdminPublicUrl(report: MarketReportRoute): string {
-  return `/admin/market/public/${marketReportSlug(report.period_type, report.period_key)}`;
+  return `/admin/market/public/${marketReportSlug(report.period_type, report.period_key)}${languageQuery(report)}`;
 }

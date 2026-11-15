@@ -2,16 +2,25 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { IconButton } from "@radix-ui/themes";
 import { HamburgerMenuIcon, Cross2Icon } from "@radix-ui/react-icons";
 
 import { translations, Language } from "../lib/translations";
+import { parseMarketReportSlug } from "@/lib/market-report-url";
 
 export default function Header({ lang = "en" }: { lang?: Language }) {
   const [open, setOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("home");
+  const pathname = usePathname();
   const t = translations[lang].nav;
   const homeHref = lang === "zh" ? "/cn" : "/";
+  const marketReportSlug = pathname?.match(/^\/market-reports\/([^/]+)(?:\/cn)?$/)?.[1];
+  const langHref = marketReportSlug && parseMarketReportSlug(marketReportSlug)
+    ? lang === "zh"
+      ? `/market-reports/${marketReportSlug}`
+      : `/market-reports/${marketReportSlug}/cn`
+    : t.langLink;
 
   useEffect(() => {
     const sections = ["home", "about", "appraisal", "service", "properties", "contact"];
@@ -81,6 +90,12 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.service}
             </Link>
             <Link
+              href={`/market-reports?lang=${lang}`}
+              className="hover:text-blue-600 transition-colors duration-300 text-gray-700"
+            >
+              {t.marketReports}
+            </Link>
+            <Link
               href={`${homeHref}#properties`}
               className={linkCls("properties")}
               onClick={() => setActiveSection("properties")}
@@ -103,7 +118,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               {t.blog}
             </Link>
             <Link
-              href={t.langLink}
+              href={langHref}
               className="ml-4 px-3 py-1 rounded-full border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all duration-300 font-semibold"
             >
               {t.langToggle}
@@ -112,7 +127,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
 
           <div className="lg:hidden flex items-center gap-4">
             <Link
-              href={t.langLink}
+              href={langHref}
               className="px-2 py-1 text-xs rounded-full border border-blue-600 text-blue-600 font-semibold"
             >
               {t.langToggle}
@@ -152,6 +167,13 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
               className={`font-bold hover:text-blue-600 transition-colors duration-300 ${activeSection === "appraisal" || activeSection === "service" ? "text-blue-600" : "text-gray-700"}`}
             >
               {t.service}
+            </Link>
+            <Link
+              href={`/market-reports?lang=${lang}`}
+              onClick={() => setOpen(false)}
+              className="hover:text-blue-600 transition-colors duration-300 text-gray-700"
+            >
+              {t.marketReports}
             </Link>
             <Link
               href={`${homeHref}#properties`}

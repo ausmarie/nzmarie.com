@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Trash2 } from 'lucide-react';
 import MarketReportEditor from '@/components/market/MarketReportEditor';
 import MarketGenerateReportModal from '@/components/market/MarketGenerateReportModal';
-import type { MarketReportSnapshot, MarketReportPeriodType } from '@/lib/market-report-data';
+import type { MarketReportLanguage, MarketReportSnapshot, MarketReportPeriodType } from '@/lib/market-report-data';
 import { ensureMarketReportTitleIcon, refreshMarketReportGeneratedBlocks } from '@/lib/market-report-document';
 import {
   marketReportAdminPublicUrl,
@@ -20,6 +20,7 @@ interface MarketReportSummary {
   id: string;
   period_type: MarketReportPeriodType;
   period_key: string;
+  language: MarketReportLanguage;
   title: string;
   summary: string;
   status: 'draft' | 'published' | 'withdrawn';
@@ -58,7 +59,13 @@ function initialContent(value: unknown): ReportEditorContent {
   return Array.isArray(value) ? value as ReportEditorContent : [{ type: 'paragraph' }];
 }
 
-export default function MarketAdminPage({ initialSlug }: { initialSlug?: string } = {}) {
+export default function MarketAdminPage({
+  initialSlug,
+  initialLanguage = 'en',
+}: {
+  initialSlug?: string;
+  initialLanguage?: MarketReportLanguage;
+} = {}) {
   const router = useRouter();
   const [reports, setReports] = useState<MarketReportSummary[]>([]);
   const [latestAvailableMonth, setLatestAvailableMonth] = useState<string | null>(null);
@@ -118,9 +125,9 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
       setActive(report);
       setTitle(report.title);
       setSummary(report.summary || '');
-      setFooter(report.footer ?? getDefaultMarketReportFooter(report.data_snapshot));
+      setFooter(report.footer ?? getDefaultMarketReportFooter(report.data_snapshot, report.language));
       setContent(ensureMarketReportTitleIcon(
-        refreshMarketReportGeneratedBlocks(initialContent(report.content), report.data_snapshot),
+        refreshMarketReportGeneratedBlocks(initialContent(report.content), report.data_snapshot, report.language),
       ));
       setEditorRevision((revision) => revision + 1);
       draftRevisionRef.current = 0;
@@ -150,14 +157,16 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
     }
     if (loadingList || loadingReport) return;
     const report = reports.find(
-      (item) => item.period_type === period.periodType && item.period_key === period.periodKey,
+      (item) => item.period_type === period.periodType
+        && item.period_key === period.periodKey
+        && item.language === initialLanguage,
     );
     if (!report) {
       setError('Market report not found.');
       return;
     }
     if (active?.id !== report.id) void loadReport(report.id);
-  }, [active?.id, initialSlug, loadReport, loadingList, loadingReport, reports]);
+  }, [active?.id, initialLanguage, initialSlug, loadReport, loadingList, loadingReport, reports]);
 
   const sortedReports = useMemo(
     () => reports.slice().sort((a, b) => periodOrder(b) - periodOrder(a)),
@@ -277,7 +286,7 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to regenerate Analytics data.');
       const currentContent = getContentRef.current?.() ?? content;
       setContent(ensureMarketReportTitleIcon(
-        refreshMarketReportGeneratedBlocks(currentContent, data.snapshot),
+        refreshMarketReportGeneratedBlocks(currentContent, data.snapshot, active.language),
       ));
       setEditorRevision((revision) => revision + 1);
       markDraftChanged();
@@ -445,6 +454,12 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
                         <span className="block truncate text-sm font-medium">{periodLabel(report)}</span>
                         <span className="mt-1 flex items-center justify-between gap-2">
                           <span className="truncate text-[11px] text-slate-500">{report.period_type}</span>
+                          <span
+                            aria-label={report.language === 'zh' ? 'Chinese report' : 'English report'}
+                            className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800"
+                          >
+                            {report.language === 'zh' ? '中' : 'En'}
+                          </span>
                           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] capitalize ${
                             report.status === 'published' ? 'bg-emerald-100 text-emerald-800'
                               : report.status === 'withdrawn' ? 'bg-amber-100 text-amber-800'

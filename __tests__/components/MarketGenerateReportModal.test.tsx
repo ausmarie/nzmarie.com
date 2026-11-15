@@ -27,6 +27,7 @@ describe('MarketGenerateReportModal', () => {
       expect(screen.getByTestId('market-report-year')).toHaveProperty('value', '2026');
       expect(screen.getByTestId('market-report-part')).toHaveProperty('value', 'Q4');
     });
+    expect(screen.getByTestId('market-report-language')).toHaveProperty('value', 'en');
     expect(screen.getByLabelText('Suburb')).toHaveProperty('value', 'North Shore');
     expect(screen.getByTestId('market-data-start-year')).toHaveProperty('value', '2025');
     expect(screen.getByTestId('market-data-start-part')).toHaveProperty('value', 'Q1');
@@ -89,6 +90,7 @@ describe('MarketGenerateReportModal', () => {
       method: 'POST',
       body: JSON.stringify({
         title: 'North Shore October 2026',
+        language: 'en',
         periodType: 'monthly',
         periodKey: '2026-10',
         chartPeriodType: 'quarterly',
@@ -124,7 +126,7 @@ describe('MarketGenerateReportModal', () => {
       <MarketGenerateReportModal
         open
         latestAvailableMonth="2026-10"
-        existingReports={[{ period_type: 'monthly', period_key: '2026-10' }]}
+        existingReports={[{ period_type: 'monthly', period_key: '2026-10', language: 'en' }]}
         onClose={vi.fn()}
         onGenerated={onGenerated}
       />,
@@ -143,5 +145,42 @@ describe('MarketGenerateReportModal', () => {
 
     await waitFor(() => expect(onGenerated).toHaveBeenCalledWith('existing-report', true));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a Chinese report separately from an English report for the same period', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, id: 'chinese-report' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onGenerated = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <MarketGenerateReportModal
+        open
+        latestAvailableMonth="2026-10"
+        existingReports={[{ period_type: 'monthly', period_key: '2026-10', language: 'en' }]}
+        onClose={vi.fn()}
+        onGenerated={onGenerated}
+      />,
+    );
+
+    fireEvent.change(await screen.findByTestId('market-report-language'), { target: { value: 'zh' } });
+    expect(screen.getByTestId('market-report-name')).toHaveProperty(
+      'value',
+      '北岸房地产市场报告 — 2026年第4季度',
+    );
+    fireEvent.click(screen.getByTestId('market-period-month'));
+    expect(screen.getByTestId('market-report-name')).toHaveProperty(
+      'value',
+      '北岸房地产市场报告 — 2026年10月',
+    );
+    expect(screen.queryByText(/A report already exists/)).toBeNull();
+    fireEvent.submit(screen.getByRole('dialog'));
+
+    await waitFor(() => expect(onGenerated).toHaveBeenCalledWith('chinese-report', false));
+    expect(fetchMock).toHaveBeenCalledWith('/api/admin/market-reports', expect.objectContaining({
+      body: expect.stringContaining('"language":"zh"'),
+    }));
   });
 });

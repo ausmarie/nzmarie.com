@@ -34,6 +34,7 @@ const reportSummary = {
   id: 'october-report',
   period_type: 'monthly',
   period_key: '2026-10',
+  language: 'en',
   title: 'October 2026',
   summary: 'Existing introduction',
   status: 'draft',
@@ -54,7 +55,7 @@ const report = {
   footer: 'Existing footer',
 };
 
-function configureFetch() {
+function configureFetch(reports = [reportSummary]) {
   const savedBodies: Record<string, unknown>[] = [];
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/admin/market-reports') {
@@ -62,7 +63,7 @@ function configureFetch() {
         ok: true,
         json: async () => ({
           success: true,
-          reports: [reportSummary],
+          reports,
           latestAvailableMonth: '2026-10',
         }),
       };
@@ -95,11 +96,28 @@ describe('MarketAdminPage report editing', () => {
     render(<MarketAdminPage />);
 
     const reportLabel = await screen.findByText('October 2026');
+    expect(screen.getByText('En')).toBeTruthy();
     const reportButton = reportLabel.closest('button');
     if (!reportButton) throw new Error('October report button was not rendered.');
     fireEvent.click(reportButton);
 
     expect(mocks.push).toHaveBeenCalledWith('/admin/market/draft/October-2026');
+  });
+
+  it('shows language badges and uses a distinct draft URL for Chinese reports', async () => {
+    configureFetch([
+      reportSummary,
+      { ...reportSummary, id: 'october-report-zh', language: 'zh' },
+    ]);
+    render(<MarketAdminPage />);
+
+    const chineseBadge = await screen.findByText('中');
+    expect(screen.getByText('En')).toBeTruthy();
+    const chineseReportButton = chineseBadge.closest('button');
+    if (!chineseReportButton) throw new Error('Chinese report button was not rendered.');
+    fireEvent.click(chineseReportButton);
+
+    expect(mocks.push).toHaveBeenCalledWith('/admin/market/draft/October-2026?lang=zh');
   });
 
   it('automatically saves report content while preserving the existing summary', async () => {

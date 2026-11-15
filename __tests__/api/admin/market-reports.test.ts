@@ -21,6 +21,8 @@ import { POST as withdrawReport } from '@/app/api/admin/market-reports/[id]/with
 import { GET as getPublicMarketReports } from '@/app/api/market-reports/route';
 import MarketReportPreviewPage from '@/app/market-reports/preview/[id]/page';
 import PublishedMarketReportPage from '@/app/market-reports/[slug]/page';
+import ChinesePublishedMarketReportPage from '@/app/market-reports/[slug]/cn/page';
+import PublishedMarketReportContent from '@/components/market/PublishedMarketReportPage';
 import AdminMarketReportDraftPage from '@/app/admin/market/draft/[slug]/page';
 import AdminMarketReportDraftPreviewPage from '@/app/admin/market/draft/[slug]/preview/page';
 import AdminMarketReportPublicPage from '@/app/admin/market/public/[slug]/page';
@@ -61,9 +63,11 @@ describe('Market reports API', () => {
   it('rejects invalid monthly and quarterly period keys before database access', async () => {
     const monthly = await POST(request({ periodType: 'monthly', periodKey: '2026-13' }));
     const quarterly = await POST(request({ periodType: 'quarterly', periodKey: '2026-Q5' }));
+    const language = await POST(request({ periodType: 'monthly', periodKey: '2026-10', language: 'fr' }));
 
     expect(monthly.status).toBe(400);
     expect(quarterly.status).toBe(400);
+    expect(language.status).toBe(400);
     expect(mocks.query).not.toHaveBeenCalled();
   });
 
@@ -151,6 +155,7 @@ describe('Market reports API', () => {
 
     const response = await POST(request({ periodType: 'monthly', periodKey: '2026-10' }));
     const body = await response.json();
+    const generatedContent = JSON.parse(mocks.query.mock.calls[2][1][3]);
 
     expect(response.status).toBe(201);
     expect(body.snapshot.metrics).toEqual({ medianPrice: 1130000, salesCount: 260, daysToSell: 43 });
@@ -171,6 +176,34 @@ describe('Market reports API', () => {
       '2026-11-01',
     ]);
     expect(mocks.query.mock.calls[2][1][0]).toBe('monthly');
+    expect(mocks.query.mock.calls[2][1][5]).toBe('en');
+    expect(generatedContent[0].content[0].type).toBe('delta');
+    expect(generatedContent[0].content[2].text).toBe('North Shore Market Report');
+    expect(generatedContent[1].content[0].text).toBe('October 2026 Housing Market Update (Spring Edition)');
+  });
+
+  it('creates a Chinese report with localized generated content for the same period', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [{ region_name: 'North Shore City', period_month: '2026-10-01', median_price: '1130000', sales_count: '260', days_to_sell: '43' }],
+      })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: reportId }] });
+
+    const response = await POST(request({
+      language: 'zh',
+      periodType: 'monthly',
+      periodKey: '2026-10',
+    }));
+    const content = JSON.parse(mocks.query.mock.calls[2][1][3]);
+
+    expect(response.status).toBe(201);
+    expect(mocks.query.mock.calls[1][1]).toEqual(['monthly', '2026-10', 'zh']);
+    expect(mocks.query.mock.calls[2][0]).toContain('ON CONFLICT (period_type, period_key, language)');
+    expect(mocks.query.mock.calls[2][1][5]).toBe('zh');
+    expect(content[0].content[0].type).toBe('delta');
+    expect(content[0].content[2].text).toBe('北岸房地产市场报告');
+    expect(content[1].content[0].text).toBe('2026年10月房地产市场更新（春季版）');
   });
 
   it('refreshes an existing period while preserving its editorial content and published revision', async () => {
@@ -198,7 +231,7 @@ describe('Market reports API', () => {
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ success: true, id: reportId, reused: true });
     expect(body.snapshot.comparison.label).toBe('Compared to Previous Month (September)');
-    expect(mocks.query.mock.calls[1][1]).toEqual(['monthly', '2026-10']);
+    expect(mocks.query.mock.calls[1][1]).toEqual(['monthly', '2026-10', 'en']);
     expect(mocks.query.mock.calls[2][0]).toContain("has_unpublished_changes = CASE WHEN status = 'draft' THEN FALSE ELSE TRUE END");
     expect(mocks.query.mock.calls[2][0]).not.toContain('published_content =');
     expect(mocks.query.mock.calls[2][1][1]).toBe('Marie’s October market update');
@@ -374,26 +407,34 @@ describe('Market reports API', () => {
     expect(missing.status).toBe(404);
   });
 
-  it('requires both an introduction and editorial text before publishing', async () => {
+  it('requires report text in a paragraph before publishing', async () => {
     mocks.query.mockResolvedValueOnce({
-      rows: [{ title: 'October report', summary: '', content: validContent, data_snapshot: {}, updated_at: '2026-11-14T00:00:00Z' }],
+      rows: [{
+        title: 'October report',
+        content: [{ type: 'heading', content: [{ type: 'text', text: 'North Shore Market Report' }] }],
+        data_snapshot: {},
+        updated_at: '2026-11-14T00:00:00Z',
+      }],
     });
 
     const response = await publishReport(new Request('http://localhost'), context());
 
     expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe('Add at least one paragraph of report text before publishing.');
     expect(mocks.query).toHaveBeenCalledTimes(1);
   });
 
-  it('publishes the current draft as a separate public revision', async () => {
+  it.each(['en', 'zh'] as const)('publishes a %s report without requiring a summary', async (language) => {
+    const updatedAt = '2026-11-14 01:00:00.123456+00';
     mocks.query
       .mockResolvedValueOnce({
         rows: [{
           title: 'October report',
-          summary: 'A clear overview.',
+          language,
+          summary: '',
           content: validContent,
           data_snapshot: { periodKey: '2026-10' },
-          updated_at: '2026-11-14T00:00:00Z',
+          updated_at: updatedAt,
         }],
       })
       .mockResolvedValueOnce({
@@ -403,9 +444,12 @@ describe('Market reports API', () => {
     const response = await publishReport(new Request('http://localhost'), context());
 
     expect(response.status).toBe(200);
+    expect(mocks.query.mock.calls[0][0]).toContain('updated_at::text AS updated_at');
+    expect(mocks.query.mock.calls[0][0]).not.toContain('summary');
     expect(mocks.query.mock.calls[1][0]).toContain('published_content = content');
     expect(mocks.query.mock.calls[1][0]).toContain('published_footer = footer');
     expect(mocks.query.mock.calls[1][0]).toContain('published_data_snapshot = data_snapshot');
+    expect(mocks.query.mock.calls[1][1]).toEqual([reportId, updatedAt, 'admin@example.com']);
   });
 
   it('only withdraws published reports and preserves their saved content', async () => {
@@ -448,14 +492,15 @@ describe('Market reports API', () => {
       ],
     });
 
-    const response = await getPublicMarketReports();
+    const response = await getPublicMarketReports(new Request('http://localhost/api/market-reports'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(body.latest.id).toBe('october');
     expect(body.previousReports).toEqual([]);
     expect(body.notice).toBeNull();
-    expect(mocks.query.mock.calls[0][0]).toContain("WHERE status IN ('published', 'withdrawn')");
+    expect(mocks.query.mock.calls[0][0]).toContain("WHERE status IN ('published', 'withdrawn') AND language = $1");
+    expect(mocks.query.mock.calls[0][1]).toEqual(['en']);
   });
 
   it('returns a polite notice when the newest published issue was withdrawn', async () => {
@@ -486,13 +531,22 @@ describe('Market reports API', () => {
       ],
     });
 
-    const body = await (await getPublicMarketReports()).json();
+    const body = await (await getPublicMarketReports(new Request('http://localhost/api/market-reports'))).json();
 
     expect(body.latest).toBeNull();
     expect(body.notice.reason).toBe('withdrawn');
     expect(body.notice.zh).toContain('欢迎稍后再来查看');
     expect(body.previousReports.map((report: { id: string }) => report.id)).toEqual(['previous']);
     expect(JSON.stringify(body)).not.toContain('Private withdrawn summary');
+  });
+
+  it('filters the public report list by the selected language', async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [] });
+
+    const response = await getPublicMarketReports(new Request('http://localhost/api/market-reports?lang=zh'));
+
+    expect(response.status).toBe(200);
+    expect(mocks.query.mock.calls[0][1]).toEqual(['zh']);
   });
 
   it('renders the authenticated preview from a month-based report URL', async () => {
@@ -505,13 +559,17 @@ describe('Market reports API', () => {
       }],
     });
 
-    const page = await MarketReportPreviewPage({ params: Promise.resolve({ id: 'October-2026' }) });
+    const page = await MarketReportPreviewPage({
+      params: Promise.resolve({ id: 'October-2026' }),
+      searchParams: Promise.resolve({ lang: 'zh' }),
+    });
 
+    expect(page.props.report.language).toBe('zh');
     expect(page.props.report.title).toBeUndefined();
     expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Custom draft footer');
     expect(mocks.query.mock.calls[0][0]).toContain('FROM north_shore_market_reports');
-    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'zh']);
   });
 
   it('loads the editor for an authenticated admin draft URL', async () => {
@@ -520,7 +578,14 @@ describe('Market reports API', () => {
     });
 
     expect(page.props.initialSlug).toBe('October-2026');
+    expect(page.props.initialLanguage).toBe('en');
     expect(mocks.query).not.toHaveBeenCalled();
+
+    const chinesePage = await AdminMarketReportDraftPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+      searchParams: Promise.resolve({ lang: 'zh' }),
+    });
+    expect(chinesePage.props.initialLanguage).toBe('zh');
   });
 
   it('renders an authenticated draft preview from its admin preview URL', async () => {
@@ -537,13 +602,20 @@ describe('Market reports API', () => {
     });
 
     expect(page.props.preview).toBe(true);
+    expect(page.props.report.language).toBe('en');
     expect(page.props.report.title).toBeUndefined();
     expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Draft footer');
-    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);
   });
 
   it('renders published reports from their month-based public URL', async () => {
+    const route = await PublishedMarketReportPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+    });
+
+    expect(route.props.language).toBe('en');
+
     mocks.query.mockResolvedValueOnce({
       rows: [{
         published_content: validContent,
@@ -552,8 +624,9 @@ describe('Market reports API', () => {
       }],
     });
 
-    const page = await PublishedMarketReportPage({
-      params: Promise.resolve({ slug: 'October-2026' }),
+    const page = await PublishedMarketReportContent({
+      slug: route.props.slug,
+      language: route.props.language,
     });
 
     expect(page.props.report.title).toBeUndefined();
@@ -561,7 +634,31 @@ describe('Market reports API', () => {
     expect(page.props.report.footer).toBe('Published custom footer');
     expect(page.props.preview).toBeUndefined();
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
-    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);
+  });
+
+  it('serves Chinese public reports from the /cn URL suffix', async () => {
+    const route = await ChinesePublishedMarketReportPage({
+      params: Promise.resolve({ slug: 'October-2026' }),
+    });
+    expect(route.props.language).toBe('zh');
+
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        published_content: validContent,
+        published_footer: 'Chinese published footer',
+        published_data_snapshot: { periodKey: '2026-10' },
+      }],
+    });
+
+    const page = await PublishedMarketReportContent({
+      slug: route.props.slug,
+      language: route.props.language,
+    });
+
+    expect(page.props.report.language).toBe('zh');
+    expect(page.props.report.footer).toBe('Chinese published footer');
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'zh']);
   });
 
   it('renders the published revision from the authenticated admin public URL', async () => {
@@ -582,6 +679,6 @@ describe('Market reports API', () => {
     expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Published footer');
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
-    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
+    expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);
   });
 });

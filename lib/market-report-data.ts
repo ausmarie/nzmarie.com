@@ -1,4 +1,5 @@
 export type MarketReportPeriodType = 'monthly' | 'quarterly';
+export type MarketReportLanguage = 'en' | 'zh';
 
 export interface MarketReportSourceRow {
   region_name?: string;
@@ -203,7 +204,23 @@ function getSinglePeriodWindow(
   return { from: monthString(from.year, from.month), to: monthString(to.year, to.month) };
 }
 
-function periodLabel(periodType: MarketReportPeriodType, periodKey: string): string {
+export function isMarketReportLanguage(value: unknown): value is MarketReportLanguage {
+  return value === 'en' || value === 'zh';
+}
+
+export function getMarketReportPeriodLabel(
+  periodType: MarketReportPeriodType,
+  periodKey: string,
+  language: MarketReportLanguage = 'en',
+): string {
+  if (language === 'zh') {
+    if (periodType === 'monthly') {
+      const { year, month } = parseMonthKey(periodKey);
+      return `${year}年${month}月`;
+    }
+    const { year, quarter } = parseQuarterKey(periodKey);
+    return `${year}年第${quarter}季度`;
+  }
   if (periodType === 'monthly') {
     const { year, month } = parseMonthKey(periodKey);
     return `${MONTH_NAMES[month - 1]} ${year}`;
@@ -291,7 +308,7 @@ function periodKeys(
 }
 
 function chartLabel(periodType: MarketReportPeriodType, key: string): string {
-  return periodLabel(periodType, key);
+  return getMarketReportPeriodLabel(periodType, key);
 }
 
 function percentageChange(current: number | null, previous: number | null): string {
@@ -303,10 +320,20 @@ function percentageChange(current: number | null, previous: number | null): stri
 export function getMarketReportComparisonLabel(
   periodType: MarketReportPeriodType,
   periodKey: string,
+  language: MarketReportLanguage = 'en',
 ): string {
   const previousKey = periodKeyFromIndex(periodType, periodIndex(periodType, periodKey) - 1);
-  const previousLabel = periodLabel(periodType, previousKey);
+  const previousLabel = getMarketReportPeriodLabel(periodType, previousKey, language);
   const isSameYear = periodKey.slice(0, 4) === previousKey.slice(0, 4);
+  if (language === 'zh') {
+    const previousPeriod = periodType === 'monthly'
+      ? `${Number(previousKey.slice(5, 7))}月`
+      : `第${previousKey.slice(-1)}季度`;
+    const shortLabel = isSameYear ? previousPeriod : previousLabel;
+    return periodType === 'monthly'
+      ? `较上月（${shortLabel}）`
+      : `较上季度（${shortLabel}）`;
+  }
   const shortLabel = periodType === 'monthly'
     ? MONTH_NAMES[Number(previousKey.slice(5, 7)) - 1]
     : `Q${previousKey.slice(-1)}`;
@@ -314,6 +341,35 @@ export function getMarketReportComparisonLabel(
     return `Compared to Previous Month (${isSameYear ? shortLabel : previousLabel})`;
   }
   return `Compared to Previous Quarter (${isSameYear ? shortLabel : previousLabel})`;
+}
+
+export function getMarketReportDataNotes(
+  periodType: MarketReportPeriodType,
+  chartPeriodType: MarketReportPeriodType,
+  language: MarketReportLanguage = 'en',
+): string {
+  if (language === 'zh') {
+    return [
+      periodType === 'quarterly'
+        ? '季度卡片数值为可用月度房价中位数和售出天数的平均值，成交数量为总和。'
+        : '卡片数值反映所选月份。',
+      chartPeriodType === 'quarterly'
+        ? '趋势图按季度汇总月度数据。'
+        : '趋势图展示月度数据。',
+      '有数据时，奥克兰地区以灰色虚线作为对比。',
+      '图表中的空白点表示该期间没有可用快照数据。',
+    ].join(' ');
+  }
+  return [
+    periodType === 'quarterly'
+      ? 'Quarterly card values average available monthly median prices and days to sell; sales count is summed.'
+      : 'Card values reflect the selected month.',
+    chartPeriodType === 'quarterly'
+      ? 'Line charts aggregate the monthly source data by quarter.'
+      : 'Line charts show monthly source data.',
+    'Auckland Region is shown as a grey dashed comparison line where data is available.',
+    'Blank chart points indicate that no snapshot was available for that period.',
+  ].join(' ');
 }
 
 export interface MarketReportBuildOptions {
@@ -332,7 +388,7 @@ export function buildMarketReportSnapshot(
   const chartAnchorKey = getChartPeriodKey(periodType, periodKey, chartPeriodType);
   const dataRange = options.dataRange ?? getDefaultMarketReportDataRange(chartPeriodType, chartAnchorKey);
   getMarketReportWindow(periodType, periodKey, chartPeriodType, dataRange);
-  const expectedPeriod = periodLabel(periodType, periodKey);
+  const expectedPeriod = getMarketReportPeriodLabel(periodType, periodKey);
   const northShoreRows = selectRegionRows(rows, [MARKET_REPORT_NORTH_SHORE_REGION], MARKET_REPORT_NORTH_SHORE_REGION, true);
   const aucklandRows = selectRegionRows(
     rows,
@@ -351,7 +407,7 @@ export function buildMarketReportSnapshot(
     expectedPeriod,
   );
   const previousKey = periodKeyFromIndex(periodType, periodIndex(periodType, periodKey) - 1);
-  const previousPoint = aggregateGroup(reportGroups.get(previousKey), periodLabel(periodType, previousKey));
+  const previousPoint = aggregateGroup(reportGroups.get(previousKey), getMarketReportPeriodLabel(periodType, previousKey));
   const chartGroups = buildGroups(northShoreRows, chartPeriodType);
   const districtChartGroups = buildGroups(aucklandRows, chartPeriodType);
   const points = periodKeys(chartPeriodType, dataRange.startPeriodKey, dataRange.endPeriodKey).map((key) => {
@@ -411,16 +467,7 @@ export function buildMarketReportSnapshot(
         period, label, medianPrice: null, salesCount: null, daysToSell, districtDaysToSell,
       })),
     },
-    dataNotes: [
-      periodType === 'quarterly'
-        ? 'Quarterly card values average available monthly median prices and days to sell; sales count is summed.'
-        : 'Card values reflect the selected month.',
-      chartPeriodType === 'quarterly'
-        ? 'Line charts aggregate the monthly source data by quarter.'
-        : 'Line charts show monthly source data.',
-      'Auckland Region is shown as a grey dashed comparison line where data is available.',
-      'Blank chart points indicate that no snapshot was available for that period.',
-    ].join(' '),
+    dataNotes: getMarketReportDataNotes(periodType, chartPeriodType),
   };
 }
 

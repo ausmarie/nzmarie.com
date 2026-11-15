@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { isMarketReportLanguage } from '@/lib/market-report-data';
 
 export const dynamic = 'force-dynamic';
 
 interface PublicMarketReport {
   id: string;
+  language: 'en' | 'zh';
   period_type: 'monthly' | 'quarterly';
   period_key: string;
   title: string;
@@ -31,18 +33,23 @@ function comparePeriods(a: PublicMarketReport, b: PublicMarketReport): number {
   return a.period_type === 'monthly' ? -1 : 1;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const requestedLanguage = new URL(request.url).searchParams.get('lang') ?? 'en';
+  if (!isMarketReportLanguage(requestedLanguage)) {
+    return NextResponse.json({ success: false, error: 'Select a valid report language.' }, { status: 400 });
+  }
   try {
     const result = await query<PublicMarketReport & Record<string, unknown>>(
-      `SELECT id, period_type, period_key, status,
+      `SELECT id, period_type, period_key, language, status,
               published_title AS title,
               published_summary AS summary,
               published_content AS content,
               published_data_snapshot AS data_snapshot,
               published_at
        FROM north_shore_market_reports
-       WHERE status IN ('published', 'withdrawn')
-       ORDER BY period_key DESC`
+       WHERE status IN ('published', 'withdrawn') AND language = $1
+       ORDER BY period_key DESC`,
+      [requestedLanguage]
     );
     const rows = result.rows
       .filter((report) => report.status === 'published' || report.status === 'withdrawn')

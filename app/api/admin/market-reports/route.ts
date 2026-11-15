@@ -5,6 +5,7 @@ import {
   buildMarketReportSnapshot,
   getMarketReportWindow,
   isMarketReportPeriodType,
+  isMarketReportLanguage,
   isValidMarketReportPeriod,
   MARKET_REPORT_AUCKLAND_REGION,
   MARKET_REPORT_NORTH_SHORE_REGION,
@@ -31,11 +32,13 @@ async function refreshExistingReport(
   defaultTitle: string,
   snapshot: ReturnType<typeof buildMarketReportSnapshot>,
   email: string,
+  language: 'en' | 'zh',
 ): Promise<NextResponse> {
   const title = requestedTitle === defaultTitle ? existing.title : requestedTitle;
   const content = refreshMarketReportGeneratedBlocks(
     Array.isArray(existing.content) ? existing.content : [],
     snapshot,
+    language,
   );
   const updated = await query<{ id: string }>(
     `UPDATE north_shore_market_reports
@@ -62,7 +65,7 @@ export async function GET() {
   try {
     const [result, available] = await Promise.all([
       query(
-      `SELECT id, period_type, period_key, title, summary, status,
+      `SELECT id, period_type, period_key, language, title, summary, status,
               has_unpublished_changes, published_at, withdrawn_at, updated_at
        FROM north_shore_market_reports
        ORDER BY period_key DESC, period_type ASC`
@@ -96,6 +99,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: 'A valid JSON request body is required.' }, { status: 400 });
   }
 
+  const language = body.language === undefined ? 'en' : body.language;
+  if (!isMarketReportLanguage(language)) {
+    return NextResponse.json({ success: false, error: 'Select a valid report language.' }, { status: 400 });
+  }
   const periodType = body.periodType;
   const periodKey = typeof body.periodKey === 'string' ? body.periodKey : '';
   if (!isMarketReportPeriodType(periodType) || !isValidMarketReportPeriod(periodType, periodKey)) {
@@ -136,27 +143,31 @@ export async function POST(request: Request) {
       chartPeriodType,
       dataRange: window,
     });
-    const defaultTitle = `North Shore Property Market Report — ${snapshot.periodLabel}`;
+    const defaultTitle = language === 'zh'
+      ? `北岸房地产市场报告 — ${snapshot.periodType === 'monthly'
+        ? `${periodKey.slice(0, 4)}年${Number(periodKey.slice(5, 7))}月`
+        : `${periodKey.slice(0, 4)}年第${periodKey.slice(-1)}季度`}`
+      : `North Shore Property Market Report — ${snapshot.periodLabel}`;
     const title = requestedTitle || defaultTitle;
     const existingResult = await query<ExistingMarketReport>(
       `SELECT id, title, content
        FROM north_shore_market_reports
-       WHERE period_type = $1 AND period_key = $2`,
-      [periodType, periodKey]
+       WHERE period_type = $1 AND period_key = $2 AND language = $3`,
+      [periodType, periodKey, language]
     );
     const existing = existingResult.rows[0];
     if (existing) {
-      return refreshExistingReport(existing, title, defaultTitle, snapshot, email);
+      return refreshExistingReport(existing, title, defaultTitle, snapshot, email, language);
     }
 
-    const content = buildMarketReportRichTextContent(snapshot);
+    const content = buildMarketReportRichTextContent(snapshot, language);
     const result = await query<{ id: string }>(
       `INSERT INTO north_shore_market_reports
-         (period_type, period_key, title, summary, content, data_snapshot, created_by, updated_by)
-       VALUES ($1, $2, $3, '', $4::jsonb, $5::jsonb, $6, $6)
-       ON CONFLICT (period_type, period_key) DO NOTHING
+         (period_type, period_key, title, summary, content, data_snapshot, language, created_by, updated_by)
+       VALUES ($1, $2, $3, '', $4::jsonb, $5::jsonb, $6, $7, $7)
+       ON CONFLICT (period_type, period_key, language) DO NOTHING
        RETURNING id`,
-      [periodType, periodKey, title, JSON.stringify(content), JSON.stringify(snapshot), email]
+      [periodType, periodKey, title, JSON.stringify(content), JSON.stringify(snapshot), language, email]
     );
 
     if (result.rows[0]) {
@@ -166,12 +177,12 @@ export async function POST(request: Request) {
     const racedReportResult = await query<ExistingMarketReport>(
       `SELECT id, title, content
        FROM north_shore_market_reports
-       WHERE period_type = $1 AND period_key = $2`,
-      [periodType, periodKey]
+       WHERE period_type = $1 AND period_key = $2 AND language = $3`,
+      [periodType, periodKey, language]
     );
     const racedReport = racedReportResult.rows[0];
     if (racedReport) {
-      return refreshExistingReport(racedReport, title, defaultTitle, snapshot, email);
+      return refreshExistingReport(racedReport, title, defaultTitle, snapshot, email, language);
     }
     return NextResponse.json({ success: false, error: 'The report changed while generating. Please try again.' }, { status: 409 });
   } catch (error) {
@@ -188,7 +199,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: error.message }, { status: 422 });
     }
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
-      return NextResponse.json({ success: false, error: 'A report already exists for this period.' }, { status: 409 });
+      return NextResponse.json({ success: false, error: 'A report already exists for this period and language.' }, { status: 409 });
     }
     console.error('Failed to create Market report:', error);
     return NextResponse.json({ success: false, error: 'Failed to generate the Market report.' }, { status: 500 });

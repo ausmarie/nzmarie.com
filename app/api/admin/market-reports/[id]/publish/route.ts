@@ -4,7 +4,7 @@ import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
 
 export const dynamic = 'force-dynamic';
 
-function hasWrittenContent(content: unknown): boolean {
+function hasWrittenParagraph(content: unknown): boolean {
   if (!Array.isArray(content)) return false;
   const collectText = (value: unknown): string => {
     if (typeof value === 'string') return value;
@@ -15,7 +15,12 @@ function hasWrittenContent(content: unknown): boolean {
     }
     return '';
   };
-  return collectText(content).trim().length > 0;
+  return content.some((block) =>
+    block
+    && typeof block === 'object'
+    && (block as Record<string, unknown>).type === 'paragraph'
+    && collectText((block as Record<string, unknown>).content).trim().length > 0,
+  );
 }
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,17 +32,23 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   try {
     const existing = await query(
-      `SELECT title, summary, content, footer, data_snapshot, updated_at
+      `SELECT title, content, footer, data_snapshot, updated_at::text AS updated_at
        FROM north_shore_market_reports
        WHERE id = $1`,
       [id]
     );
     const report = existing.rows[0];
     if (!report) return NextResponse.json({ success: false, error: 'Report not found.' }, { status: 404 });
-    if (!String(report.title || '').trim() || !String(report.summary || '').trim() || !hasWrittenContent(report.content)) {
+    if (!String(report.title || '').trim()) {
       return NextResponse.json({
         success: false,
-        error: 'Add a summary and at least one paragraph of report text before publishing.',
+        error: 'A report title is required before publishing.',
+      }, { status: 400 });
+    }
+    if (!hasWrittenParagraph(report.content)) {
+      return NextResponse.json({
+        success: false,
+        error: 'Add at least one paragraph of report text before publishing.',
       }, { status: 400 });
     }
 

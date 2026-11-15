@@ -3,6 +3,7 @@ import {
   buildMarketReportSnapshot,
   getDefaultMarketReportDataRange,
   getMarketReportComparisonLabel,
+  getMarketReportPeriodLabel,
   getMarketReportWindow,
   isValidMarketReportPeriod,
   type MarketReportSourceRow,
@@ -135,6 +136,11 @@ describe('market report data', () => {
       .toBe('Compared to Previous Quarter (Q1)');
     expect(getMarketReportComparisonLabel('quarterly', '2026-Q1'))
       .toBe('Compared to Previous Quarter (Q4 2025)');
+    expect(getMarketReportComparisonLabel('monthly', '2026-10', 'zh')).toBe('较上月（9月）');
+    expect(getMarketReportComparisonLabel('monthly', '2026-01', 'zh')).toBe('较上月（2025年12月）');
+    expect(getMarketReportComparisonLabel('quarterly', '2026-Q2', 'zh')).toBe('较上季度（第1季度）');
+    expect(getMarketReportComparisonLabel('quarterly', '2026-Q1', 'zh')).toBe('较上季度（2025年第4季度）');
+    expect(getMarketReportPeriodLabel('quarterly', '2026-Q4', 'zh')).toBe('2026年第4季度');
   });
 
   it('keeps North Shore cards and adds Auckland Region chart comparison data', () => {

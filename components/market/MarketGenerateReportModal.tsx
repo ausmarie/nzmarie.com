@@ -2,7 +2,7 @@
 
 import { createPortal } from 'react-dom';
 import { useEffect, useState } from 'react';
-import type { MarketReportPeriodType } from '@/lib/market-report-data';
+import { isMarketReportLanguage, type MarketReportLanguage, type MarketReportPeriodType } from '@/lib/market-report-data';
 
 interface MarketGenerateReportModalProps {
   open: boolean;
@@ -10,6 +10,7 @@ interface MarketGenerateReportModalProps {
   existingReports: Array<{
     period_type: MarketReportPeriodType;
     period_key: string;
+    language?: MarketReportLanguage;
   }>;
   onClose: () => void;
   onGenerated: (id: string, reused: boolean) => Promise<void>;
@@ -17,6 +18,7 @@ interface MarketGenerateReportModalProps {
 
 interface GenerateReportInput {
   title: string;
+  language: MarketReportLanguage;
   periodType: MarketReportPeriodType;
   periodKey: string;
   chartPeriodType: MarketReportPeriodType;
@@ -101,7 +103,13 @@ function defaultStart(type: MarketReportPeriodType, key: string): string {
   return indexForPeriod(type, key) < indexForPeriod(type, earliestKey) ? key : earliestKey;
 }
 
-function reportTitle(type: MarketReportPeriodType, key: string): string {
+function reportTitle(type: MarketReportPeriodType, key: string, language: MarketReportLanguage): string {
+  if (language === 'zh') {
+    const period = type === 'monthly'
+      ? `${key.slice(0, 4)}年${Number(key.slice(5, 7))}月`
+      : `${key.slice(0, 4)}年第${key.slice(-1)}季度`;
+    return `北岸房地产市场报告 — ${period}`;
+  }
   if (type === 'monthly') return `North Shore Property Market Report — ${formatPeriod(type, key)}`;
   const [year, quarter] = key.split('-Q');
   return `North Shore Property Market Report — Q${quarter} ${year}`;
@@ -164,6 +172,7 @@ export default function MarketGenerateReportModal({
 }: MarketGenerateReportModalProps) {
   const [mounted, setMounted] = useState(false);
   const [periodType, setPeriodType] = useState<MarketReportPeriodType>('quarterly');
+  const [language, setLanguage] = useState<MarketReportLanguage>('en');
   const [periodKey, setPeriodKey] = useState('');
   const [chartPeriodType, setChartPeriodType] = useState<MarketReportPeriodType>('quarterly');
   const [dataStartKey, setDataStartKey] = useState('');
@@ -178,7 +187,9 @@ export default function MarketGenerateReportModal({
     indexForPeriod(chartPeriodType, dataStartKey) > indexForPeriod(chartPeriodType, dataEndKey),
   );
   const existingReport = existingReports.some(
-    (report) => report.period_type === periodType && report.period_key === periodKey,
+    (report) => report.period_type === periodType
+      && report.period_key === periodKey
+      && (report.language ?? 'en') === language,
   );
 
   useEffect(() => setMounted(true), []);
@@ -190,11 +201,12 @@ export default function MarketGenerateReportModal({
     const nextChartType: MarketReportPeriodType = 'quarterly';
     const nextChartKey = getChartAnchorKey(nextType, nextKey, nextChartType);
     setPeriodType(nextType);
+    setLanguage('en');
     setPeriodKey(nextKey);
     setChartPeriodType(nextChartType);
     setDataStartKey(defaultStart(nextChartType, nextChartKey));
     setDataEndKey(nextChartKey);
-    setTitle(reportTitle(nextType, nextKey));
+    setTitle(reportTitle(nextType, nextKey, 'en'));
     setTitleDirty(false);
     setError(null);
     setLoading(false);
@@ -217,7 +229,13 @@ export default function MarketGenerateReportModal({
     setPeriodKey(key);
     setDataStartKey(defaultStart(chartPeriodType, chartKey));
     setDataEndKey(chartKey);
-    if (!titleDirty) setTitle(reportTitle(type, key));
+    if (!titleDirty) setTitle(reportTitle(type, key, language));
+    setError(null);
+  };
+
+  const updateLanguage = (nextLanguage: MarketReportLanguage) => {
+    setLanguage(nextLanguage);
+    if (!titleDirty) setTitle(reportTitle(periodType, periodKey, nextLanguage));
     setError(null);
   };
 
@@ -238,6 +256,7 @@ export default function MarketGenerateReportModal({
     try {
       const input: GenerateReportInput = {
         title: title.trim(),
+        language,
         periodType,
         periodKey,
         chartPeriodType,
@@ -290,6 +309,21 @@ export default function MarketGenerateReportModal({
           </p>
 
           <div className="flex flex-col space-y-4">
+            <div>
+              <label htmlFor="market-report-language" className="mb-1 block text-sm text-slate-500">Language</label>
+              <select
+                id="market-report-language"
+                data-testid="market-report-language"
+                value={language}
+                onChange={(event) => {
+                  if (isMarketReportLanguage(event.target.value)) updateLanguage(event.target.value);
+                }}
+                className={fieldClass}
+              >
+                <option value="en">English</option>
+                <option value="zh">中文</option>
+              </select>
+            </div>
             <div>
               <label htmlFor="market-report-name" className="mb-1 block text-sm text-slate-500">Report Name</label>
               <input

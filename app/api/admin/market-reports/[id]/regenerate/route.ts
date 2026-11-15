@@ -7,6 +7,7 @@ import {
   MARKET_REPORT_AUCKLAND_REGION,
   MARKET_REPORT_NORTH_SHORE_REGION,
   type MarketReportDataRange,
+  type MarketReportLanguage,
   type MarketReportPeriodType,
   type MarketReportSourceRow,
 } from '@/lib/market-report-data';
@@ -27,13 +28,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const reportResult = await query<{
       period_type: MarketReportPeriodType;
       period_key: string;
+      language: MarketReportLanguage;
       data_snapshot: {
         chartPeriodType?: MarketReportPeriodType;
         dataRange?: MarketReportDataRange;
       } | null;
       content: ReportEditorContent | null;
     }>(
-      `SELECT period_type, period_key, data_snapshot, content
+      `SELECT period_type, period_key, language, data_snapshot, content
        FROM north_shore_market_reports
        WHERE id = $1`,
       [id]
@@ -61,6 +63,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const content = refreshMarketReportGeneratedBlocks(
       Array.isArray(report.content) ? report.content : [],
       snapshot,
+      report.language,
     );
     const updated = await query(
       `UPDATE north_shore_market_reports
