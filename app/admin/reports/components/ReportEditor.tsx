@@ -24,35 +24,8 @@ import {
   inlineCardStyles,
   isImageClipboardSupported,
 } from '@/lib/card-image-copy';
+import { createReportDeltaIcon } from '@/lib/report-delta-icon';
 import type { ReportEditorContent } from '@/types/report';
-
-function createDeltaSVG(height: string, strokeColor: string): SVGElement {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('fill', 'none');
-  svg.style.height = height;
-  svg.style.width = 'auto';
-  svg.style.display = 'block';
-  svg.style.cursor = 'pointer';
-  svg.style.flexShrink = '0';
-
-  const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path1.setAttribute('d', 'M12 3L22 18H2Z');
-  path1.setAttribute('stroke', strokeColor);
-  path1.setAttribute('stroke-width', '2.5');
-  path1.setAttribute('stroke-linecap', 'round');
-  path1.setAttribute('stroke-linejoin', 'round');
-
-  const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path2.setAttribute('d', 'M2 22H22');
-  path2.setAttribute('stroke', strokeColor);
-  path2.setAttribute('stroke-width', '2.5');
-  path2.setAttribute('stroke-linecap', 'round');
-  path2.setAttribute('stroke-linejoin', 'round');
-
-  svg.append(path1, path2);
-  return svg;
-}
 
 function createToolbar(
   currentHeight: string,
@@ -131,7 +104,8 @@ const deltaInlineContent = createInlineContentSpec(
         vertical-align: middle;
       `;
 
-      const svg = createDeltaSVG(currentHeight, currentColor);
+      const svg = createReportDeltaIcon(currentHeight, currentColor);
+      svg.style.cursor = 'pointer';
 
       let toolbar: HTMLDivElement | null = null;
 

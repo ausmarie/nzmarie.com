@@ -50,17 +50,11 @@ body {
   color: #0f172a !important;
 }
 
-/* BlockNote adds 54px of inline padding to its editor content. */
-.market-report-title {
-  padding-left: calc(1rem + 54px);
-}
-
 .market-report-footer {
   padding-left: calc(1rem + 54px);
 }
 
 @media (min-width: 640px) {
-  .market-report-title,
   .market-report-footer {
     padding-left: calc(2rem + 54px);
   }

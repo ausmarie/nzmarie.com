@@ -113,7 +113,7 @@ describe('MarketAdminPage report editing', () => {
     expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
   });
 
-  it('edits the title above the footer and saves both with Ctrl+S', async () => {
+  it('saves footer edits with Ctrl+S while keeping Title out of the editor and Edit dialog', async () => {
     const { savedBodies } = configureFetch();
     render(<MarketAdminPage initialSlug="October-2026" />);
 
@@ -122,30 +122,28 @@ describe('MarketAdminPage report editing', () => {
     expect(edit.compareDocumentPosition(publish) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(edit);
 
-    const title = screen.getByLabelText('Title');
     const footer = screen.getByLabelText('Page footer');
-    expect(title.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.change(title, { target: { value: 'Updated October report' } });
+    expect(screen.queryByLabelText('Title')).toBeNull();
     fireEvent.change(footer, { target: { value: 'Updated footer' } });
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
 
     await waitFor(() => expect(savedBodies).toHaveLength(1));
-    expect(savedBodies[0].title).toBe('Updated October report');
+    expect(savedBodies[0].title).toBe('October 2026');
     expect(savedBodies[0].footer).toBe('Updated footer');
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('saves title and footer together from the Edit dialog', async () => {
+  it('saves footer edits from the Edit dialog without exposing a Title field', async () => {
     const { savedBodies } = configureFetch();
     render(<MarketAdminPage initialSlug="October-2026" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Renamed report' } });
+    expect(screen.queryByLabelText('Title')).toBeNull();
     fireEvent.change(screen.getByLabelText('Page footer'), { target: { value: 'Updated footer' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(savedBodies).toHaveLength(1));
-    expect(savedBodies[0].title).toBe('Renamed report');
+    expect(savedBodies[0].title).toBe('October 2026');
     expect(savedBodies[0].footer).toBe('Updated footer');
   });
 });

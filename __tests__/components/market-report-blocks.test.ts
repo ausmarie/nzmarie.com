@@ -15,7 +15,9 @@ vi.mock('@blocknote/core', () => ({
     mocks.blockSpecs.push({ spec, implementation });
     return () => ({});
   }),
+  createInlineContentSpec: vi.fn((spec, implementation) => ({ spec, implementation })),
   defaultBlockSpecs: {},
+  defaultInlineContentSpecs: {},
 }));
 
 import { createMarketReportSchema } from '@/components/market/market-report-blocks';

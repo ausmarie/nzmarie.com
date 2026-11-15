@@ -6,7 +6,7 @@ import { Trash2 } from 'lucide-react';
 import MarketReportEditor from '@/components/market/MarketReportEditor';
 import MarketGenerateReportModal from '@/components/market/MarketGenerateReportModal';
 import type { MarketReportSnapshot, MarketReportPeriodType } from '@/lib/market-report-data';
-import { refreshMarketReportGeneratedBlocks } from '@/lib/market-report-document';
+import { ensureMarketReportTitleIcon, refreshMarketReportGeneratedBlocks } from '@/lib/market-report-document';
 import {
   marketReportAdminPublicUrl,
   marketReportDraftPreviewUrl,
@@ -72,7 +72,6 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [titleDraft, setTitleDraft] = useState('');
   const [summary, setSummary] = useState('');
   const [footer, setFooter] = useState('');
   const [footerDraft, setFooterDraft] = useState('');
@@ -118,10 +117,11 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
       const report = data.report as MarketReport;
       setActive(report);
       setTitle(report.title);
-      setTitleDraft(report.title);
       setSummary(report.summary || '');
       setFooter(report.footer ?? getDefaultMarketReportFooter(report.data_snapshot));
-      setContent(refreshMarketReportGeneratedBlocks(initialContent(report.content), report.data_snapshot));
+      setContent(ensureMarketReportTitleIcon(
+        refreshMarketReportGeneratedBlocks(initialContent(report.content), report.data_snapshot),
+      ));
       setEditorRevision((revision) => revision + 1);
       draftRevisionRef.current = 0;
       setDraftRevision(0);
@@ -239,7 +239,6 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
       if (!active || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
       event.preventDefault();
       void handleSave({
-        titleToSave: footerDialogOpen ? titleDraft : title,
         footerToSave: footerDialogOpen ? footerDraft : footer,
       }).then((saved) => {
         if (saved && footerDialogOpen) {
@@ -249,10 +248,10 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [active, footer, footerDialogOpen, footerDraft, handleSave, title, titleDraft]);
+  }, [active, footer, footerDialogOpen, footerDraft, handleSave]);
 
-  const saveEdits = async () => {
-    if (await handleSave({ titleToSave: titleDraft, footerToSave: footerDraft })) {
+  const saveFooter = async () => {
+    if (await handleSave({ footerToSave: footerDraft })) {
       setFooterDialogOpen(false);
     }
   };
@@ -277,7 +276,9 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to regenerate Analytics data.');
       const currentContent = getContentRef.current?.() ?? content;
-      setContent(refreshMarketReportGeneratedBlocks(currentContent, data.snapshot));
+      setContent(ensureMarketReportTitleIcon(
+        refreshMarketReportGeneratedBlocks(currentContent, data.snapshot),
+      ));
       setEditorRevision((revision) => revision + 1);
       markDraftChanged();
       setActive({
@@ -532,11 +533,7 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
                   )}
                   <button
                     type="button"
-                    onClick={() => {
-                      setTitleDraft(title);
-                      setFooterDraft(footer);
-                      setFooterDialogOpen(true);
-                    }}
+                    onClick={() => { setFooterDraft(footer); setFooterDialogOpen(true); }}
                     disabled={working || loadingReport}
                     className={`${buttonClass} border border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}
                   >
@@ -580,18 +577,8 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
             aria-labelledby="market-report-footer-title"
             className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl"
           >
-            <h2 id="market-report-footer-title" className="text-lg font-semibold text-slate-900">Edit report</h2>
-            <p className="mt-1 text-sm text-slate-600">Update the report title and footer. Use a new line for each footer paragraph.</p>
-            <label htmlFor="market-report-title" className="mb-1 mt-4 block text-sm font-medium text-slate-700">
-              Title
-            </label>
-            <input
-              id="market-report-title"
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              maxLength={255}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-lg font-semibold focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
+            <h2 id="market-report-footer-title" className="text-lg font-semibold text-slate-900">Edit Footer</h2>
+            <p className="mt-1 text-sm text-slate-600">Update the page footer. Use a new line for each paragraph.</p>
             <label htmlFor="market-report-footer" className="mb-1 mt-4 block text-sm font-medium text-slate-700">
               Page footer
             </label>
@@ -614,7 +601,7 @@ export default function MarketAdminPage({ initialSlug }: { initialSlug?: string 
               </button>
               <button
                 type="button"
-                onClick={() => void saveEdits()}
+                onClick={() => void saveFooter()}
                 disabled={working}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >

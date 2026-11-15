@@ -121,13 +121,12 @@ describe('Market reports API', () => {
       'Number of Sales - North Shore vs Auckland Region',
       'Days to Sell - North Shore vs Auckland Region',
     ];
-    expect(charts.map((chart: { props: { caption: string } }) => chart.props.caption)).toEqual(expectedTitles);
-    const northShoreColors = ['#2348c5', '#059669', '#d97706'];
+    expect(charts.every((chart: { props: Record<string, unknown> }) => !('caption' in chart.props))).toBe(true);
     for (const [index, chart] of charts.entries()) {
       const svg = decodeURIComponent(chart.props.url.replace('data:image/svg+xml,', ''));
       expect(svg).toContain(expectedTitles[index]);
       expect(svg).toContain(' C ');
-      expect(svg).toContain(`stroke="${northShoreColors[index]}"`);
+      expect(svg).toContain('stroke="#2348c5"');
       expect(svg).toContain('stroke="#94a3b8"');
       expect(svg).toContain('stroke-dasharray="8 7"');
       expect(svg).toContain('Auckland Region');
@@ -499,8 +498,6 @@ describe('Market reports API', () => {
   it('renders the authenticated preview from a month-based report URL', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
-        title: 'October preview',
-        summary: 'Preview summary',
         content: validContent,
         footer: 'Custom draft footer',
         data_snapshot: { periodKey: '2026-10' },
@@ -510,7 +507,8 @@ describe('Market reports API', () => {
 
     const page = await MarketReportPreviewPage({ params: Promise.resolve({ id: 'October-2026' }) });
 
-    expect(page.props.report.title).toBe('October preview');
+    expect(page.props.report.title).toBeUndefined();
+    expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Custom draft footer');
     expect(mocks.query.mock.calls[0][0]).toContain('FROM north_shore_market_reports');
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
@@ -528,8 +526,6 @@ describe('Market reports API', () => {
   it('renders an authenticated draft preview from its admin preview URL', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
-        title: 'October draft',
-        summary: 'Draft summary',
         content: validContent,
         footer: 'Draft footer',
         data_snapshot: { periodKey: '2026-10' },
@@ -541,7 +537,8 @@ describe('Market reports API', () => {
     });
 
     expect(page.props.preview).toBe(true);
-    expect(page.props.report.title).toBe('October draft');
+    expect(page.props.report.title).toBeUndefined();
+    expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Draft footer');
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);
   });
@@ -549,8 +546,6 @@ describe('Market reports API', () => {
   it('renders published reports from their month-based public URL', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
-        published_title: 'October 2026',
-        published_summary: 'Published summary',
         published_content: validContent,
         published_footer: 'Published custom footer',
         published_data_snapshot: { periodKey: '2026-10' },
@@ -561,7 +556,8 @@ describe('Market reports API', () => {
       params: Promise.resolve({ slug: 'October-2026' }),
     });
 
-    expect(page.props.report.title).toBe('October 2026');
+    expect(page.props.report.title).toBeUndefined();
+    expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Published custom footer');
     expect(page.props.preview).toBeUndefined();
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
@@ -571,8 +567,6 @@ describe('Market reports API', () => {
   it('renders the published revision from the authenticated admin public URL', async () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
-        published_title: 'October 2026',
-        published_summary: 'Published summary',
         published_content: validContent,
         published_footer: 'Published footer',
         published_data_snapshot: { periodKey: '2026-10' },
@@ -584,7 +578,8 @@ describe('Market reports API', () => {
     });
 
     expect(page.props.preview).toBeUndefined();
-    expect(page.props.report.title).toBe('October 2026');
+    expect(page.props.report.title).toBeUndefined();
+    expect(page.props.report.summary).toBeUndefined();
     expect(page.props.report.footer).toBe('Published footer');
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10']);

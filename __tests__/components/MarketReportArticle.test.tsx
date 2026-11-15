@@ -13,20 +13,26 @@ vi.mock('@blocknote/mantine', () => ({
 }));
 
 vi.mock('next/dynamic', () => ({
-  default: () => () => React.createElement('div', { 'data-testid': 'report-content' }),
+  default: () => ({ content }: { content: unknown }) => React.createElement(
+    'div',
+    { 'data-testid': 'report-content' },
+    JSON.stringify(content),
+  ),
 }));
 
 vi.mock('@/components/Header', () => ({
   default: () => null,
 }));
 
-vi.mock('@/lib/market-report-document', () => ({
-  ensureMarketReportRichTextContent: (content: unknown[]) => content,
-}));
+vi.mock('@/lib/market-report-document', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/market-report-document')>();
+  return {
+    ...actual,
+    ensureMarketReportRichTextContent: (content: unknown[]) => content,
+  };
+});
 
 const report: MarketReportArticleData = {
-  title: 'North Shore Property Market Report — October 2026',
-  summary: '',
   content: [{ type: 'paragraph' }],
   dataSnapshot: {
     periodType: 'monthly',
@@ -44,15 +50,10 @@ const report: MarketReportArticleData = {
 describe('MarketReportArticle', () => {
   afterEach(cleanup);
 
-  it('removes redundant report labels and paper styling while preserving the page width', () => {
+  it('does not render a separate report title or summary and preserves the page width', () => {
     render(<MarketReportArticle report={report} preview />);
 
-    const heading = screen.getByRole('heading', { level: 1, name: report.title });
-    expect(heading).toBeTruthy();
-    expect(heading.className).toContain('text-left');
-    expect(heading.parentElement?.className).toContain('px-4');
-    expect(heading.parentElement?.className).toContain('sm:px-8');
-    expect(heading.parentElement?.className).toContain('market-report-title');
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
     expect(screen.queryByText('North Shore Property Market Report', { exact: true })).toBeNull();
     expect(screen.queryByText('October 2026 · Draft preview')).toBeNull();
 
@@ -63,6 +64,24 @@ describe('MarketReportArticle', () => {
     expect(main?.className).toContain('market-report-body');
     expect(article?.className).toContain('px-4');
     expect(article?.className).not.toMatch(/bg-white|border|rounded|shadow/);
+  });
+
+  it('adds the Reports delta icon to the rich-text title', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [{
+            type: 'heading',
+            props: { level: 1 },
+            content: [{ type: 'text', text: 'North Shore Market Report', styles: { bold: true } }],
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('report-content').textContent).toContain('"type":"delta"');
+    expect(screen.getByTestId('report-content').textContent).toContain('North Shore Market Report');
   });
 
   it('renders a custom footer as paragraphs and aligns it with the report content', () => {

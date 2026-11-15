@@ -21,7 +21,7 @@ export default async function AdminMarketReportDraftPreviewPage({
   if (!period) notFound();
 
   const result = await query(
-    `SELECT title, summary, content, footer, data_snapshot
+    `SELECT content, footer, data_snapshot
      FROM north_shore_market_reports
      WHERE period_type = $1 AND period_key = $2`,
     [period.periodType, period.periodKey],
@@ -33,8 +33,6 @@ export default async function AdminMarketReportDraftPreviewPage({
     <MarketReportArticle
       preview
       report={{
-        title: String(report.title),
-        summary: String(report.summary || ''),
         content: Array.isArray(report.content) ? report.content as ReportEditorContent : [],
         footer: typeof report.footer === 'string' ? report.footer : null,
         dataSnapshot: report.data_snapshot as MarketReportSnapshot,

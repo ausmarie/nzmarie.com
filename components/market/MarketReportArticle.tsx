@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import Header from '@/components/Header';
 import type { ReportEditorContent } from '@/types/report';
 import type { MarketReportSnapshot } from '@/lib/market-report-data';
-import { ensureMarketReportRichTextContent } from '@/lib/market-report-document';
+import { ensureMarketReportRichTextContent, ensureMarketReportTitleIcon } from '@/lib/market-report-document';
 import { getDefaultMarketReportFooter } from '@/lib/market-report-footer';
 
 const MarketReportRichText = dynamic(() => import('./MarketReportRichText'), {
@@ -12,8 +12,6 @@ const MarketReportRichText = dynamic(() => import('./MarketReportRichText'), {
 });
 
 export interface MarketReportArticleData {
-  title: string;
-  summary: string;
   footer?: string | null;
   content: ReportEditorContent;
   dataSnapshot: MarketReportSnapshot;
@@ -27,7 +25,9 @@ export default function MarketReportArticle({
   preview?: boolean;
 }) {
   const { dataSnapshot: snapshot } = report;
-  const content = ensureMarketReportRichTextContent(report.content ?? [], snapshot);
+  const content = ensureMarketReportTitleIcon(
+    ensureMarketReportRichTextContent(report.content ?? [], snapshot),
+  );
   const footer = report.footer ?? getDefaultMarketReportFooter(snapshot);
   return (
     <div className="min-h-screen bg-white text-slate-900">
@@ -38,13 +38,6 @@ export default function MarketReportArticle({
         </div>
       )}
       <main className="market-report-body mx-auto max-w-6xl space-y-8 px-4 py-10 sm:px-6 lg:px-8">
-        <header className="market-report-title px-4 text-left sm:px-8">
-          <h1 className="text-left text-3xl font-bold tracking-tight sm:text-4xl">{report.title}</h1>
-          {report.summary && (
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-700">{report.summary}</p>
-          )}
-        </header>
-
         <article className="px-4 py-6 sm:px-8">
           <MarketReportRichText content={content} />
         </article>

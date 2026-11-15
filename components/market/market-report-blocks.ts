@@ -1,7 +1,35 @@
-import { BlockNoteSchema, createBlockSpec, defaultBlockSpecs } from '@blocknote/core';
+import {
+  BlockNoteSchema,
+  createBlockSpec,
+  createInlineContentSpec,
+  defaultBlockSpecs,
+  defaultInlineContentSpecs,
+} from '@blocknote/core';
 import { buildMarketPulseHTML, statDirection, type MarketPulseProps } from '@/lib/market-pulse';
+import { createReportDeltaIcon } from '@/lib/report-delta-icon';
 
 export type MarketPulseFlushRegistry = Map<string, () => void>;
+
+const deltaInlineContent = createInlineContentSpec(
+  {
+    type: 'delta' as const,
+    content: 'none',
+    propSchema: {
+      height: { default: '36px' },
+      strokeColor: { default: '#1e40af' },
+    },
+  },
+  {
+    render: (inlineContent) => {
+      const container = document.createElement('span');
+      container.style.cssText = 'display:inline-flex;align-items:center;padding:2px;vertical-align:middle;';
+      const icon = createReportDeltaIcon(inlineContent.props.height, inlineContent.props.strokeColor);
+      icon.setAttribute('aria-hidden', 'true');
+      container.append(icon);
+      return { dom: container };
+    },
+  },
+);
 
 function createMarketPulseBlock(
   editable: boolean,
@@ -102,6 +130,10 @@ export function createMarketReportSchema(
     blockSpecs: {
       ...defaultBlockSpecs,
       marketPulse: createMarketPulseBlock(editable, flushRegistry, onEdit)(),
+    },
+    inlineContentSpecs: {
+      ...defaultInlineContentSpecs,
+      delta: deltaInlineContent,
     },
   });
 }

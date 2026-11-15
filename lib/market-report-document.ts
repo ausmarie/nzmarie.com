@@ -6,20 +6,46 @@ import { monotonePath } from '@/lib/monotone-chart-path';
 
 type TrendMetric = 'medianPrice' | 'salesCount' | 'daysToSell';
 
-const CHARTS: Array<{ metric: TrendMetric; title: string; color: string }> = [
-  { metric: 'medianPrice', title: 'Median Price', color: '#2348c5' },
-  { metric: 'salesCount', title: 'Number of Sales', color: '#059669' },
-  { metric: 'daysToSell', title: 'Days to Sell', color: '#d97706' },
+const NORTH_SHORE_CHART_COLOR = '#2348c5';
+
+const CHARTS: Array<{ metric: TrendMetric; title: string }> = [
+  { metric: 'medianPrice', title: 'Median Price' },
+  { metric: 'salesCount', title: 'Number of Sales' },
+  { metric: 'daysToSell', title: 'Days to Sell' },
 ];
 
 interface MarketDocumentBlock {
   type?: string;
   props?: Record<string, unknown>;
-  content?: string | Array<{ type?: string; text?: string; styles?: Record<string, unknown> }>;
+  content?: string | Array<{
+    type?: string;
+    text?: string;
+    styles?: Record<string, unknown>;
+    props?: Record<string, unknown>;
+  }>;
 }
 
 export function marketReportChartName(metric: TrendMetric): string {
   return `north-shore-market-chart-${metric}`;
+}
+
+export function ensureMarketReportTitleIcon(content: ReportEditorContent): ReportEditorContent {
+  let titleFound = false;
+  const blocks = content as unknown as MarketDocumentBlock[];
+  return blocks.map((block) => {
+    if (titleFound || block.type !== 'heading' || block.props?.level !== 1) return block;
+    titleFound = true;
+    const inlineContent = Array.isArray(block.content) ? block.content : [];
+    if (inlineContent.some((item) => item.type === 'delta')) return block;
+    return {
+      ...block,
+      content: [
+        { type: 'delta', props: { height: '36px', strokeColor: '#1e40af' } },
+        { type: 'text', text: ' ', styles: {} },
+        ...inlineContent,
+      ],
+    };
+  }) as unknown as ReportEditorContent;
 }
 
 function formatValue(metric: TrendMetric, value: number): string {
@@ -189,13 +215,12 @@ export function buildMarketReportRichTextContent(snapshot: MarketReportSnapshot)
       `${chart.title} - North Shore vs Auckland Region`,
       chart.metric,
       snapshot.charts[chart.metric],
-      chart.color,
+      NORTH_SHORE_CHART_COLOR,
     );
     blocks.push({
       type: 'image',
       props: {
         url: `data:image/svg+xml,${encodeURIComponent(svg)}`,
-        caption: `${chart.title} - North Shore vs Auckland Region`,
         name: marketReportChartName(chart.metric),
         showPreview: true,
         previewWidth: 960,
@@ -215,9 +240,18 @@ export function ensureMarketReportRichTextContent(
   const blocks = content as unknown as MarketDocumentBlock[];
   if (blocks.some((block) => block.type === 'marketPulse')) {
     const compareLabel = getMarketReportComparisonLabel(snapshot.periodType, snapshot.periodKey);
-    return blocks.map((block) => block.type === 'marketPulse'
-      ? { ...block, props: { ...block.props, compareLabel } }
-      : block) as unknown as ReportEditorContent;
+    return blocks.map((block) => {
+      if (block.type === 'marketPulse') {
+        return { ...block, props: { ...block.props, compareLabel } };
+      }
+      if (block.type === 'image' && typeof block.props?.name === 'string'
+        && block.props.name.startsWith('north-shore-market-chart-') && 'caption' in block.props) {
+        const props = { ...block.props };
+        delete props.caption;
+        return { ...block, props };
+      }
+      return block;
+    }) as unknown as ReportEditorContent;
   }
   const generated = buildMarketReportRichTextContent(snapshot);
   return [
