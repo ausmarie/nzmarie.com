@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import React from 'react';
 
 const renderedLineProps = vi.hoisted(() => [] as Array<Record<string, unknown>>);
@@ -26,6 +26,10 @@ const makePoint = (period: string) => ({
   cityMedian: 1_000_000,
   citySales: 10,
   cityDays: 30,
+  districts: {
+    'North Shore City': { median: 1_000_000, sales: 10, days: 30 },
+    'Auckland Region': { median: 1_500_000, sales: 20, days: 40 },
+  },
   suburbs: {
     Oteha: { median: 900_000, sales: 5, days: 25 },
   },
@@ -33,9 +37,8 @@ const makePoint = (period: string) => ({
 
 const chartProps = {
   suburbs: ['Oteha'],
-  district: 'North Shore City',
+  districts: ['North Shore City'],
   suburbColors: { Oteha: '#2563EB' },
-  showDistrict: true,
 };
 
 describe('MarketTrendsChart scroll position', () => {
@@ -83,5 +86,45 @@ describe('MarketTrendsChart scroll position', () => {
 
     expect(renderedLineProps.length).toBe(2);
     expect(renderedLineProps.every((props) => props.isAnimationActive === false)).toBe(true);
+  });
+
+  it('styles Auckland Region as a blue primary line', () => {
+    render(
+      <MarketTrendsChart
+        data={[makePoint('2026-01')]}
+        suburbs={[]}
+        districts={['Auckland Region']}
+        mode="monthly"
+        suburbColors={{}}
+      />
+    );
+
+    expect(screen.getByText('Auckland Region Monthly Median Price')).toBeDefined();
+    expect(renderedLineProps[0]).toMatchObject({
+      name: 'Auckland Region',
+      stroke: '#1E3A8A',
+      strokeWidth: 3,
+    });
+  });
+
+  it('renders Auckland Region and North Shore as separate comparison lines', () => {
+    render(
+      <MarketTrendsChart
+        data={[makePoint('2026-01')]}
+        suburbs={[]}
+        districts={['Auckland Region', 'North Shore City']}
+        mode="monthly"
+        suburbColors={{}}
+      />
+    );
+
+    expect(screen.getByText('Auckland Region vs North Shore Monthly Median Price')).toBeDefined();
+    expect(renderedLineProps).toHaveLength(2);
+    expect(renderedLineProps[0]).toMatchObject({ name: 'Auckland Region', stroke: '#1E3A8A' });
+    expect(renderedLineProps[1]).toMatchObject({
+      name: 'North Shore',
+      stroke: '#94A3B8',
+      strokeDasharray: '5 5',
+    });
   });
 });

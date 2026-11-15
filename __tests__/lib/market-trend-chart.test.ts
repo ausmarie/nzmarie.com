@@ -5,15 +5,24 @@ import {
   MIN_CHART_WIDTH,
   MONTHLY_POINT_WIDTH,
   QUARTERLY_POINT_WIDTH,
+  districtSeriesKey,
   type TrendChartSourcePoint,
 } from '@/lib/market-trend-chart';
 
-function point(period: string, cityMedian: number | null, suburbs: Record<string, number | null> = {}): TrendChartSourcePoint {
+function point(
+  period: string,
+  cityMedian: number | null,
+  suburbs: Record<string, number | null> = {},
+  districts?: Record<string, number | null>,
+): TrendChartSourcePoint {
   const detail: TrendChartSourcePoint['suburbs'] = {};
   for (const [name, median] of Object.entries(suburbs)) {
     detail[name] = { median };
   }
-  return { period, cityMedian, suburbs: detail };
+  const districtDetails = districts && Object.fromEntries(
+    Object.entries(districts).map(([name, median]) => [name, { median }]),
+  );
+  return { period, cityMedian, suburbs: detail, districts: districtDetails };
 }
 
 describe('buildMarketTrendRows', () => {
@@ -79,6 +88,28 @@ describe('buildMarketTrendRows', () => {
     expect(rows.map((row) => row._label)).toEqual(['2025-Q1', '2025-Q2']);
     expect(rows.map((row) => row._period)).toEqual(['2025-Q1', '2025-Q2']);
     expect(rows[1].Torbay).toBe(1200000);
+  });
+
+  it('creates independent series for both regions and does not substitute the primary district', () => {
+    const rows = buildMarketTrendRows(
+      [
+        point('2026-01', 1200000, {}, {
+          'North Shore City': 1200000,
+          'Auckland Region': 1500000,
+        }),
+        point('2026-02', 1510000, {}, {
+          'Auckland Region': 1510000,
+        }),
+      ],
+      [],
+      'monthly',
+      ['Auckland Region', 'North Shore City'],
+    );
+
+    expect(rows[0][districtSeriesKey('Auckland Region')]).toBe(1500000);
+    expect(rows[0][districtSeriesKey('North Shore City')]).toBe(1200000);
+    expect(rows[1][districtSeriesKey('Auckland Region')]).toBe(1510000);
+    expect(rows[1][districtSeriesKey('North Shore City')]).toBeUndefined();
   });
 });
 

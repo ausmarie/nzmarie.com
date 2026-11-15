@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
 import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
+import { parseReportQuarter } from '@/lib/outreach-quarter';
 
 export async function PATCH(
   _request: Request,
@@ -30,11 +31,11 @@ export async function PATCH(
 
     let targetQuarter: { year: number; quarter: string } | null = null;
     if (status === 'pending' && returnToPending) {
-      const quarterMatch = body.report_quarter?.match(/^(\d{4})-(Q[1-4])$/);
-      if (quarterMatch) {
-        targetQuarter = { year: Number(quarterMatch[1]), quarter: quarterMatch[2] };
+      const reportPeriod = parseReportQuarter(body.report_quarter);
+      if (reportPeriod) {
+        targetQuarter = { year: reportPeriod.year, quarter: reportPeriod.quarter };
       } else if (body.report_quarter) {
-        return NextResponse.json({ error: 'Invalid report quarter' }, { status: 400 });
+        return NextResponse.json({ error: 'Invalid report period' }, { status: 400 });
       }
     }
 
@@ -43,18 +44,29 @@ export async function PATCH(
       const latestSentQuarter = await marieDB.query(
         `SELECT year, quarter
          FROM (
-           SELECT q.year, q.quarter, q.last_sent_at AS activity_at
+           SELECT q.year,
+                  CASE WHEN q.quarter ~ '^(0[1-9]|1[0-2])$'
+                    THEN 'M' || q.quarter
+                    ELSE q.quarter
+                  END AS quarter,
+                  q.last_sent_at AS activity_at
            FROM outreach_property_quarter_status q
-           WHERE q.outreach_property_id = $1
-             AND q.status IN ('sent', 'partial')
+             WHERE q.outreach_property_id = $1
+               AND q.status IN ('sent', 'partial')
            UNION ALL
            SELECT sr.year, sr.quarter, sl.sent_at AS activity_at
            FROM outreach_send_logs sl
            JOIN suburb_reports sr ON sr.id = sl.suburb_report_id
            WHERE sl.outreach_property_id = $1
-             AND sr.quarter ~ '^Q[1-4]$'
+               AND sr.quarter ~ '^(Q[1-4]|M(0[1-9]|1[0-2])|0[1-9]|1[0-2])$'
          ) sent_quarters
-         ORDER BY year DESC, quarter DESC, activity_at DESC NULLS LAST
+           ORDER BY year DESC,
+                    CASE
+                      WHEN quarter ~ '^M' THEN SUBSTRING(quarter FROM 2)::INTEGER
+                      WHEN quarter ~ '^(0[1-9]|1[0-2])$' THEN SUBSTRING(quarter FROM 1)::INTEGER
+                      ELSE SUBSTRING(quarter FROM 2)::INTEGER * 3
+                    END DESC,
+                    activity_at DESC NULLS LAST
          LIMIT 1`,
         [params.id]
       );
@@ -64,7 +76,7 @@ export async function PATCH(
       }
       if (!targetQuarter) {
         return NextResponse.json(
-          { error: 'No quarterly send history found for this address' },
+          { error: 'No report-period send history found for this address' },
           { status: 409 }
         );
       }
@@ -88,9 +100,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Record not found' }, { status: 404 });
     }
 
-    // When rolling back to pending, clear send fields but KEEP send logs
-    // so quarter filtering still works correctly. The status field will be 'pending'
-    // but the send log preserves the quarter/campaign association.
+    // Keep immutable send logs so the period association remains available.
     if (status === 'pending' && returnToPending && targetQuarter) {
       await marieDB.query(
         `UPDATE outreach_property_quarter_status
@@ -100,18 +110,20 @@ export async function PATCH(
              last_sent_at = NULL
          WHERE outreach_property_id = $1
            AND year = $2
-           AND quarter = $3`,
+           AND quarter = CASE WHEN $3 ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($3 FROM 2) ELSE $3 END`,
         [params.id, targetQuarter.year, targetQuarter.quarter]
       );
 
-      // Rebuild missing quarter rows from immutable send history. This also
-      // repairs quarter status rows removed by the former all-quarter DELETE.
+      // Rebuild missing report-period rows from immutable send history.
       await marieDB.query(
         `WITH logged_reports AS (
            SELECT
              sr.id AS suburb_report_id,
              sr.suburb,
-             sr.quarter,
+             CASE WHEN sr.quarter ~ '^M(0[1-9]|1[0-2])$'
+               THEN SUBSTRING(sr.quarter FROM 2)
+               ELSE sr.quarter
+             END AS quarter,
              sr.year,
              ARRAY_AGG(DISTINCT sl.campaign_key)
                FILTER (WHERE sl.campaign_key IS NOT NULL) AS campaign_keys
@@ -123,7 +135,12 @@ export async function PATCH(
            GROUP BY sr.id, sr.suburb, sr.quarter, sr.year
          ),
          fallback_report AS (
-           SELECT sr.id, sr.suburb, sr.quarter, sr.year, ARRAY[]::text[] AS campaign_keys
+           SELECT sr.id, sr.suburb,
+                  CASE WHEN sr.quarter ~ '^M(0[1-9]|1[0-2])$'
+                    THEN SUBSTRING(sr.quarter FROM 2)
+                    ELSE sr.quarter
+                  END AS quarter,
+                  sr.year, ARRAY[]::text[] AS campaign_keys
            FROM suburb_reports sr
            JOIN outreach_properties op ON op.id = $1 AND op.suburb = sr.suburb
            WHERE sr.year = $2
@@ -134,7 +151,7 @@ export async function PATCH(
                FROM outreach_property_quarter_status existing
                WHERE existing.outreach_property_id = $1
                  AND existing.year = $2
-                 AND existing.quarter = $3
+                 AND existing.quarter = CASE WHEN $3 ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($3 FROM 2) ELSE $3 END
              )
            ORDER BY sr.uploaded_at DESC
            LIMIT 1
@@ -181,7 +198,7 @@ export async function PATCH(
     await invalidateDashboardStatsCache();
 
     if (process.env.USE_OUTREACH_MV === 'true') {
-      marieDB.query('REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched')
+      await marieDB.query('REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched')
         .catch(err => console.error('MV refresh failed (non-critical):', err));
     }
 

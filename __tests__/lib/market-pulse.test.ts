@@ -478,6 +478,22 @@ describe('buildMarketPulseHTML', () => {
     }
   });
 
+  it('renders Auckland metrics as notes under the matching KPI values', () => {
+    const html = buildMarketPulseHTML({
+      ...baseProps,
+      card2Note: 'Auckland Region Sold: 110',
+      districtLine: 'Auckland Region Avg: 43 Days',
+      priceNote: 'Auckland Region Price: $1.60M',
+    });
+
+    expect(html).toContain('Auckland Region Price: $1.60M');
+    expect(html).toContain('Auckland Region Sold: 110');
+    expect(html).toContain('Auckland Region Avg: 43 Days');
+    expect(html.indexOf('Auckland Region Price:')).toBeLessThan(html.indexOf('Local Properties Sold'));
+    expect(html.indexOf('Auckland Region Sold:')).toBeLessThan(html.indexOf('Local Avg Days to Sell'));
+    expect(html.indexOf('Auckland Region Avg:')).toBeLessThan(html.indexOf('Compared to Previous Month'));
+  });
+
   it('escapes HTML in editable values', () => {
     const html = buildMarketPulseHTML({ ...baseProps, medianLabel: '<b>oops</b>' });
     expect(html).toContain('&lt;b&gt;oops&lt;/b&gt;');

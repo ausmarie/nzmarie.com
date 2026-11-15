@@ -4,7 +4,13 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
-import { buildMarketTrendRows, marketTrendChartMinWidth, type TrendChartMode } from '@/lib/market-trend-chart';
+import {
+  buildMarketTrendRows,
+  districtSeriesKey,
+  marketTrendChartMinWidth,
+  type TrendChartMode,
+} from '@/lib/market-trend-chart';
+import { ANALYTICS_DISTRICTS } from '@/lib/analytics-districts';
 
 const formatYAxis = (value: number) => `$${(value / 1000000).toFixed(2)}M`;
 
@@ -20,21 +26,25 @@ interface DataPoint {
   cityMedian: number | null;
   citySales: number;
   cityDays: number | null;
+  districts?: Record<string, SuburbDataPoint>;
   suburbs: Record<string, SuburbDataPoint>;
 }
 
 interface Props {
   data: DataPoint[];
   suburbs: string[];
-  district: string;
+  districts: string[];
   mode: TrendChartMode;
   suburbColors: Record<string, string>;
-  showDistrict: boolean;
 }
 
-export default function MarketTrendsChart({ data, suburbs, district, mode, suburbColors, showDistrict }: Props) {
-  const chartData = buildMarketTrendRows(data, suburbs, mode);
+export default function MarketTrendsChart({ data, suburbs, districts, mode, suburbColors }: Props) {
+  const chartData = buildMarketTrendRows(data, suburbs, mode, districts);
   const minWidth = marketTrendChartMinWidth(chartData.length, mode);
+  const districtLabels = districts.map((district) =>
+    ANALYTICS_DISTRICTS.find((item) => item.name === district)?.label ?? district,
+  );
+  const chartTitle = [...suburbs, ...districtLabels].join(' vs ') || 'Market';
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
 
@@ -67,7 +77,7 @@ export default function MarketTrendsChart({ data, suburbs, district, mode, subur
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
       <h3 className="text-xl font-bold mb-4">
-        {suburbs.join(', ')}{showDistrict ? ` vs ${district}` : ''} {mode === 'monthly' ? 'Monthly' : 'Quarterly'} Median Price
+        {chartTitle} {mode === 'monthly' ? 'Monthly' : 'Quarterly'} Median Price
       </h3>
       <div ref={scrollRef} className="overflow-x-auto" data-testid="market-trends-scroll">
         <div style={{ width: chartWidth }}>
@@ -85,7 +95,6 @@ export default function MarketTrendsChart({ data, suburbs, district, mode, subur
               <Tooltip
                 formatter={(value, name) => {
                   if (typeof value !== 'number') return [value, name];
-                  if (name === 'cityMedian') return [`$${value.toLocaleString()}`, 'North Shore'];
                   return [`$${value.toLocaleString()}`, name];
                 }}
                 labelFormatter={(label, payload) => {
@@ -108,19 +117,25 @@ export default function MarketTrendsChart({ data, suburbs, district, mode, subur
                   activeDot={{ r: 8 }}
                 />
               ))}
-              {showDistrict && (
-                <Line
-                  name="North Shore"
-                  type="monotone"
-                  dataKey="cityMedian"
-                  stroke="#94A3B8"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  connectNulls
-                  isAnimationActive={false}
-                  dot={{ r: 4, fill: '#94A3B8' }}
-                />
-              )}
+              {districts.map((district) => {
+                const isAuckland = district === 'Auckland Region';
+                const districtLabel = ANALYTICS_DISTRICTS.find((item) => item.name === district)?.label ?? district;
+                const color = isAuckland ? '#1E3A8A' : '#94A3B8';
+                return (
+                  <Line
+                    key={district}
+                    name={districtLabel}
+                    type="monotone"
+                    dataKey={districtSeriesKey(district)}
+                    stroke={color}
+                    strokeWidth={isAuckland ? 3 : 2}
+                    strokeDasharray={isAuckland ? undefined : '5 5'}
+                    connectNulls
+                    isAnimationActive={false}
+                    dot={{ r: isAuckland ? 5 : 4, fill: color }}
+                  />
+                );
+              })}
           </LineChart>
         </div>
       </div>

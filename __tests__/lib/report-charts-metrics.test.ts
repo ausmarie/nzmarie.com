@@ -121,7 +121,7 @@ describe('renderMetricChartSvg', () => {
 
   it('titles the monthly sales chart like the reference chart', () => {
     const svg = renderMetricChartSvg('Totara Vale', 'sales', 'month', points);
-    expect(svg).toContain('Number of Sales/Month in Totara Vale and North Shore City');
+    expect(svg).toContain('Number of Sales/Month - Totara Vale vs North Shore');
     expect(svg).toContain('>Totara Vale</text>');
     expect(svg).toContain('>North Shore</text>');
     expect(svg).toContain('Jul 25');
@@ -135,7 +135,7 @@ describe('renderMetricChartSvg', () => {
       { period: '2025-Q3', sub: 8, dist: 580 },
       { period: '2025-Q4', sub: 6, dist: 540 },
     ]);
-    expect(svg).toContain('Number of Sales/Quarter in Totara Vale and North Shore City');
+    expect(svg).toContain('Number of Sales/Quarter - Totara Vale vs North Shore');
     expect(svg).toContain('2025 Q3');
     expect(svg).toContain('2025 Q4');
   });
@@ -145,14 +145,14 @@ describe('renderMetricChartSvg', () => {
       { period: '2025-07', sub: 1000000, dist: 1200000 },
       { period: '2025-08', sub: 1100000, dist: 1180000 },
     ]);
-    expect(price).toContain('Median Sale Price in Totara Vale and North Shore City');
+    expect(price).toContain('Median Price - Totara Vale vs North Shore');
     expect(price).toContain('Median Price (NZD)');
 
     const days = renderMetricChartSvg('Totara Vale', 'days_to_sell', 'month', [
       { period: '2025-07', sub: 40, dist: 55 },
       { period: '2025-08', sub: 45, dist: 57 },
     ]);
-    expect(days).toContain('Median Days to Sell in Totara Vale and North Shore City');
+    expect(days).toContain('Days to Sell - Totara Vale vs North Shore');
     expect(days).toContain('Days to Sell');
   });
 
@@ -207,7 +207,7 @@ describe('renderMetricChartSvg', () => {
       { period: '2025-07', sub: 300, dist: null },
       { period: '2025-08', sub: 280, dist: null },
     ]);
-    expect(svg).toContain('Number of Sales/Month in North Shore');
+    expect(svg).toContain('Number of Sales/Month - North Shore');
     expect(svg).not.toContain('and North Shore City');
   });
 
@@ -216,7 +216,7 @@ describe('renderMetricChartSvg', () => {
       { period: '2025-07', sub: 5, dist: null },
       { period: '2025-08', sub: 3, dist: null },
     ]);
-    expect(svg).not.toContain('North Shore</text>');
+    expect(svg).not.toContain('font-size="10">North Shore</text>');
   });
 
   it('returns an empty string when there is no data at all', () => {
@@ -264,7 +264,7 @@ describe('generateMetricChartImageUrl', () => {
     const [key, body, contentType] = vi.mocked(uploadToR2).mock.calls[0];
     expect(key).toBe('charts/totara-vale-sales-month-2025-07-01-to-2025-09-01.svg');
     expect(contentType).toBe('image/svg+xml');
-    expect(String(body)).toContain('Number of Sales/Month in Totara Vale and North Shore City');
+    expect(String(body)).toContain('Number of Sales/Month - Totara Vale vs North Shore');
 
     expect(url).toContain('https://cdn.test/charts/totara-vale-sales-month-2025-07-01-to-2025-09-01.svg');
   });

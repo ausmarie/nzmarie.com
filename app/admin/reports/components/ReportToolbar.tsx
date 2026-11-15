@@ -14,6 +14,9 @@ interface ReportToolbarProps {
   onSaveNow: () => void;
   onExport: () => void;
   onDelete: () => void;
+  onRefreshChartTitle?: () => void;
+  refreshingChartTitle?: boolean;
+  canRefreshChartTitle?: boolean;
   onEditHeaderFooter?: () => void;
   suburbName?: string;
   quarter?: string;
@@ -22,7 +25,8 @@ interface ReportToolbarProps {
 }
 
 export default function ReportToolbar({
-  title, onTitleChange, status, docType, saving, onSaveNow, onExport, onDelete, onEditHeaderFooter, suburbName, quarter, hideExtraButtons,
+  title, onTitleChange, status, docType, saving, onSaveNow, onExport, onDelete, onRefreshChartTitle,
+  refreshingChartTitle, canRefreshChartTitle, onEditHeaderFooter, suburbName, quarter, hideExtraButtons,
 }: ReportToolbarProps) {
   const router = useRouter();
   const bumpRefreshKey = useReportStore(s => s.bumpRefreshKey);
@@ -68,6 +72,21 @@ export default function ReportToolbar({
         }}>
           Save
         </button>
+
+        {!hideExtraButtons && canRefreshChartTitle && onRefreshChartTitle && (
+          <button
+            onClick={onRefreshChartTitle}
+            disabled={refreshingChartTitle || saving}
+            title="Update the saved median-price chart title without generating a new report"
+            style={{
+              padding: '4px 12px', fontSize: '0.8rem', borderRadius: 6,
+              border: '1px solid #d97706', background: '#fffbeb', cursor: refreshingChartTitle || saving ? 'wait' : 'pointer',
+              color: '#b45309', fontWeight: 500, opacity: refreshingChartTitle || saving ? 0.6 : 1,
+            }}
+          >
+            {refreshingChartTitle ? 'Updating title...' : 'Update chart title'}
+          </button>
+        )}
 
         {!hideExtraButtons && (
           <button onClick={() => setShowGenerate(true)} style={{

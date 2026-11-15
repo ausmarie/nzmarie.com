@@ -198,7 +198,8 @@ describe('Extra admin pages', () => {
         <AnalyticsPage />
       </QueryClientProvider>
     );
-    expect(await screen.findByText(/North Shore/)).toBeTruthy();
+    expect(await screen.findByTestId('analysis-district-North Shore City')).toBeTruthy();
+    expect(screen.getByTestId('analysis-district-Auckland Region')).toBeTruthy();
   });
 
   it('renders activity page with appraisals and downloads tabs', async () => {

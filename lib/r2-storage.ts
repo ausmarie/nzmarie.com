@@ -42,6 +42,17 @@ export async function uploadToR2(key: string, body: Buffer | Uint8Array, content
   return key;
 }
 
+export async function downloadFromR2(key: string): Promise<Buffer> {
+  if (isR2Mock) throw new Error('R2 storage is not configured');
+  const command = new GetObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: key,
+  });
+  const response = await s3Client.send(command);
+  if (!response.Body) throw new Error(`R2 object "${key}" has no content`);
+  return Buffer.from(await response.Body.transformToByteArray());
+}
+
 export async function createPresignedUploadUrl(key: string, contentType: string = 'application/pdf', expiresIn: number = 600): Promise<string> {
   if (isR2Mock) {
     return `https://mock-r2.example.com/${key}`;

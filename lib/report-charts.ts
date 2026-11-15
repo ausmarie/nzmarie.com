@@ -1,5 +1,6 @@
 import { query as marieQuery } from './db';
 import { uploadToR2, isR2Mock } from './r2-storage';
+import { monotonePath } from './monotone-chart-path';
 
 interface RawTrendRow {
   region_name: string;
@@ -72,40 +73,6 @@ async function fetchQuarterly(suburbName: string, dataStartQuarter?: string, dat
   return { subData, distData };
 }
 
-function monotonePath(points: { x: number; y: number }[]): string {
-  if (points.length < 2) return '';
-  const n = points.length;
-  // Secant slopes
-  const m: number[] = [];
-  for (let i = 0; i < n - 1; i++) {
-    const dx = points[i + 1].x - points[i].x;
-    m.push(dx !== 0 ? (points[i + 1].y - points[i].y) / dx : 0);
-  }
-  // Tangents (Fritsch–Carlson monotone)
-  const t: number[] = [];
-  t[0] = m[0];
-  t[n - 1] = m[n - 2];
-  for (let i = 1; i < n - 1; i++) {
-    if (m[i - 1] * m[i] <= 0) {
-      t[i] = 0;
-    } else {
-      const dx = points[i + 1].x - points[i - 1].x;
-      t[i] = dx !== 0 ? (points[i + 1].y - points[i - 1].y) / dx : 0;
-    }
-  }
-  let d = `M ${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
-  for (let i = 0; i < n - 1; i++) {
-    const p0 = points[i], p1 = points[i + 1];
-    const dx = p1.x - p0.x;
-    const cp1x = p0.x + dx / 3;
-    const cp1y = p0.y + t[i] * dx / 3;
-    const cp2x = p1.x - dx / 3;
-    const cp2y = p1.y - t[i + 1] * dx / 3;
-    d += ` C ${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${p1.x.toFixed(1)},${p1.y.toFixed(1)}`;
-  }
-  return d;
-}
-
 export function generateSVG(
   suburbName: string,
   subData: { quarter: string; median: number | null }[],
@@ -170,9 +137,7 @@ export function generateSVG(
 
   const showDistrict = cleanDist.length > 0;
   const displayName = suburbName === 'North Shore City' ? 'North Shore' : suburbName;
-  const titleText = suburbName === 'North Shore City'
-    ? `${displayName} — Median Price`
-    : `${displayName} vs North Shore — Median Price`;
+  const titleText = legacyMedianPriceChartTitle(suburbName);
 
   const legendHtml = `<rect x="${W / 2 - 120}" y="${H - 48}" width="${showDistrict ? 240 : 120}" height="26" rx="4" fill="white" stroke="#f1f5f9" stroke-width="1"/>
 <line x1="${W / 2 - 108}" y1="${H - 39}" x2="${W / 2 - 85}" y2="${H - 39}" stroke="${subColor}" stroke-width="3" stroke-linecap="round"/>
@@ -230,6 +195,36 @@ export interface MetricRow {
   median_price: number | null;
   sales_count: number | null;
   days_to_sell: number | null;
+}
+
+export function legacyMedianPriceChartTitle(suburbName: string): string {
+  const displayName = suburbName === 'North Shore City' ? 'North Shore' : suburbName;
+  return suburbName === 'North Shore City'
+    ? 'Median Price - North Shore'
+    : `Median Price - ${displayName} vs North Shore`;
+}
+
+function escapeSvgText(value: string): string {
+  const escapedCharacters: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;',
+  };
+  return value.replace(/[&<>"']/g, (character) => escapedCharacters[character]);
+}
+
+export function updateLegacyMedianPriceChartTitle(svg: string, suburbName: string): string {
+  const titlePattern = /(<text\b(?=[^>]*\bx="350")(?=[^>]*\by="(?:22|26)")[^>]*>)([\s\S]*?)(<\/text>)/;
+  const match = titlePattern.exec(svg);
+  if (!match) throw new Error('Could not locate the saved chart title.');
+
+  const title = escapeSvgText(legacyMedianPriceChartTitle(suburbName));
+  if (match[2] === title) return svg;
+  return svg.replace(titlePattern, (_matched, openingTag: string, _oldTitle: string, closingTag: string) =>
+    `${openingTag}${title}${closingTag}`,
+  );
 }
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -315,14 +310,14 @@ export function aggregateMetricSeries(
 function metricTitle(suburbName: string, metric: LeadChartMetric, periodType: ChartPeriodType): string {
   const display = suburbName === 'North Shore City' ? 'North Shore' : suburbName;
   const isDistrict = suburbName === 'North Shore City' || suburbName === 'North Shore';
-  const suffix = isDistrict ? '' : ' and North Shore City';
+  const subject = isDistrict ? display : `${display} vs North Shore`;
   if (metric === 'sales') {
-    return `Number of Sales/${periodType === 'month' ? 'Month' : 'Quarter'} in ${display}${suffix}`;
+    return `Number of Sales/${periodType === 'month' ? 'Month' : 'Quarter'} - ${subject}`;
   }
   if (metric === 'median_price') {
-    return `Median Sale Price in ${display}${suffix}`;
+    return `Median Price - ${subject}`;
   }
-  return `Median Days to Sell in ${display}${suffix}`;
+  return `Days to Sell - ${subject}`;
 }
 
 function niceAxis(values: number[], ticks: number): { min: number; max: number; step: number } {

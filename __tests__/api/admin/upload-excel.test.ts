@@ -132,6 +132,33 @@ describe('POST /api/admin/analytics/upload-excel', () => {
     }
   });
 
+  it('imports Auckland district data with the Auckland Region canonical name', async () => {
+    mockParse.mockReturnValue({
+      rows: [
+        { location: 'Auckland', region_name: 'Auckland Region', city: 'Auckland', period_month: '2025-01-01', median_price: 1100000, sales_count: 500, days_to_sell: 40, median_price_1yr_prior: null, price_diff_1yr_pct: null, median_price_3yrs_prior: null, price_diff_3yrs_pct: null, median_valuation: null, median_list_price: null, sale_to_valuation_pct: null, list_to_valuation_pct: null, total_volume: null, pct_of_national_sales: null, house_price_index: null, price_diff_mom_pct: null },
+      ],
+      suburb_name: 'Auckland Region',
+      city: 'Auckland',
+      region_type: 'district',
+      period_start: '2025-01-01',
+      period_end: '2025-01-01',
+      count: 1,
+    });
+
+    const form = new FormData();
+    form.append('file', new File([makeFileBuffer('dummy')], 'auckland.csv', { type: 'text/csv' }));
+    const res = await POST(makeRequest(form));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ success: true, suburb: 'Auckland Region', region_type: 'district' });
+    const insertCall = mockQuery.mock.calls.find(
+      (call: unknown[]) => (call[0] as string).includes('INSERT INTO market_monthly_snapshots')
+    );
+    expect(insertCall?.[1][0]).toBe('district');
+    expect(insertCall?.[1][1]).toBe('Auckland Region');
+  });
+
   it('skips months that already exist in the DB', async () => {
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes('SELECT DISTINCT period_month')) {

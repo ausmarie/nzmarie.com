@@ -142,6 +142,32 @@ describe('buildOutreachFilter - Unsent Status', () => {
     expect(filter.sql).toContain('op.sent_at IS NULL');
   });
 
+  it('should treat a returned pending property as unsent despite retained send logs', () => {
+    const filter = buildOutreachFilter({
+      suburb: 'Torbay',
+      status: 'pending',
+      sentStatus: 'unsent',
+    });
+
+    expect(filter.sql).toContain("op.status = 'pending'");
+    expect(filter.sql).toContain('op.total_send_count, 0) = 0');
+    expect(filter.sql).toContain('op.last_sent_at IS NULL');
+    expect(filter.sql).toContain('op.sent_at IS NULL');
+    expect(filter.sql).toContain("OR op.status = 'pending'");
+  });
+
+  it('should not keep a returned pending property in the sent filter because its logs are retained', () => {
+    const filter = buildOutreachFilter({
+      suburb: 'Torbay',
+      status: 'pending',
+      sentStatus: 'sent',
+    });
+
+    expect(filter.sql).toContain("EXISTS (SELECT 1 FROM outreach_send_logs");
+    expect(filter.sql).toContain("AND op.status <> 'pending'");
+    expect(filter.sql).toContain("op.status = 'sent'");
+  });
+
   it('should not exclude properties sent in earlier quarters when reportQuarter is set', () => {
     const filter = buildOutreachFilter({
       suburb: 'Oteha',

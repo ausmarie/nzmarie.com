@@ -6,6 +6,7 @@ const MONTH_SHORT: Record<string, string> = {
 export interface TrendChartSourcePoint {
   period: string;
   cityMedian: number | null;
+  districts?: Record<string, { median: number | null }>;
   suburbs: Record<string, { median: number | null }>;
 }
 
@@ -18,18 +19,28 @@ export interface TrendChartRow {
 
 export type TrendChartMode = 'monthly' | 'quarterly';
 
+export function districtSeriesKey(district: string): string {
+  return `district:${district}`;
+}
+
 export function buildMarketTrendRows(
   data: TrendChartSourcePoint[],
   suburbs: string[],
-  mode: TrendChartMode
+  mode: TrendChartMode,
+  districts: string[] = [],
 ): TrendChartRow[] {
   if (mode === 'quarterly') {
     return data.map((d) => {
       const row: TrendChartRow = {
         _label: d.period,
         _period: d.period,
-        cityMedian: d.cityMedian ?? undefined,
       };
+      for (const district of districts) {
+        const median = d.districts
+          ? d.districts[district]?.median
+          : district === 'North Shore City' ? d.cityMedian : null;
+        if (median != null) row[districtSeriesKey(district)] = median;
+      }
       for (const s of suburbs) {
         if (d.suburbs[s]?.median != null) row[s] = d.suburbs[s]!.median!;
       }
@@ -46,8 +57,13 @@ export function buildMarketTrendRows(
     const row: TrendChartRow = {
       _label: showYear ? `${year} ${month}` : month,
       _period: `${year} ${month}`,
-      cityMedian: d.cityMedian ?? undefined,
     };
+    for (const district of districts) {
+      const median = d.districts
+        ? d.districts[district]?.median
+        : district === 'North Shore City' ? d.cityMedian : null;
+      if (median != null) row[districtSeriesKey(district)] = median;
+    }
     for (const s of suburbs) {
       if (d.suburbs[s]?.median != null) row[s] = d.suburbs[s]!.median!;
     }

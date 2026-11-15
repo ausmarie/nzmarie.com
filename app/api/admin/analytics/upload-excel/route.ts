@@ -129,6 +129,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       suburb: parsed.suburb_name,
+      region_type: parsed.region_type,
       city: parsed.city,
       period_start: parsed.period_start,
       period_end: parsed.period_end,

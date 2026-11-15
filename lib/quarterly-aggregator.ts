@@ -106,6 +106,18 @@ export function aggregateToQuarterly(monthly: MonthlyDataPoint[]): MonthlyDataPo
 
     const cityMedians = months.map(m => m.cityMedian).filter((v): v is number => v !== null);
     const cityDays = months.map(m => m.cityDays).filter((v): v is number => v !== null);
+    const districtNames = new Set(months.flatMap((month) => Object.keys(month.districts ?? {})));
+    const districts: NonNullable<MonthlyDataPoint['districts']> = {};
+    for (const district of districtNames) {
+      const districtPoints = months
+        .map((month) => month.districts?.[district])
+        .filter((point): point is NonNullable<typeof point> => point != null);
+      districts[district] = {
+        median: avg(districtPoints.map((point) => point.median).filter((value): value is number => value != null)),
+        sales: sum(districtPoints.map((point) => point.sales)),
+        days: avg(districtPoints.map((point) => point.days).filter((value): value is number => value != null)),
+      };
+    }
 
     const cityDetailAgs: (number | null | undefined)[] = [];
     const cityDetailSales: number[] = [];
@@ -161,6 +173,7 @@ export function aggregateToQuarterly(monthly: MonthlyDataPoint[]): MonthlyDataPo
       citySales: months.reduce((s, m) => s + Number(m.citySales), 0),
       cityDays: avg(cityDays),
       cityDetail: aggDetail,
+      districts,
       suburbs,
     });
   }

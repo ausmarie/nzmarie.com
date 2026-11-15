@@ -41,8 +41,9 @@ function parseLocation(location: string): { region_name: string; city: string; r
       region_type: 'suburb',
     };
   }
+  const districtName = parts[0] || location;
   return {
-    region_name: parts[0] || location,
+    region_name: /^auckland$/i.test(districtName) ? 'Auckland Region' : districtName,
     city: 'Auckland',
     region_type: 'district',
   };

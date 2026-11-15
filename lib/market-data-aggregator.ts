@@ -1,4 +1,9 @@
 import { query } from './db';
+import {
+  ANALYTICS_DISTRICTS,
+  getAnalyticsCanonicalDistrictName,
+  getAnalyticsDistrictDataNames,
+} from './analytics-districts';
 
 export interface SuburbDetail {
   median: number | null;
@@ -23,6 +28,7 @@ export interface MonthlyDataPoint {
   citySales: number;
   cityDays: number | null;
   cityDetail: SuburbDetail | null;
+  districts?: Record<string, SuburbDetail>;
   suburbs: Record<string, SuburbDetail>;
 }
 
@@ -48,6 +54,42 @@ function quarterFromMonth(m: number): number {
   return Math.ceil(m / 3);
 }
 
+function findPreferredDistrictRow<T extends { region_name: string }>(
+  rows: T[],
+  districtNames: string[],
+  matches: (row: T) => boolean,
+): T | undefined {
+  for (const name of districtNames) {
+    const row = rows.find((item) => item.region_name === name && matches(item));
+    if (row) return row;
+  }
+  return undefined;
+}
+
+function getAllDistrictDataNames(primaryDistrictNames: string[]): string[] {
+  return [...new Set([
+    ...ANALYTICS_DISTRICTS.flatMap((district) => getAnalyticsDistrictDataNames(district.name)),
+    ...primaryDistrictNames,
+  ])];
+}
+
+function getDistrictDetails<T extends { region_name: string }>(
+  rows: T[],
+  matches: (row: T) => boolean,
+  toDetail: (row: T) => SuburbDetail,
+): Record<string, SuburbDetail> {
+  const details: Record<string, SuburbDetail> = {};
+  for (const district of ANALYTICS_DISTRICTS) {
+    const row = findPreferredDistrictRow(
+      rows,
+      getAnalyticsDistrictDataNames(district.name),
+      matches,
+    );
+    if (row) details[district.name] = toDetail(row);
+  }
+  return details;
+}
+
 export async function getMonthlyData(
   suburbNames: string[],
   districtName: string,
@@ -55,7 +97,9 @@ export async function getMonthlyData(
   endDate: string
 ): Promise<MonthlyDataPoint[]> {
   try {
-    const params = [suburbNames, districtName, startDate, endDate];
+    const primaryDistrictNames = getAnalyticsDistrictDataNames(districtName);
+    const districtNames = getAllDistrictDataNames(primaryDistrictNames);
+    const params = [suburbNames, districtNames, startDate, endDate];
     const result = await query<RawMonthly>(
       `SELECT region_name, period_month::text,
               median_price, sales_count, days_to_sell,
@@ -64,7 +108,7 @@ export async function getMonthlyData(
               total_volume, median_price_1yr_prior, median_price_3yrs_prior,
               price_diff_3yrs_pct, house_price_index
        FROM market_monthly_snapshots
-       WHERE (region_name = ANY($1::text[]) OR region_name = $2)
+       WHERE (region_name = ANY($1::text[]) OR region_name = ANY($2::text[]))
          AND period_month BETWEEN $3::date AND $4::date
        ORDER BY period_month, region_name`,
       params
@@ -93,7 +137,7 @@ export async function getMonthlyData(
       };
     }
 
-    const districtRows = rows.filter(r => r.region_name === districtName);
+    const districtRows = rows.filter(r => districtNames.includes(r.region_name));
 
     const keys = new Set<string>();
     for (const r of rows) {
@@ -102,7 +146,9 @@ export async function getMonthlyData(
 
     const merged: MonthlyDataPoint[] = [];
     for (const key of keys) {
-      const d = districtRows.find(r => r.period_month.startsWith(key));
+      const matchesPeriod = (row: RawMonthly) => row.period_month.startsWith(key);
+      const d = findPreferredDistrictRow(districtRows, primaryDistrictNames, matchesPeriod);
+      const districts = getDistrictDetails(districtRows, matchesPeriod, toDetail);
       const suburbs: MonthlyDataPoint['suburbs'] = {};
       for (const sn of suburbNames) {
         const sr = rows.find(r => r.region_name === sn && r.period_month.startsWith(key));
@@ -115,6 +161,7 @@ export async function getMonthlyData(
         citySales: d?.sales_count ?? 0,
         cityDays: d?.days_to_sell ?? null,
         cityDetail: d ? toDetail(d) : null,
+        districts,
         suburbs,
       });
     }
@@ -132,7 +179,9 @@ export async function getQuarterlyComparison(
   startDate: string,
   endDate: string
 ): Promise<MonthlyDataPoint[]> {
-    try {
+  const primaryDistrictNames = getAnalyticsDistrictDataNames(districtName);
+  const districtNames = getAllDistrictDataNames(primaryDistrictNames);
+  try {
     const result = await query<{
       region_name: string;
       year: number;
@@ -149,11 +198,11 @@ export async function getQuarterlyComparison(
         SUM(sales_count) AS sales,
         ROUND(AVG(days_to_sell)) AS days
       FROM market_monthly_snapshots
-      WHERE (region_name = ANY($1::text[]) OR region_name = $2)
+      WHERE (region_name = ANY($1::text[]) OR region_name = ANY($2::text[]))
         AND period_month BETWEEN $3::date AND $4::date
       GROUP BY region_name, 2, 3
       ORDER BY year, quarter, region_name`,
-      [suburbNames, districtName, startDate, endDate]
+      [suburbNames, districtNames, startDate, endDate]
     );
 
     const rows = result.rows.map(r => ({
@@ -165,7 +214,7 @@ export async function getQuarterlyComparison(
       days: r.days !== null ? Number(r.days) : null,
     }));
     if (rows.length > 0) {
-      return aggregateQuarterlyRows(rows, suburbNames, districtName);
+      return aggregateQuarterlyRows(rows, suburbNames, districtNames, primaryDistrictNames);
     }
   } catch (sqlErr) {
     console.warn('SQL quarterly aggregation failed, falling back to JS aggregation:', sqlErr);
@@ -175,13 +224,13 @@ export async function getQuarterlyComparison(
     const raw = await query<RawMonthly>(
       `SELECT region_name, period_month::text, median_price, sales_count, days_to_sell
        FROM market_monthly_snapshots
-       WHERE (region_name = ANY($1::text[]) OR region_name = $2)
+       WHERE (region_name = ANY($1::text[]) OR region_name = ANY($2::text[]))
          AND period_month BETWEEN $3::date AND $4::date
        ORDER BY period_month`,
-      [suburbNames, districtName, startDate, endDate]
+      [suburbNames, districtNames, startDate, endDate]
     );
     if (raw.rows.length > 0) {
-      return aggregateRawToQuarterly(raw.rows, suburbNames, districtName);
+      return aggregateRawToQuarterly(raw.rows, suburbNames, districtNames, primaryDistrictNames);
     }
   } catch (fallbackErr) {
     console.error('JS fallback aggregation also failed:', fallbackErr);
@@ -193,9 +242,10 @@ export async function getQuarterlyComparison(
 function aggregateQuarterlyRows(
   rows: { region_name: string; year: number; quarter: number; median: number | null; sales: number; days: number | null }[],
   suburbNames: string[],
-  districtName: string
+  districtNames: string[],
+  primaryDistrictNames: string[],
 ): MonthlyDataPoint[] {
-  const districtData = rows.filter(r => r.region_name === districtName);
+  const districtData = rows.filter(r => districtNames.includes(r.region_name));
 
   const allKeys = new Set<string>();
   for (const r of rows) {
@@ -205,7 +255,13 @@ function aggregateQuarterlyRows(
   const result: MonthlyDataPoint[] = [];
   for (const key of allKeys) {
     const [y, q] = key.split('-Q').map(Number);
-    const d = districtData.find(r => r.year === y && r.quarter === q);
+    const matchesPeriod = (row: typeof districtData[number]) => row.year === y && row.quarter === q;
+    const d = findPreferredDistrictRow(districtData, primaryDistrictNames, matchesPeriod);
+    const districts = getDistrictDetails(districtData, matchesPeriod, (row) => ({
+      median: row.median,
+      sales: row.sales,
+      days: row.days,
+    }));
     const suburbs: MonthlyDataPoint['suburbs'] = {};
     for (const sn of suburbNames) {
       const sr = rows.find(r => r.region_name === sn && r.year === y && r.quarter === q);
@@ -213,7 +269,7 @@ function aggregateQuarterlyRows(
         suburbs[sn] = { median: sr.median, sales: sr.sales, days: sr.days };
       }
     }
-    if (Object.keys(suburbs).length > 0 || d) {
+    if (Object.keys(suburbs).length > 0 || d || Object.keys(districts).length > 0) {
       result.push({
         period: key,
         periodRaw: key,
@@ -221,6 +277,7 @@ function aggregateQuarterlyRows(
         citySales: d?.sales ?? 0,
         cityDays: d?.days ?? null,
         cityDetail: null,
+        districts,
         suburbs,
       });
     }
@@ -232,16 +289,24 @@ function aggregateQuarterlyRows(
 function aggregateRawToQuarterly(
   rows: RawMonthly[],
   suburbNames: string[],
-  districtName: string
+  districtNames: string[],
+  primaryDistrictNames: string[],
 ): MonthlyDataPoint[] {
-  const map = new Map<string, { district: RawMonthly[]; suburbs: Map<string, RawMonthly[]> }>();
+  const map = new Map<string, { districts: Map<string, RawMonthly[]>; suburbs: Map<string, RawMonthly[]> }>();
   for (const r of rows) {
     const d = new Date(r.period_month);
     const key = `${d.getFullYear()}-Q${quarterFromMonth(d.getMonth() + 1)}`;
-    if (!map.has(key)) map.set(key, { district: [], suburbs: new Map() });
+    if (!map.has(key)) map.set(key, { districts: new Map(), suburbs: new Map() });
     const entry = map.get(key)!;
-    if (r.region_name === districtName) {
-      entry.district.push(r);
+    if (districtNames.includes(r.region_name)) {
+      const canonicalName = getAnalyticsCanonicalDistrictName(r.region_name);
+      if (!entry.districts.has(canonicalName)) entry.districts.set(canonicalName, []);
+      const districtRows = entry.districts.get(canonicalName)!;
+      const existingIndex = districtRows.findIndex((row) => row.period_month.slice(0, 7) === r.period_month.slice(0, 7));
+      if (existingIndex === -1) districtRows.push(r);
+      else if (r.region_name === canonicalName && districtRows[existingIndex].region_name !== canonicalName) {
+        districtRows[existingIndex] = r;
+      }
     } else if (suburbNames.includes(r.region_name)) {
       if (!entry.suburbs.has(r.region_name)) entry.suburbs.set(r.region_name, []);
       entry.suburbs.get(r.region_name)!.push(r);
@@ -262,15 +327,29 @@ function aggregateRawToQuarterly(
         days: avg(sRows.map(r => r.days_to_sell).filter((v): v is number => v !== null)),
       };
     }
-    const dMedians = groups.district.map(r => r.median_price).filter((v): v is number => v !== null);
-    const dDays = groups.district.map(r => r.days_to_sell).filter((v): v is number => v !== null);
+    const districts: NonNullable<MonthlyDataPoint['districts']> = {};
+    for (const district of ANALYTICS_DISTRICTS) {
+      const districtRows = groups.districts.get(district.name) ?? [];
+      if (districtRows.length > 0) {
+        const medians = districtRows.map((r) => r.median_price).filter((v): v is number => v !== null);
+        const days = districtRows.map((r) => r.days_to_sell).filter((v): v is number => v !== null);
+        districts[district.name] = {
+          median: avg(medians),
+          sales: sum(districtRows.map((r) => r.sales_count)),
+          days: avg(days),
+        };
+      }
+    }
+    const primaryDistrict = getAnalyticsCanonicalDistrictName(primaryDistrictNames[0]);
+    const primaryDetails = districts[primaryDistrict];
     result.push({
       period: key,
       periodRaw: key,
-      cityMedian: avg(dMedians),
-      citySales: sum(groups.district.map(r => r.sales_count)),
-      cityDays: avg(dDays),
+      cityMedian: primaryDetails?.median ?? null,
+      citySales: primaryDetails?.sales ?? 0,
+      cityDays: primaryDetails?.days ?? null,
       cityDetail: null,
+      districts,
       suburbs,
     });
   }

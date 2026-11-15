@@ -2921,6 +2921,44 @@ describe('Outreach page - Return to Pending actions', () => {
     }, { timeout: 3000 });
   });
 
+  it('passes a selected month when returning sent rows to Pending', async () => {
+    makeOutreachFetch('sent', [{
+      suburb: 'Mairangi Bay',
+      quarter: 'M10',
+      year: 2026,
+      id: 'report-m10',
+      uploaded_at: '2026-11-01T00:00:00Z',
+      label: '2026-10',
+    }]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<OutreachPage />);
+    await waitFor(() => expect(screen.getByText('1 Main St')).toBeTruthy(), { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: '✓ Sent' }));
+    await waitFor(() => {
+      expect(screen.getByText('1 Sent Main St')).toBeTruthy();
+      expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy();
+    }, { timeout: 3000 });
+    fireEvent.click(screen.getByRole('button', { name: /2026-10/ }));
+
+    screen.getAllByRole('checkbox').forEach((checkbox) => fireEvent.click(checkbox));
+    fireEvent.click(screen.getByRole('button', { name: /Return to Pending/i }));
+
+    await waitFor(() => {
+      const statusCalls = (global.fetch as any).mock.calls.filter(
+        (call: unknown[]) => String(call[0]).includes('/status') && (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(statusCalls).toHaveLength(2);
+      for (const call of statusCalls) {
+        expect(JSON.parse((call[1] as RequestInit).body as string)).toMatchObject({
+          status: 'pending',
+          return_to_pending: true,
+          report_quarter: '2026-10',
+        });
+      }
+    }, { timeout: 3000 });
+  });
+
   it('updates the Sent UI immediately and reconciles after the Return to Pending request completes', async () => {
     let returned = false;
     let resolveStatusRequest: ((response: { ok: boolean; json: () => Promise<unknown> }) => void) | undefined;
@@ -2967,7 +3005,10 @@ describe('Outreach page - Return to Pending actions', () => {
 
     await waitFor(() => expect(screen.getByText('1 Main St')).toBeTruthy(), { timeout: 3000 });
     fireEvent.click(screen.getByRole('button', { name: '✓ Sent' }));
-    await waitFor(() => expect(screen.getByText('1 Sent Main St')).toBeTruthy(), { timeout: 3000 });
+    await waitFor(() => {
+      expect(screen.getByText('1 Sent Main St')).toBeTruthy();
+      expect(screen.getByText('2 Sent Oak Ave')).toBeTruthy();
+    }, { timeout: 3000 });
     fireEvent.click(screen.getAllByRole('checkbox')[0]);
     fireEvent.click(screen.getByRole('button', { name: /Return to Pending/i }));
 

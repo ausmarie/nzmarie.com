@@ -63,6 +63,26 @@ describe('aggregateToQuarterly', () => {
     expect(result[0].cityDays).toBe(34);
   });
 
+  it('aggregates Auckland and North Shore district series independently', () => {
+    const january = makeMonthly('2025-01', {}, {}, {});
+    january.districts = {
+      'North Shore City': { median: 1200000, sales: 100, days: 35 },
+      'Auckland Region': { median: 1500000, sales: 150, days: 42 },
+    };
+    const february = makeMonthly('2025-02', {}, {}, {});
+    february.districts = {
+      'North Shore City': { median: 1300000, sales: 110, days: 33 },
+      'Auckland Region': { median: 1600000, sales: 170, days: 40 },
+    };
+
+    const result = aggregateToQuarterly([january, february]);
+
+    expect(result[0].districts).toEqual({
+      'North Shore City': { median: 1250000, sales: 210, days: 34 },
+      'Auckland Region': { median: 1550000, sales: 320, days: 41 },
+    });
+  });
+
   it('handles null values (Low Vol.)', () => {
     const monthly = [
       makeMonthly('2025-01', { Oteha: null }, { Oteha: 5 }, { Oteha: null }, null, 20, null),

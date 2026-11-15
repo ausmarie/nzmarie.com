@@ -11,6 +11,7 @@ import {
 } from '@/lib/redis';
 import { batchGetCachedR2Urls } from '@/lib/streetview';
 import { parseReportQuarter } from '@/lib/outreach-quarter';
+import { currentSentPredicate, currentUnsentPredicate } from '@/lib/outreach-send-state';
 import { getQueryCacheKey } from '@/lib/outreach-cache-key';
 import { normalizeOutreachStreet } from '@/lib/outreach-streets';
 import { extractStreetPrefixSql } from '@/lib/street-ordering';
@@ -84,8 +85,6 @@ function quarterSentPredicate(
   params: unknown[],
   suburb?: string | null
 ) {
-  if (!/^Q[1-4]$/.test(quarter.quarter)) return null;
-
   const quarterParam = params.length + 1;
   const yearParam = quarterParam + 1;
   const campaignParam = quarterParam + 2;
@@ -105,7 +104,10 @@ function quarterSentPredicate(
      FROM outreach_property_quarter_status quarter_status
      WHERE quarter_status.outreach_property_id = ${propertyId}
        AND quarter_status.year = $${yearParam}
-       AND quarter_status.quarter = $${quarterParam}
+       AND quarter_status.quarter = CASE
+         WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2)
+         ELSE $${quarterParam}
+       END
        AND quarter_status.status ${status}${quarterSuburbClause}`;
 
   return `(
@@ -184,7 +186,10 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
         conditions.push(sub);
       }
     } else {
-      conditions.push(`EXISTS (SELECT 1 FROM outreach_send_logs sl2 WHERE sl2.outreach_property_id = outreach_enriched.id)`);
+      conditions.push(currentSentPredicate(
+        'outreach_enriched',
+        'EXISTS (SELECT 1 FROM outreach_send_logs sl2 WHERE sl2.outreach_property_id = outreach_enriched.id)'
+      ));
     }
   } else if (status === 'pending') {
     if (qi) {
@@ -313,7 +318,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
       `EXISTS (
         SELECT 1 FROM outreach_property_quarter_status qj
         WHERE qj.outreach_property_id = outreach_enriched.id
-          AND qj.quarter = $${quarterParam}
+          AND qj.quarter = CASE WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2) ELSE $${quarterParam} END
           AND qj.year = $${yearParam}
           AND qj.is_junk IS TRUE
           AND qj.junk_at IS NOT NULL${suburbClause}
@@ -340,20 +345,24 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
       }
     } else if (suburb) {
       if (isSent) {
-        let sub = `EXISTS (SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
+        const sub = `SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
         params.push(suburb);
-        sub += ') OR COALESCE(total_send_count, 0) > 0 OR last_sent_at IS NOT NULL OR sent_at IS NOT NULL OR status = \'sent\'';
-        conditions.push(`(${sub})`);
+        conditions.push(currentSentPredicate('outreach_enriched', `EXISTS (${sub})`));
       } else {
-        let sub = `NOT EXISTS (SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
+        const sub = `SELECT 1 FROM outreach_send_logs sl3 LEFT JOIN suburb_reports sr3 ON sl3.suburb_report_id = sr3.id WHERE sl3.outreach_property_id = outreach_enriched.id AND (sl3.suburb = $${params.length + 1} OR sr3.suburb = $${params.length + 1} OR sl3.suburb IS NULL)`;
         params.push(suburb);
-        sub += ') AND COALESCE(total_send_count, 0) = 0 AND last_sent_at IS NULL AND sent_at IS NULL AND status <> \'sent\'';
-        conditions.push(`(${sub})`);
+        conditions.push(currentUnsentPredicate('outreach_enriched', `EXISTS (${sub})`));
       }
     } else if (isSent) {
-      conditions.push('(EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = outreach_enriched.id) OR COALESCE(total_send_count, 0) > 0 OR last_sent_at IS NOT NULL OR sent_at IS NOT NULL OR status = \'sent\')');
+      conditions.push(currentSentPredicate(
+        'outreach_enriched',
+        'EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = outreach_enriched.id)'
+      ));
     } else {
-      conditions.push('(NOT EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = outreach_enriched.id) AND COALESCE(total_send_count, 0) = 0 AND last_sent_at IS NULL AND sent_at IS NULL AND status <> \'sent\')');
+      conditions.push(currentUnsentPredicate(
+        'outreach_enriched',
+        'EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = outreach_enriched.id)'
+      ));
     }
     if (!isSent) {
       conditions.push('(no_junk_mail IS NULL OR no_junk_mail = false)');
@@ -392,16 +401,12 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
   let quarterStatusSelect = '';
   if (qi) {
     const base = params.length;
-    if (/^Q[1-4]$/.test(qi.quarter)) {
-      quarterStatusSelect = `, CASE
-        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = outreach_enriched.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status = 'pending') THEN 'pending'
-        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = outreach_enriched.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status IN ('sent', 'partial')) THEN 'sent'
-        WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = outreach_enriched.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent'
-        ELSE 'pending'
-      END AS status`;
-    } else {
-      quarterStatusSelect = `, CASE WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = outreach_enriched.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent' ELSE 'pending' END AS status`;
-    }
+    quarterStatusSelect = `, CASE
+      WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = outreach_enriched.id AND qst.year = $${base + 2} AND qst.quarter = CASE WHEN $${base + 1} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${base + 1} FROM 2) ELSE $${base + 1} END AND qst.status = 'pending') THEN 'pending'
+      WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = outreach_enriched.id AND qst.year = $${base + 2} AND qst.quarter = CASE WHEN $${base + 1} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${base + 1} FROM 2) ELSE $${base + 1} END AND qst.status IN ('sent', 'partial')) THEN 'sent'
+      WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = outreach_enriched.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent'
+      ELSE 'pending'
+    END AS status`;
     params.push(qi.quarter, qi.year, qi.campaignPattern);
   }
   let quarterSentAtSelect = '';
@@ -423,7 +428,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
         (SELECT MAX(qss.last_sent_at)
          FROM outreach_property_quarter_status qss
          WHERE qss.outreach_property_id = outreach_enriched.id
-           AND qss.quarter = $${quarterParam}
+           AND qss.quarter = CASE WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2) ELSE $${quarterParam} END
            AND qss.year = $${yearParam}${quarterSuburbClause}),
         (SELECT MAX(qsl.sent_at)
          FROM outreach_send_logs qsl
@@ -450,7 +455,7 @@ async function handleMVQuery(searchParams: URLSearchParams, view: string) {
       (SELECT MAX(qj.junk_at)
        FROM outreach_property_quarter_status qj
        WHERE qj.outreach_property_id = outreach_enriched.id
-         AND qj.quarter = $${quarterParam}
+         AND qj.quarter = CASE WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2) ELSE $${quarterParam} END
          AND qj.year = $${yearParam}
          AND qj.is_junk IS TRUE
          AND qj.junk_at IS NOT NULL${suburbClause}) AS quarter_junk_at`;
@@ -750,7 +755,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
     query += ` AND EXISTS (
       SELECT 1 FROM outreach_property_quarter_status qj
       WHERE qj.outreach_property_id = op.id
-        AND qj.quarter = $${quarterParam}
+        AND qj.quarter = CASE WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2) ELSE $${quarterParam} END
         AND qj.year = $${yearParam}
         AND qj.is_junk IS TRUE
         AND qj.junk_at IS NOT NULL${suburbClause}
@@ -783,15 +788,21 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
       params.push(suburb);
       idx++;
       if (isSent) {
-        query += ` AND (EXISTS (${sub}) OR op.status = 'sent' OR COALESCE(op.total_send_count, 0) > 0 OR op.last_sent_at IS NOT NULL OR op.sent_at IS NOT NULL)`;
+        query += ` AND ${currentSentPredicate('op', `EXISTS (${sub})`)}`;
       } else {
-        query += ` AND (NOT EXISTS (${sub}) AND op.status <> 'sent' AND COALESCE(op.total_send_count, 0) = 0 AND op.last_sent_at IS NULL AND op.sent_at IS NULL)`;
+        query += ` AND ${currentUnsentPredicate('op', `EXISTS (${sub})`)}`;
       }
     } else {
       if (isSent) {
-        query += ` AND (EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = op.id) OR op.status = 'sent' OR COALESCE(op.total_send_count, 0) > 0 OR op.last_sent_at IS NOT NULL OR op.sent_at IS NOT NULL)`;
+        query += ` AND ${currentSentPredicate(
+          'op',
+          'EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = op.id)'
+        )}`;
       } else {
-        query += ` AND (NOT EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = op.id) AND op.status <> 'sent' AND COALESCE(op.total_send_count, 0) = 0 AND op.last_sent_at IS NULL AND op.sent_at IS NULL)`;
+        query += ` AND ${currentUnsentPredicate(
+          'op',
+          'EXISTS (SELECT 1 FROM outreach_send_logs sl3 WHERE sl3.outreach_property_id = op.id)'
+        )}`;
       }
     }
     if (!isSent) {
@@ -869,16 +880,12 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
   let quarterStatusSelect = '';
   if (qiLegacy) {
     const base = params.length;
-    if (/^Q[1-4]$/.test(qiLegacy.quarter)) {
-      quarterStatusSelect = `, CASE
-        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = op.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status = 'pending') THEN 'pending'
-        WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = op.id AND qst.year = $${base + 2} AND qst.quarter = $${base + 1} AND qst.status IN ('sent', 'partial')) THEN 'sent'
-        WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = op.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent'
-        ELSE 'pending'
-      END AS status`;
-    } else {
-      quarterStatusSelect = `, CASE WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = op.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent' ELSE 'pending' END AS status`;
-    }
+    quarterStatusSelect = `, CASE
+      WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = op.id AND qst.year = $${base + 2} AND qst.quarter = CASE WHEN $${base + 1} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${base + 1} FROM 2) ELSE $${base + 1} END AND qst.status = 'pending') THEN 'pending'
+      WHEN EXISTS (SELECT 1 FROM outreach_property_quarter_status qst WHERE qst.outreach_property_id = op.id AND qst.year = $${base + 2} AND qst.quarter = CASE WHEN $${base + 1} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${base + 1} FROM 2) ELSE $${base + 1} END AND qst.status IN ('sent', 'partial')) THEN 'sent'
+      WHEN EXISTS (SELECT 1 FROM outreach_send_logs slq LEFT JOIN suburb_reports srq ON slq.suburb_report_id = srq.id WHERE slq.outreach_property_id = op.id AND ((srq.quarter = $${base + 1} AND srq.year = $${base + 2}) OR slq.campaign_key ~ $${base + 3})) THEN 'sent'
+      ELSE 'pending'
+    END AS status`;
     params.push(qiLegacy.quarter, qiLegacy.year, qiLegacy.campaignPattern);
   }
   let quarterSentAtSelect = '';
@@ -900,7 +907,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
         (SELECT MAX(qss.last_sent_at)
          FROM outreach_property_quarter_status qss
          WHERE qss.outreach_property_id = op.id
-           AND qss.quarter = $${quarterParam}
+           AND qss.quarter = CASE WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2) ELSE $${quarterParam} END
            AND qss.year = $${yearParam}${quarterSuburbClause}),
         (SELECT MAX(qsl.sent_at)
          FROM outreach_send_logs qsl
@@ -927,7 +934,7 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
       (SELECT MAX(qj.junk_at)
        FROM outreach_property_quarter_status qj
        WHERE qj.outreach_property_id = op.id
-         AND qj.quarter = $${quarterParam}
+         AND qj.quarter = CASE WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2) ELSE $${quarterParam} END
          AND qj.year = $${yearParam}
          AND qj.is_junk IS TRUE
          AND qj.junk_at IS NOT NULL${suburbClause}) AS quarter_junk_at`;

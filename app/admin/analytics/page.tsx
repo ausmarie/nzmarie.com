@@ -12,6 +12,7 @@ import AnalyticsRangeSelector from '@/components/admin/AnalyticsRangeSelector';
 import ScanTrendsChart from '@/components/admin/ScanTrendsChart';
 import SuburbSectionAnalytics from '@/components/admin/SuburbSectionAnalytics';
 import { isSuperAdmin } from '@/lib/permissions';
+import { ANALYTICS_DISTRICTS, isAnalyticsDistrict } from '@/lib/analytics-districts';
 import type { MonthlyDataPoint } from '@/lib/market-data-aggregator';
 import { sortSuburbs, SUBURB_PRIORITY_ORDER } from '@/lib/suburb-order';
 import {
@@ -104,7 +105,11 @@ export default function AnalyticsPage() {
   const [chartLoading, setChartLoading] = useState(false);
   const [chartNeedsMigration, setChartNeedsMigration] = useState(false);
   const [availableSuburbs, setAvailableSuburbs] = useState<string[]>(FALLBACK_SUBURBS);
-  const [showDistrict, setShowDistrict] = useState(true);
+  const [selectedDistrict, setSelectedDistrict] = useState('North Shore City');
+  const [selectedDistricts, setSelectedDistricts] = useState<string[]>([
+    'Auckland Region',
+    'North Shore City',
+  ]);
   const [activeFocusSuburb, setActiveFocusSuburb] = useState<string>('Oteha');
   const [tableDataMode, setTableDataMode] = useState<DataMode>('monthly');
   const [chartRange, setChartRange] = useState<AnalyticsRange>(DEFAULT_ANALYTICS_RANGE);
@@ -227,7 +232,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     if (availableSuburbs.length > 0) {
       setActiveFocusSuburb(prev =>
-        prev !== 'North Shore City' && !availableSuburbs.includes(prev) ? availableSuburbs[0] : prev
+        !isAnalyticsDistrict(prev) && !availableSuburbs.includes(prev) ? availableSuburbs[0] : prev
       );
     }
   }, [availableSuburbs]);
@@ -286,12 +291,12 @@ export default function AnalyticsPage() {
     }
   }, [status, session?.user?.email, fetchAvailableSuburbs, fetchLastSoldData, fetchScanData, lastSoldFilterType]);
 
-  const fetchChartData = useCallback(async (suburbs: string[]) => {
+  const fetchChartData = useCallback(async (suburbs: string[], district: string) => {
     const reqId = ++chartReqIdRef.current;
     setChartLoading(true);
     setChartNeedsMigration(false);
     try {
-      const res = await fetch(`/api/admin/analytics/chart-data?suburbs=${suburbs.map(encodeURIComponent).join(',')}&district=North Shore City&from=${ANALYTICS_ALL_DATA_FROM}&to=${ANALYTICS_ALL_DATA_TO}`);
+      const res = await fetch(`/api/admin/analytics/chart-data?suburbs=${suburbs.map(encodeURIComponent).join(',')}&district=${encodeURIComponent(district)}&from=${ANALYTICS_ALL_DATA_FROM}&to=${ANALYTICS_ALL_DATA_TO}`);
       const data = await res.json();
       if (reqId !== chartReqIdRef.current) return;
       if (data.needsMigration) {
@@ -324,9 +329,9 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     if (status === 'authenticated' && session?.user?.email && isSuperAdmin(session.user.email)) {
-      fetchChartData(selectedSuburbsKey.split(',').filter(Boolean));
+      fetchChartData(selectedSuburbsKey.split(',').filter(Boolean), selectedDistrict);
     }
-  }, [status, session?.user?.email, selectedSuburbsKey, fetchChartData]);
+  }, [status, session?.user?.email, selectedSuburbsKey, selectedDistrict, fetchChartData]);
 
   const toggleSuburb = (s: string) => {
     setSelectedSuburbs(prev =>
@@ -335,12 +340,34 @@ export default function AnalyticsPage() {
     setActiveFocusSuburb(s);
   };
 
+  const handleAnalysisFocusChange = (location: string) => {
+    setActiveFocusSuburb(location);
+    if (isAnalyticsDistrict(location)) {
+      setSelectedDistrict(location);
+      setSelectedDistricts((current) => current.includes(location) ? current : [...current, location]);
+      setSelectedSuburbs([]);
+    } else {
+      setSelectedSuburbs([location]);
+    }
+  };
+
+  const toggleDistrict = (district: string) => {
+    const nextDistricts = selectedDistricts.includes(district)
+      ? selectedDistricts.filter((item) => item !== district)
+      : [...selectedDistricts, district];
+    setSelectedDistricts(nextDistricts);
+    setSelectedDistrict(district);
+    if (isAnalyticsDistrict(activeFocusSuburb)) {
+      setActiveFocusSuburb(nextDistricts[0] ?? district);
+    }
+  };
+
   useEffect(() => {
     setActiveFocusSuburb(prev => {
       if (selectedSuburbs.length > 0 && !selectedSuburbs.includes(prev)) {
         return selectedSuburbs[0];
       }
-      if (selectedSuburbs.length === 0) {
+      if (selectedSuburbs.length === 0 && !isAnalyticsDistrict(prev)) {
         return 'North Shore City';
       }
       return prev;
@@ -516,12 +543,7 @@ export default function AnalyticsPage() {
         activeFocusSuburb={activeFocusSuburb}
         availableSuburbs={availableSuburbs}
         onFocusChange={(suburb) => {
-          setActiveFocusSuburb(suburb);
-          if (suburb !== 'North Shore City') {
-            setSelectedSuburbs([suburb]);
-          } else {
-            setSelectedSuburbs([]);
-          }
+          handleAnalysisFocusChange(suburb);
         }}
       />
 
@@ -567,16 +589,25 @@ export default function AnalyticsPage() {
               </button>
             );
           })}
-          <button
-            onClick={() => setShowDistrict(v => !v)}
-            className={`text-sm font-medium rounded-full px-3 py-1.5 border transition-all ${
-              showDistrict
-                ? 'bg-[#94A3B8] text-white border-[#94A3B8] shadow-sm'
-                : 'text-gray-500 border-gray-300 hover:border-gray-400 bg-white'
-            }`}
-          >
-            North Shore {showDistrict ? '✓' : ''}
-          </button>
+          {ANALYTICS_DISTRICTS.map((district) => {
+            const active = selectedDistricts.includes(district.name);
+            const color = district.name === 'Auckland Region' ? '#1E3A8A' : '#94A3B8';
+            return (
+              <button
+                key={district.name}
+                data-testid={`reinz-district-${district.name}`}
+                onClick={() => toggleDistrict(district.name)}
+                className={`text-sm font-medium rounded-full px-3 py-1.5 border transition-all ${
+                  active
+                    ? 'text-white shadow-sm'
+                    : 'text-gray-500 border-gray-300 hover:border-gray-400 bg-white'
+                }`}
+                style={active ? { backgroundColor: color, borderColor: color } : undefined}
+              >
+                {district.label} {active ? '✓' : ''}
+              </button>
+            );
+          })}
         </div>
         {(() => {
           const activeData = dataMode === 'monthly' ? chartMonthlyData : chartQuarterlyData;
@@ -613,10 +644,9 @@ export default function AnalyticsPage() {
               <MarketTrendsChart
                 data={activeData}
                 suburbs={selectedSuburbs}
-                district="North Shore City"
+                districts={selectedDistricts}
                 mode={dataMode}
                 suburbColors={Object.fromEntries(selectedSuburbs.map(s => [s, getSuburbColor(availableSuburbs.indexOf(s))]))}
-                showDistrict={showDistrict}
               />
               {chartLoading && (
                 <div className="absolute inset-0 bg-white/70 flex items-center justify-center rounded-xl z-10">
@@ -734,11 +764,19 @@ export default function AnalyticsPage() {
 
              {/* Excel Upload Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ExcelUploadForm onSuccess={(suburb) => {
-          if (suburb && !selectedSuburbs.includes(suburb)) {
+        <ExcelUploadForm onSuccess={(suburb, regionType) => {
+          if (!suburb) return;
+          if (regionType === 'district') {
+            const alreadySelected = selectedDistrict === suburb && selectedSuburbs.length === 0;
+            setSelectedDistrict(suburb);
+            setSelectedDistricts((current) => current.includes(suburb) ? current : [...current, suburb]);
+            setActiveFocusSuburb(suburb);
+            setSelectedSuburbs([]);
+            if (alreadySelected) fetchChartData([], suburb);
+          } else if (!selectedSuburbs.includes(suburb)) {
             setSelectedSuburbs(prev => [...prev, suburb]);
-          } else if (suburb) {
-            fetchChartData(selectedSuburbs);
+          } else {
+            fetchChartData(selectedSuburbs, selectedDistrict);
           }
           fetchAvailableSuburbs();
         }} />

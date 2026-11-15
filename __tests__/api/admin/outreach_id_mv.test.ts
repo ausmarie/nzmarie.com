@@ -555,6 +555,78 @@ describe('Outreach [id]/status MV PATCH /api/admin/outreach/[id]/status', () => 
     );
   });
 
+  it('returns a sent property to pending for the selected quarter', async () => {
+    mockAuth();
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'test-id', status: 'pending', suburb: 'Torbay' }],
+      } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await StatusPATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id/status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'pending',
+          return_to_pending: true,
+          report_quarter: '2026-10',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const calls = vi.mocked(marieDB.query).mock.calls;
+    expect(calls[0][0]).toContain("SET status = $1");
+    expect(calls[0][0]).toContain("total_send_count = CASE WHEN $1 = 'pending' THEN 0");
+    expect(calls[0][1]).toEqual(['pending', 'test-id']);
+
+    const quarterUpdate = calls.find(([query]) =>
+      String(query).includes('UPDATE outreach_property_quarter_status')
+    );
+    expect(quarterUpdate?.[0]).toContain("SUBSTRING($3 FROM 2)");
+    expect(quarterUpdate?.[1]).toEqual(['test-id', 2026, 'M10']);
+
+    const rebuiltQuarterStatuses = calls.find(([query]) =>
+      String(query).includes('INSERT INTO outreach_property_quarter_status')
+    );
+    expect(rebuiltQuarterStatuses?.[0]).toContain("SUBSTRING(sr.quarter FROM 2)");
+    expect(rebuiltQuarterStatuses?.[0]).toContain("SELECT $1, suburb_report_id, suburb, quarter, year, 'pending'");
+
+    const outreachViewRefresh = calls.findIndex(
+      ([query]) => query === 'REFRESH MATERIALIZED VIEW CONCURRENTLY outreach_enriched'
+    );
+    expect(outreachViewRefresh).toBeGreaterThan(calls.indexOf(quarterUpdate!));
+  });
+
+  it('derives the latest monthly period when Return to Pending has no selected period', async () => {
+    mockAuth();
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [{ year: 2026, quarter: 'M10' }] } as any)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'test-id', status: 'pending', suburb: 'Mairangi Bay' }],
+      } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await StatusPATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id/status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending', return_to_pending: true }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const calls = vi.mocked(marieDB.query).mock.calls;
+    expect(calls[0][0]).toContain("THEN 'M' || q.quarter");
+    const quarterUpdate = calls.find(([query]) =>
+      String(query).includes('UPDATE outreach_property_quarter_status')
+    );
+    expect(quarterUpdate?.[1]).toEqual(['test-id', 2026, 'M10']);
+  });
+
   it('returns 400 for invalid status', async () => {
     mockAuth();
 

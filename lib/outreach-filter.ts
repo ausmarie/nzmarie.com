@@ -1,4 +1,5 @@
 import { parseReportQuarter } from '@/lib/outreach-quarter';
+import { currentSentPredicate, currentUnsentPredicate } from '@/lib/outreach-send-state';
 
 export interface OutreachFilterOptions {
   suburb: string;
@@ -54,16 +55,18 @@ export function buildOutreachFilter(opts: OutreachFilterOptions): OutreachFilter
         WHERE quarter_status.outreach_property_id = op.id
           AND quarter_status.suburb = $1
           AND quarter_status.year = $${yearParam}
-          AND quarter_status.quarter = $${quarterParam}
+          AND quarter_status.quarter = CASE
+            WHEN $${quarterParam} ~ '^M(0[1-9]|1[0-2])$' THEN SUBSTRING($${quarterParam} FROM 2)
+            ELSE $${quarterParam}
+          END
           AND quarter_status.status ${status}`;
       const quarterSent = `(EXISTS (${quarterStatus("IN ('sent', 'partial')")})
         OR (NOT EXISTS (${quarterStatus("= 'pending'" )}) AND EXISTS (${sub})))`;
       sql += ` AND ${isSent ? quarterSent : `NOT ${quarterSent}`}`;
     } else if (isSent) {
-      sql += ` AND (EXISTS (${sub}) OR op.status = 'sent' OR COALESCE(op.total_send_count, 0) > 0 OR op.last_sent_at IS NOT NULL OR op.sent_at IS NOT NULL)`;
+      sql += ` AND ${currentSentPredicate('op', `EXISTS (${sub})`)}`;
     } else {
-      sql += ` AND (NOT EXISTS (${sub}) AND COALESCE(op.total_send_count, 0) = 0 AND op.last_sent_at IS NULL AND op.sent_at IS NULL)`;
-      sql += ` AND op.status <> 'sent'`;
+      sql += ` AND ${currentUnsentPredicate('op', `EXISTS (${sub})`)}`;
     }
     if (!isSent) {
       sql += ` AND NOT EXISTS (

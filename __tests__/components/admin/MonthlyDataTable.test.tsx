@@ -125,6 +125,22 @@ describe('MonthlyDataTable', () => {
     expect(screen.getByRole('button', { name: /North Shore/ })).toBeDefined();
   });
 
+  it('renders Auckland Region district and focuses it when selected', () => {
+    render(
+      <MonthlyDataTable
+        monthlyData={mockData}
+        dataMode="monthly"
+        onModeChange={onModeChange}
+        activeFocusSuburb="Oteha"
+        availableSuburbs={availableSuburbs}
+        onFocusChange={onFocusChange}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Auckland Region/ }));
+    expect(onFocusChange).toHaveBeenCalledWith('Auckland Region');
+  });
+
   it('renders new column headers', () => {
     render(
       <MonthlyDataTable

@@ -23,8 +23,10 @@ vi.mock('@/components/admin/Skeleton', () => ({
 }));
 
 vi.mock('@/components/admin/MarketTrendsChart', () => ({
-  default: ({ data }: any) => (
-    <div data-testid="market-trends-chart">{data.map((point: { period: string }) => point.period).join(',')}</div>
+  default: ({ data, districts }: any) => (
+    <div data-testid="market-trends-chart" data-districts={districts.join(',')}>
+      {data.map((point: { period: string }) => point.period).join(',')}
+    </div>
   ),
 }));
 
@@ -60,6 +62,13 @@ vi.mock('@/components/admin/MonthlyDataTable', () => ({
           className={activeFocusSuburb === 'North Shore City' ? 'text-white shadow-sm' : 'text-gray-600'}
         >
           North Shore {activeFocusSuburb === 'North Shore City' ? '✓' : ''}
+        </button>
+        <button
+          onClick={() => onFocusChange('Auckland Region')}
+          data-testid="ad-btn-auckland-region"
+          className={activeFocusSuburb === 'Auckland Region' ? 'text-white shadow-sm' : 'text-gray-600'}
+        >
+          Auckland Region {activeFocusSuburb === 'Auckland Region' ? '✓' : ''}
         </button>
       </div>
     );
@@ -213,6 +222,78 @@ describe('Analytics Page — suburb sync between sections', () => {
       const reinzAlbany = screen.getAllByText('Albany');
       expect(reinzAlbany[0].className).toContain('text-gray-600');
     });
+  });
+
+  it('selects Auckland Region from Analysis Data and loads district trends', async () => {
+    const AnalyticsPage = (await import('../../../app/admin/analytics/page')).default;
+    const qc = createQueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <AnalyticsPage />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('ad-btn-auckland-region')).toBeDefined());
+    fireEvent.click(screen.getByTestId('ad-btn-auckland-region'));
+
+    await waitFor(() => {
+      const calls = (global.fetch as any).mock.calls
+        .filter((call: unknown[]) => String(call[0]).includes('/api/admin/analytics/chart-data'))
+        .map((call: unknown[]) => String(call[0]));
+      expect(calls.some((url: string) => url.includes('district=Auckland%20Region'))).toBe(true);
+    });
+    expect(screen.getByTestId('reinz-district-Auckland Region').className).toContain('text-white');
+  });
+
+  it('can select Auckland Region directly from REINZ Market Trends', async () => {
+    chartDataResponse = {
+      success: true,
+      data: { monthlyData: [{ period: '2026-01' }], quarterlyData: [] },
+    };
+    const AnalyticsPage = (await import('../../../app/admin/analytics/page')).default;
+    const qc = createQueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <AnalyticsPage />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('reinz-district-Auckland Region')).toBeDefined());
+    fireEvent.click(screen.getByTestId('reinz-district-Auckland Region'));
+    expect(screen.getByTestId('reinz-district-Auckland Region').className).toContain('text-gray-500');
+    fireEvent.click(screen.getByTestId('reinz-district-Auckland Region'));
+
+    await waitFor(() => {
+      const calls = (global.fetch as any).mock.calls
+        .filter((call: unknown[]) => String(call[0]).includes('/api/admin/analytics/chart-data'))
+        .map((call: unknown[]) => String(call[0]));
+      expect(calls.some((url: string) => url.includes('district=Auckland%20Region'))).toBe(true);
+    });
+    expect(screen.getByTestId('market-trends-chart').getAttribute('data-districts'))
+      .toBe('North Shore City,Auckland Region');
+  });
+
+  it('shows both regions by default and lets either comparison line be toggled independently', async () => {
+    chartDataResponse = {
+      success: true,
+      data: { monthlyData: [{ period: '2026-01' }], quarterlyData: [] },
+    };
+    const AnalyticsPage = (await import('../../../app/admin/analytics/page')).default;
+    const qc = createQueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <AnalyticsPage />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('market-trends-chart').getAttribute('data-districts'))
+        .toBe('Auckland Region,North Shore City');
+    });
+
+    fireEvent.click(screen.getByTestId('reinz-district-North Shore City'));
+    expect(screen.getByTestId('market-trends-chart').getAttribute('data-districts'))
+      .toBe('Auckland Region');
   });
 
   it('loads the full history, defaults to 2 years, and reveals older REINZ data with 5 years+', async () => {

@@ -166,8 +166,57 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     expect(response.status).toBe(200);
 
     const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
-    expect(queryCall).toContain('NOT EXISTS (SELECT 1 FROM outreach_send_logs sl3');
+    expect(queryCall).toContain('NOT (EXISTS (SELECT 1 FROM outreach_send_logs sl3');
+    expect(queryCall).toContain("OR outreach_enriched.status = 'pending'");
     expect(queryCall).toContain('(no_junk_mail IS NULL OR no_junk_mail = false)');
+  });
+
+  it('does not classify returned pending records as sent when historical send logs remain', async () => {
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any);
+
+    const response = await GET(new Request('http://localhost:3000/api/admin/outreach?sent_status=sent&limit=10'));
+    expect(response.status).toBe(200);
+
+    const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    expect(queryCall).toContain('EXISTS (SELECT 1 FROM outreach_send_logs sl3');
+    expect(queryCall).toContain("outreach_enriched.status <> 'pending'");
+  });
+
+  it('uses the monthly pending marker to exclude returned records from Sent', async () => {
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any);
+
+    const response = await GET(new Request('http://localhost:3000/api/admin/outreach?status=pending&sent_status=sent&report_quarter=2026-10&limit=10'));
+    expect(response.status).toBe(200);
+
+    const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    expect(queryCall).toContain("quarter_status.quarter = CASE");
+    expect(queryCall).toContain("quarter_status.status = 'pending'");
+    expect(vi.mocked(marieDB.query).mock.calls[0][1]).toContain('M10');
+  });
+
+  it('uses the returned-pending marker in the legacy Unsent query', async () => {
+    process.env.USE_OUTREACH_MV = 'false';
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any);
+
+    const response = await GET(new Request('http://localhost:3000/api/admin/outreach?sent_status=unsent&limit=10'));
+    expect(response.status).toBe(200);
+
+    const queryCall = vi.mocked(marieDB.query).mock.calls[0][0] as string;
+    expect(queryCall).toContain("OR op.status = 'pending'");
+    expect(queryCall).toContain("op.last_sent_at IS NULL");
+    expect(queryCall).toContain("op.sent_at IS NULL");
   });
 
   it('filters by market_status', async () => {

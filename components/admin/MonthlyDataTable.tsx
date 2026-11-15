@@ -5,6 +5,7 @@ import type { MonthlyDataPoint, SuburbDetail } from '@/lib/market-data-aggregato
 import { aggregateToQuarterly } from '@/lib/quarterly-aggregator';
 import AnalyticsRangeSelector from './AnalyticsRangeSelector';
 import { DEFAULT_ANALYTICS_RANGE, type AnalyticsRange } from '@/lib/analytics-range';
+import { ANALYTICS_DISTRICTS } from '@/lib/analytics-districts';
 
 const SUBURB_COLORS = [
   '#2563EB', '#DC2626', '#16A34A', '#D97706', '#8B5CF6',
@@ -163,7 +164,8 @@ export default function MonthlyDataTable({
   range = DEFAULT_ANALYTICS_RANGE,
   onRangeChange,
 }: Props) {
-  const isDistrict = activeFocusSuburb === 'North Shore City';
+  const activeDistrict = ANALYTICS_DISTRICTS.find((district) => district.name === activeFocusSuburb);
+  const isDistrict = activeDistrict !== undefined;
   const activeData = useMemo(
     () => dataMode === 'monthly' ? monthlyData : aggregateToQuarterly(monthlyData),
     [monthlyData, dataMode]
@@ -250,16 +252,23 @@ export default function MonthlyDataTable({
             </button>
           );
         })}
-        <button
-          onClick={() => onFocusChange('North Shore City')}
-          className={`text-sm font-medium rounded-full px-3 py-1.5 border transition-all ${
-            isDistrict
-              ? 'bg-[#94A3B8] text-white border-[#94A3B8] shadow-sm'
-              : 'text-gray-500 border-gray-300 hover:border-gray-400 bg-white'
-          }`}
-        >
-          North Shore {isDistrict ? '✓' : ''}
-        </button>
+        {ANALYTICS_DISTRICTS.map((district) => {
+          const active = activeFocusSuburb === district.name;
+          return (
+            <button
+              key={district.name}
+              data-testid={`analysis-district-${district.name}`}
+              onClick={() => onFocusChange(district.name)}
+              className={`text-sm font-medium rounded-full px-3 py-1.5 border transition-all ${
+                active
+                  ? 'bg-[#94A3B8] text-white border-[#94A3B8] shadow-sm'
+                  : 'text-gray-500 border-gray-300 hover:border-gray-400 bg-white'
+              }`}
+            >
+              {district.label} {active ? '✓' : ''}
+            </button>
+          );
+        })}
       </div>
 
       {noDetail && (

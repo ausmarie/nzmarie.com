@@ -5,6 +5,7 @@ import React, { useState, useRef } from 'react';
 interface UploadResult {
   success: boolean;
   suburb?: string;
+  region_type?: 'suburb' | 'district';
   city?: string;
   period_start?: string;
   period_end?: string;
@@ -17,7 +18,7 @@ interface UploadResult {
 }
 
 interface Props {
-  onSuccess?: (suburb: string) => void;
+  onSuccess?: (suburb: string, regionType?: 'suburb' | 'district') => void;
 }
 
 export default function ExcelUploadForm({ onSuccess }: Props) {
@@ -54,7 +55,7 @@ export default function ExcelUploadForm({ onSuccess }: Props) {
       addLog(data.success ? 'Upload complete.' : 'Upload failed.');
       setResult(data);
       if (data.success && onSuccess) {
-        setTimeout(() => onSuccess(data.suburb || ''), 300);
+        setTimeout(() => onSuccess(data.suburb || '', data.region_type), 300);
       }
     } catch {
       setResult({ success: false, error: 'Network error' });
@@ -67,6 +68,9 @@ export default function ExcelUploadForm({ onSuccess }: Props) {
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Upload REINZ Market Data</h3>
+      <p className="mb-4 text-sm text-gray-500">
+        Upload suburb data or district totals such as Auckland Region and North Shore City. The spreadsheet Location field identifies the area.
+      </p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -114,7 +118,7 @@ export default function ExcelUploadForm({ onSuccess }: Props) {
                 <li>Already in DB: {result.already_existed ?? 0}</li>
                 <li>Invalid rows skipped: {result.validation_skipped ?? 0}</li>
                 <li>Total rows: {result.total_rows}</li>
-                <li>Suburb: {result.suburb}</li>
+                <li>Area: {result.suburb}</li>
                 <li>Period: {result.period_start} to {result.period_end}</li>
               </ul>
             </div>

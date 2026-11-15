@@ -231,18 +231,18 @@ function escapeHtml(value: string): string {
 
 const EDITABLE_STYLE = 'border-radius:3px;padding:0 2px;margin:0 -2px;outline:none;cursor:text;';
 
-export function buildMarketPulseHTML(props: MarketPulseProps): string {
+export function buildMarketPulseHTML(props: MarketPulseProps, editable = true): string {
   const value = (prop: keyof MarketPulseProps): string => escapeHtml(String(props[prop] ?? ''));
   const edit = (prop: keyof MarketPulseProps): string =>
-    `<span data-prop="${prop}" contenteditable="true" spellcheck="false" style="${EDITABLE_STYLE}">${value(prop)}</span>`;
+    `<span${editable ? ` data-prop="${prop}" contenteditable="true" spellcheck="false" style="${EDITABLE_STYLE}"` : ''}>${value(prop)}</span>`;
 
   const kpiCard = (
     labelProp: keyof MarketPulseProps,
     valueProp: keyof MarketPulseProps,
-    noteProp: keyof MarketPulseProps
+    noteProp?: keyof MarketPulseProps
   ): string => {
-    const note = String(props[noteProp] ?? '');
-    const noteHtml = note
+    const note = noteProp ? String(props[noteProp] ?? '') : '';
+    const noteHtml = noteProp && note
       ? `<span style="font-size:12px;color:#64748b;display:block;margin-top:6px;line-height:1.4;text-align:center;">${edit(noteProp)}</span>`
       : '';
     return `

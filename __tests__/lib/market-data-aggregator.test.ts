@@ -17,6 +17,25 @@ describe('getQuarterlyComparison', () => {
     vi.clearAllMocks();
   });
 
+  it('loads Auckland Region quarterly rows with the legacy-name fallback', async () => {
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { region_name: 'Auckland', year: '2025', quarter: '3', median: '1300000', sales: '90', days: '48' },
+        { region_name: 'Auckland Region', year: '2025', quarter: '3', median: '1500000', sales: '100', days: '45' },
+      ],
+    } as any);
+
+    const result = await getQuarterlyComparison([], 'Auckland Region', FROM, TO);
+
+    expect(result[0]).toMatchObject({ cityMedian: 1500000, citySales: 100, cityDays: 45 });
+    expect(vi.mocked(query).mock.calls[0][1]).toEqual([
+      [],
+      ['North Shore City', 'Auckland Region', 'Auckland'],
+      FROM,
+      TO,
+    ]);
+  });
+
   it('returns quarterly data when SQL aggregation succeeds with string year/quarter from CockroachDB', async () => {
     vi.mocked(query).mockResolvedValueOnce({
       rows: [
@@ -53,6 +72,23 @@ describe('getQuarterlyComparison', () => {
     expect(result[0].citySales).toBe(96);
     expect(result[0].cityDays).toBe(35);
     expect(result[0].suburbs['Torbay']?.median).toBe(1150000);
+  });
+
+  it('returns both district series for direct comparison', async () => {
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { region_name: 'North Shore City', year: '2025', quarter: '3', median: '1200000', sales: '96', days: '35' },
+        { region_name: 'Auckland Region', year: '2025', quarter: '3', median: '1500000', sales: '150', days: '42' },
+      ],
+    } as any);
+
+    const result = await getQuarterlyComparison([], DISTRICT, FROM, TO);
+
+    expect(result[0].districts).toEqual({
+      'North Shore City': { median: 1200000, sales: 96, days: 35 },
+      'Auckland Region': { median: 1500000, sales: 150, days: 42 },
+    });
+    expect(result[0]).toMatchObject({ cityMedian: 1200000, citySales: 96, cityDays: 35 });
   });
 
   it('returns suburbs even without district data', async () => {
@@ -153,6 +189,42 @@ describe('getMonthlyData', () => {
     expect(result[0].cityMedian).toBe(1200000);
     expect(result[0].citySales).toBe(100);
     expect(result[0].cityDays).toBe(35);
+  });
+
+  it('uses Auckland Region data and prefers it over legacy Auckland rows', async () => {
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { region_name: 'Auckland', period_month: '2025-07-01', median_price: 1300000, sales_count: 90, days_to_sell: 48 },
+        { region_name: 'Auckland Region', period_month: '2025-07-01', median_price: 1500000, sales_count: 100, days_to_sell: 45 },
+      ],
+    } as any);
+
+    const result = await getMonthlyData([], 'Auckland Region', FROM, TO);
+
+    expect(result[0]).toMatchObject({ cityMedian: 1500000, citySales: 100, cityDays: 45 });
+    expect(vi.mocked(query).mock.calls[0][1]).toEqual([
+      [],
+      ['North Shore City', 'Auckland Region', 'Auckland'],
+      FROM,
+      TO,
+    ]);
+  });
+
+  it('returns both district series while preserving the requested primary district fields', async () => {
+    vi.mocked(query).mockResolvedValueOnce({
+      rows: [
+        { region_name: 'North Shore City', period_month: '2025-07-01', median_price: 1200000, sales_count: 100, days_to_sell: 35 },
+        { region_name: 'Auckland Region', period_month: '2025-07-01', median_price: 1500000, sales_count: 150, days_to_sell: 42 },
+      ],
+    } as any);
+
+    const result = await getMonthlyData([], 'Auckland Region', FROM, TO);
+
+    expect(result[0].cityMedian).toBe(1500000);
+    expect(result[0].districts).toMatchObject({
+      'North Shore City': { median: 1200000, sales: 100, days: 35 },
+      'Auckland Region': { median: 1500000, sales: 150, days: 42 },
+    });
   });
 
   it('returns empty array when no data found', async () => {

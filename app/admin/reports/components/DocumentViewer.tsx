@@ -23,6 +23,8 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
   const [loading, setLoading] = useState(true);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [refreshingChartTitle, setRefreshingChartTitle] = useState(false);
+  const [editorRevision, setEditorRevision] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [isAboutMarie, setIsAboutMarie] = useState(false);
   const [showHeaderFooter, setShowHeaderFooter] = useState(false);
@@ -80,7 +82,7 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
   }, [docId, updateDocument]);
 
   const handleSaveNow = useCallback(async () => {
-    if (!doc) return;
+    if (!doc) return false;
     try {
       const contentToSave = getContentRef.current?.() ?? doc.content ?? null;
       console.log('[Save] Manual start — docId:', docId, 'title:', title, 'content:', contentToSave ? 'present' : 'null');
@@ -101,19 +103,59 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
       console.log('[Save] Manual response — docId:', docId, 'status:', res.status);
       if (!res.ok) {
         console.log('[Save] Manual failed — docId:', docId, 'status:', res.status);
-        return;
+        return false;
       }
       const result = await res.json();
       if (result.success) {
         console.log('[Save] Manual success — docId:', docId);
         updateDocument(docId, { title, content: contentToSave });
+        return true;
       }
+      return false;
     } catch (err) {
       console.error('Failed to save document', err);
+      return false;
     }
   }, [docId, title, doc, updateDocument]);
 
   useCtrlS(handleSaveNow);
+
+  const handleRefreshChartTitle = useCallback(async () => {
+    if (!doc || doc.doc_type !== 'report' || doc.lead_id) return;
+    if (!window.confirm('Update the saved median-price chart title in this report? The chart data will not change and no new report will be created.')) return;
+    if (!(await handleSaveNow())) {
+      setToast('Could not save this report. Please try again before updating the chart title.');
+      return;
+    }
+
+    setRefreshingChartTitle(true);
+    try {
+      const response = await fetch(`/api/admin/reports/documents/${docId}/refresh-chart-title`, { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to update the chart title.');
+      }
+
+      const refreshedResponse = await fetch(`/api/admin/reports/documents/${docId}`, { cache: 'no-store' });
+      const refreshedResult = await refreshedResponse.json();
+      if (!refreshedResponse.ok || !refreshedResult.success) {
+        throw new Error('The chart was updated, but the report could not be reloaded. Please refresh the page.');
+      }
+
+      const refreshedDoc = refreshedResult.document as ReportDocument;
+      setDoc(refreshedDoc);
+      setTitle(refreshedDoc.title || '');
+      updateDocument(docId, { content: refreshedDoc.content, updated_at: refreshedDoc.updated_at });
+      setEditorRevision((revision) => revision + 1);
+      setToast(result.updated > 0
+        ? `Updated the title on ${result.updated} saved chart${result.updated === 1 ? '' : 's'}.`
+        : result.message || 'The chart title is already updated.');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : 'Failed to update the chart title.');
+    } finally {
+      setRefreshingChartTitle(false);
+    }
+  }, [doc, docId, handleSaveNow, updateDocument]);
 
   const handleHeaderFooterSave = useCallback((h: string, f: string) => {
     setHeaderContent(h);
@@ -219,6 +261,9 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
             docType={doc.doc_type}
             saving={isSaving}
             onSaveNow={handleSaveNow}
+            onRefreshChartTitle={handleRefreshChartTitle}
+            refreshingChartTitle={refreshingChartTitle}
+            canRefreshChartTitle={doc.doc_type === 'report' && !doc.lead_id && Boolean(doc.suburb_name)}
             onExport={handleExport}
             onDelete={() => setShowDeleteModal(true)}
             onEditHeaderFooter={() => setShowHeaderFooter(true)}
@@ -254,7 +299,7 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
           />
         ) : (
           <ReportEditor
-            key={docId}
+            key={`${docId}:${editorRevision}`}
             docId={docId}
             initialContent={doc.content}
             onContentChange={handleContentChange}

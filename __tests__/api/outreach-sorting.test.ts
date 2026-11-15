@@ -313,6 +313,12 @@ describe("Outreach Status API - Return to Pending preserves quarter", () => {
 
   it("returns an address to pending for only the selected quarter and preserves send logs", async () => {
     const { PATCH } = await import("@/app/api/admin/outreach/[id]/status/route");
+    vi.mocked(parseReportQuarter).mockReturnValueOnce({
+      quarter: "Q3",
+      year: 2026,
+      key: "2026-Q3",
+      campaignPattern: "^2026[_-]Q3",
+    });
 
     const mockRow = { id: "test-id", suburb: "Torbay", status: "pending" };
     (marieDB.query as Mock)
@@ -341,7 +347,7 @@ describe("Outreach Status API - Return to Pending preserves quarter", () => {
     expect(calls[0][0]).toContain("UPDATE outreach_properties");
     expect(calls[1][0]).toContain("UPDATE outreach_property_quarter_status");
     expect(calls[1][0]).toContain("year = $2");
-    expect(calls[1][0]).toContain("quarter = $3");
+    expect(calls[1][0]).toContain("quarter = CASE");
     expect(calls[1][1]).toEqual(["test-id", 2026, "Q3"]);
     expect(calls[2][0]).toContain("INSERT INTO outreach_property_quarter_status");
     expect(calls[2][0]).toContain("FROM outreach_send_logs sl");

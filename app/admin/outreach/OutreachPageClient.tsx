@@ -1341,10 +1341,10 @@ export default function OutreachPage() {
   };
 
   const returnToPendingBody = () => {
-    const quarterStatusSupported = !activeQuarter || /^\d{4}-Q[1-4]$/.test(activeQuarter);
+    const reportPeriodSupported = !activeQuarter || Boolean(parsePeriodParts(activeQuarter));
     return JSON.stringify({
       status: 'pending',
-      ...(quarterStatusSupported
+      ...(reportPeriodSupported
         ? { return_to_pending: true, report_quarter: activeQuarter || undefined }
         : {}),
     });
