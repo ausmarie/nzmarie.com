@@ -220,6 +220,44 @@ describe('Outreach [id] MV PATCH /api/admin/outreach/[id]', () => {
     expect(transactionCalls.at(-1)?.[0]).toBe('COMMIT');
   });
 
+  it('records Pending junk against the selected active month report', async () => {
+    mockAuth();
+    const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });
+    vi.mocked(marieDB.connect).mockResolvedValueOnce({
+      query: transactionQuery,
+      release: vi.fn(),
+    } as any);
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({
+        rows: [{ id: 'test-id', suburb: 'Torbay' }],
+      } as any)
+      .mockResolvedValueOnce({ rows: [{ id: 'report-id' }] } as any)
+      .mockResolvedValue({ rows: [] } as any);
+
+    const response = await PATCH(
+      new Request('http://localhost:3000/api/admin/outreach/test-id', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no_junk_mail: true,
+          quarter: 'M11',
+          year: 2026,
+          suburb_report_id: 'report-id',
+          suburb: 'Torbay',
+        }),
+      }),
+      { params }
+    );
+
+    expect(response.status).toBe(200);
+    const quarterStatus = transactionQuery.mock.calls.find(
+      ([query]) => String(query).includes('INSERT INTO outreach_property_quarter_status')
+    );
+    expect(quarterStatus?.[1]).toEqual(['test-id', 'report-id', 'Torbay', '11', 2026]);
+    expect((await response.json()).quarter_junk_recorded).toBe(true);
+  });
+
   it('records junk for an address already sent in the selected report even after the send window', async () => {
     mockAuth();
     const transactionQuery = vi.fn().mockResolvedValue({ rows: [] });

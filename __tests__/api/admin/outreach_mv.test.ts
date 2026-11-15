@@ -504,6 +504,25 @@ describe('Outreach MV GET /api/admin/outreach', () => {
     expect(countQuery).not.toContain('CASE WHEN EXISTS');
   });
 
+  it('preserves the complete monthly status SQL in legacy mode', async () => {
+    process.env.USE_OUTREACH_MV = 'false';
+    mockAuth();
+
+    vi.mocked(marieDB.query)
+      .mockResolvedValueOnce({ rows: [] } as any)
+      .mockResolvedValueOnce({ rows: [{ total: '0' }] } as any);
+
+    const response = await GET(new Request(
+      'http://localhost:3000/api/admin/outreach?status=pending&sent_status=unsent&suburb=Mairangi%20Bay&report_quarter=2026-10&limit=10'
+    ));
+
+    expect(response.status).toBe(200);
+    const queryCall = normalizeSql(vi.mocked(marieDB.query).mock.calls[0][0] as string);
+    expect(queryCall).toContain("'^M(0[1-9]|1[0-2])$' THEN SUBSTRING");
+    expect(queryCall).toContain('AS quarter_sent_at, ls.report_title');
+    expect(queryCall.match(/latest_send_title/g)).toHaveLength(1);
+  });
+
   it('keeps global clauses for unsent without reportQuarter in legacy mode', async () => {
     process.env.USE_OUTREACH_MV = 'false';
     mockAuth();

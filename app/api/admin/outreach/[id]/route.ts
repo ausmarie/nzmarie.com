@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { ensureQuarterDispatchJunkSchema, marieDB } from '@/lib/db';
 import { isAdmin } from '@/lib/permissions';
 import { invalidateDashboardStatsCache, invalidateStreetClustersForSuburb } from '@/lib/redis';
+import { isMonthCode, isQuarterCode } from '@/lib/report-period';
 
 export async function PATCH(
   request: Request,
@@ -107,8 +108,8 @@ export async function PATCH(
           ? body.suburb.trim()
           : updatedProperty.suburb;
 
-        if (!/^Q[1-4]$/.test(quarter) || !Number.isInteger(year) || year < 2000 || !suburb) {
-          return NextResponse.json({ error: 'A valid quarter, year, and suburb are required' }, { status: 400 });
+        if ((!isQuarterCode(quarter) && !isMonthCode(quarter)) || !Number.isInteger(year) || year < 2000 || !suburb) {
+          return NextResponse.json({ error: 'A valid report period, year, and suburb are required' }, { status: 400 });
         }
 
         const reportResult = body.suburb_report_id
@@ -144,7 +145,9 @@ export async function PATCH(
           // suburb's dispatch window still lands on that quarter's report.
           const junkReportId = quarterReportId;
           const junkSuburb = quarterContext.suburb;
-          const junkQuarter = quarterContext.quarter;
+          const junkQuarter = isMonthCode(quarterContext.quarter)
+            ? quarterContext.quarter.slice(1)
+            : quarterContext.quarter;
           const junkYear = quarterContext.year;
           // Marking junk must always be recorded against the selected report.
           // The dashboard reads only this table for quarterly junk; the

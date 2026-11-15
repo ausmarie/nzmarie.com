@@ -939,7 +939,10 @@ async function handleLegacyQuery(searchParams: URLSearchParams) {
          AND qj.is_junk IS TRUE
          AND qj.junk_at IS NOT NULL${suburbClause}) AS quarter_junk_at`;
   }
-  query = query.replace('@@QUARTER_STATUS@@', quarterStatusSelect + quarterSentAtSelect + quarterJunkAtSelect);
+  query = query.replace(
+    '@@QUARTER_STATUS@@',
+    () => quarterStatusSelect + quarterSentAtSelect + quarterJunkAtSelect
+  );
 
   const result = await marieDB.query(query, params);
 
