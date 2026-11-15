@@ -75,7 +75,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
             </Link>
             <Link
               href={`${homeHref}#appraisal`}
-              className={`hover:text-blue-600 transition-colors duration-300 ${activeSection === "appraisal" || activeSection === "service" ? "text-blue-600 font-semibold" : "text-gray-700"}`}
+              className={`font-bold hover:text-blue-600 transition-colors duration-300 ${activeSection === "appraisal" || activeSection === "service" ? "text-blue-600" : "text-gray-700"}`}
               onClick={() => setActiveSection("appraisal")}
             >
               {t.service}
@@ -149,7 +149,7 @@ export default function Header({ lang = "en" }: { lang?: Language }) {
                 setActiveSection("appraisal");
                 setOpen(false);
               }}
-              className={`hover:text-blue-600 transition-colors duration-300 ${activeSection === "appraisal" || activeSection === "service" ? "text-blue-600 font-semibold" : "text-gray-700"}`}
+              className={`font-bold hover:text-blue-600 transition-colors duration-300 ${activeSection === "appraisal" || activeSection === "service" ? "text-blue-600" : "text-gray-700"}`}
             >
               {t.service}
             </Link>

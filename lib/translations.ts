@@ -3,7 +3,7 @@ export const translations = {
         nav: {
             home: "Home",
             about: "About",
-            service: "Services",
+            service: "Free Appraisal",
             properties: "Properties",
             contact: "Contact",
             blog: "Blog",
@@ -212,7 +212,7 @@ export const translations = {
         nav: {
             home: "首页",
             about: "关于我",
-            service: "专业服务",
+            service: "免费评估",
             properties: "精选房源",
             contact: "联系我",
             blog: "博客",

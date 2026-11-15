@@ -21,7 +21,7 @@ vi.mock('next/dynamic', () => ({
 }));
 
 vi.mock('@/components/Header', () => ({
-  default: () => null,
+  default: () => React.createElement('div', { 'data-testid': 'public-header' }),
 }));
 
 vi.mock('@/lib/market-report-document', async (importOriginal) => {
@@ -53,6 +53,8 @@ describe('MarketReportArticle', () => {
   it('does not render a separate report title or summary and preserves the page width', () => {
     render(<MarketReportArticle report={report} preview />);
 
+    expect(screen.queryByTestId('public-header')).toBeNull();
+    expect(document.querySelector('body > div > div')?.className).toContain('overflow-y-auto');
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
     expect(screen.queryByText('North Shore Property Market Report', { exact: true })).toBeNull();
     expect(screen.queryByText('October 2026 · Draft preview')).toBeNull();
@@ -87,6 +89,7 @@ describe('MarketReportArticle', () => {
   it('renders a custom footer as paragraphs and aligns it with the report content', () => {
     render(<MarketReportArticle report={{ ...report, footer: 'Custom source note.\nCustom disclaimer.' }} />);
 
+    expect(screen.getByTestId('public-header')).toBeTruthy();
     const footer = document.querySelector('footer');
     expect(footer?.className).toContain('market-report-footer');
     expect(footer?.textContent).toBe('Custom source note.Custom disclaimer.');

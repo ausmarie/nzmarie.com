@@ -30,8 +30,8 @@ export default function MarketReportArticle({
   );
   const footer = report.footer ?? getDefaultMarketReportFooter(snapshot);
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      <Header />
+    <div className={`${preview ? 'absolute inset-0 overflow-y-auto' : 'min-h-screen'} bg-white text-slate-900`}>
+      {!preview && <Header />}
       {preview && (
         <div className="bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-900">
           Preview only — this draft is not public.
