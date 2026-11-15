@@ -50,14 +50,12 @@ body {
   color: #0f172a !important;
 }
 
-.market-report-footer {
-  padding-left: calc(1rem + 54px);
+.market-report-richtext.bn-default-styles {
+  font-size: 18px;
 }
 
-@media (min-width: 640px) {
-  .market-report-footer {
-    padding-left: calc(2rem + 54px);
-  }
+.market-report-empty-paragraph {
+  min-height: 1.5em;
 }
 
 /* Custom styles for Marie website */

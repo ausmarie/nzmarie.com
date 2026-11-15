@@ -1,16 +1,10 @@
-'use client';
-
-import dynamic from 'next/dynamic';
 import Header from '@/components/Header';
 import type { ReportEditorContent } from '@/types/report';
 import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
 import { ensureMarketReportRichTextContent, ensureMarketReportTitleIcon } from '@/lib/market-report-document';
 import { getDefaultMarketReportFooter } from '@/lib/market-report-footer';
 import { marketReportUrl } from '@/lib/market-report-url';
-
-const MarketReportRichText = dynamic(() => import('./MarketReportRichText'), {
-  ssr: false,
-});
+import MarketReportStaticContent from './MarketReportStaticContent';
 
 export interface MarketReportArticleData {
   language?: MarketReportLanguage;
@@ -48,17 +42,21 @@ export default function MarketReportArticle({
       )}
       <main className="market-report-body mx-auto max-w-6xl space-y-8 px-4 py-10 sm:px-6 lg:px-8">
         <article className="px-4 py-6 sm:px-8">
-          <MarketReportRichText content={content} />
+          <MarketReportStaticContent content={content} snapshot={snapshot} language={language} />
         </article>
-
-        {footer.length > 0 && (
-          <footer className="market-report-footer border-t border-slate-200 pt-5 text-sm leading-6 text-slate-500">
-            {footer.split(/\r?\n/).map((line, index) => (
-              <p key={`${index}-${line}`} className={index > 0 ? 'mt-1' : undefined}>{line || '\u00a0'}</p>
-            ))}
-          </footer>
-        )}
       </main>
+
+      {footer.length > 0 && (
+        <footer className="market-report-footer border-t border-slate-200">
+          <div className="mx-auto max-w-6xl px-4 py-5 text-sm leading-6 text-slate-500 sm:px-6 lg:px-8">
+            <div className="px-4 sm:px-8">
+              {footer.split(/\r?\n/).map((line, index) => (
+                <p key={`${index}-${line}`} className={index > 0 ? 'mt-1' : undefined}>{line || '\u00a0'}</p>
+              ))}
+            </div>
+          </div>
+        </footer>
+      )}
     </div>
   );
 }

@@ -1,24 +1,9 @@
 import React from 'react';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
 import MarketReportArticle from '@/components/market/MarketReportArticle';
 import type { MarketReportArticleData } from '@/components/market/MarketReportArticle';
-
-vi.mock('@blocknote/react', () => ({
-  useCreateBlockNote: () => ({}),
-}));
-
-vi.mock('@blocknote/mantine', () => ({
-  BlockNoteView: () => React.createElement('div', { 'data-testid': 'report-content' }),
-}));
-
-vi.mock('next/dynamic', () => ({
-  default: () => ({ content }: { content: unknown }) => React.createElement(
-    'div',
-    { 'data-testid': 'report-content' },
-    JSON.stringify(content),
-  ),
-}));
 
 vi.mock('@/components/Header', () => ({
   default: () => React.createElement('div', { 'data-testid': 'public-header' }),
@@ -68,7 +53,7 @@ describe('MarketReportArticle', () => {
     expect(article?.className).not.toMatch(/bg-white|border|rounded|shadow/);
   });
 
-  it('adds the Reports delta icon to the rich-text title', () => {
+  it('renders the report heading as semantic HTML', () => {
     render(
       <MarketReportArticle
         report={{
@@ -82,8 +67,55 @@ describe('MarketReportArticle', () => {
       />,
     );
 
-    expect(screen.getByTestId('report-content').textContent).toContain('"type":"delta"');
-    expect(screen.getByTestId('report-content').textContent).toContain('North Shore Market Report');
+    expect(screen.getByRole('heading', { level: 1, name: 'North Shore Market Report' })).toBeTruthy();
+  });
+
+  it('includes report text and descriptive chart alt text in server-rendered HTML', () => {
+    const html = renderToStaticMarkup(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [{
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'North Shore market commentary', styles: {} }],
+          }, {
+            type: 'image',
+            props: {
+              name: 'north-shore-market-chart-medianPrice',
+              url: 'data:image/svg+xml,%3Csvg%3E%3C%2Fsvg%3E',
+            },
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    expect(html).toContain('North Shore market commentary');
+    expect(html).toContain('alt="North Shore vs Auckland Region median sale price trend chart, October 2026"');
+  });
+
+  it('preserves empty editor paragraphs as visible spacing between report paragraphs', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [{
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'First paragraph', styles: {} }],
+          }, {
+            type: 'paragraph',
+            content: [],
+          }, {
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'Second paragraph', styles: {} }],
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    const spacer = document.querySelector('.market-report-empty-paragraph');
+    expect(spacer).toBeTruthy();
+    expect(spacer?.querySelector('br')).toBeTruthy();
+    expect(spacer?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('renders a custom footer as paragraphs and aligns it with the report content', () => {
@@ -93,6 +125,9 @@ describe('MarketReportArticle', () => {
     const footer = document.querySelector('footer');
     expect(footer?.className).toContain('market-report-footer');
     expect(footer?.textContent).toBe('Custom source note.Custom disclaimer.');
+    expect(document.querySelector('main')?.nextElementSibling).toBe(footer);
+    expect(footer?.firstElementChild?.className).toContain('max-w-6xl');
+    expect(footer?.querySelector('div > div')?.className).toContain('sm:px-8');
   });
 
   it('uses the generated footer when a report has no custom footer', () => {
