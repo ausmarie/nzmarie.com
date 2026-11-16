@@ -119,14 +119,6 @@ export default function Header({
               {t.contact}
             </Link>
             <Link
-              href={t.blogLink}
-              className="hover:text-blue-600 transition-colors duration-300 text-gray-700"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t.blog}
-            </Link>
-            <Link
               href={langHref}
               className="ml-4 px-3 py-1 rounded-full border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all duration-300 font-semibold"
             >
@@ -203,15 +195,6 @@ export default function Header({
               className={linkCls("contact")}
             >
               {t.contact}
-            </Link>
-            <Link
-              href={t.blogLink}
-              className="hover:text-blue-600 transition-colors duration-300 text-gray-700"
-              onClick={() => setOpen(false)}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t.blog}
             </Link>
           </div>
         </div>

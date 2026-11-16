@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import Header from '@/components/Header';
 
 const mocks = vi.hoisted(() => ({ usePathname: vi.fn() }));
@@ -66,5 +66,15 @@ describe('public Header Market Reports link', () => {
     const reportsLink = screen.getByRole('link', { name: 'Market Reports' });
     expect(reportsLink.getAttribute('href')).toBe('/market-reports/October-2026');
     expect(reportsLink.className).toContain('text-blue-600');
+  });
+
+  it.each(['en', 'zh'] as const)('hides the Blog link from desktop and mobile navigation (%s)', (language) => {
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+
+    render(<Header lang={language} />);
+
+    expect(screen.queryByRole('link', { name: /blog|博客/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }));
+    expect(screen.queryByRole('link', { name: /blog|博客/i })).toBeNull();
   });
 });
