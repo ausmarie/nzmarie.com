@@ -111,7 +111,7 @@ describe('GET /api/admin/dashboard/stats', () => {
 
     expect(res.status).toBe(200);
     expect(getDashboardStatsCached).toHaveBeenCalledWith(
-      'dashboard:stats:v27:all:all',
+      'dashboard:stats:v28:all:all',
       expect.any(Function),
       600
     );
@@ -936,13 +936,18 @@ describe('GET /api/admin/dashboard/stats', () => {
           campaign_key: '2026_M10_Mairangi Bay',
           period_key: '2026-10',
           sent_count: '0',
-          junk_count: '0',
+          junk_count: '2',
           total_count: '171',
           first_sent_at: null,
           last_sent_at: null,
         },
       ],
-      sent_daily: [], junk_daily: [], sent_weekly: [], junk_weekly: [],
+      sent_daily: [],
+      junk_daily: [
+        { suburb: 'Mairangi Bay', campaign_key: '2026_M10_Mairangi Bay', bucket: '2026-11-15', junk: '1' },
+        { suburb: 'Mairangi Bay', campaign_key: '2026_M10_Mairangi Bay', bucket: '2026-11-16', junk: '1' },
+      ],
+      sent_weekly: [], junk_weekly: [],
       sent_monthly: [], junk_monthly: [], sent_quarterly: [], junk_quarterly: [],
       sent_yearly: [], junk_yearly: [],
     };
@@ -973,10 +978,16 @@ describe('GET /api/admin/dashboard/stats', () => {
         suburb: 'Mairangi Bay-M10-2026',
         quarter_key: '2026-10',
         sent_count: 0,
-        unsent_count: 171,
+        junk_count: 2,
+        unsent_count: 169,
         total_count: 171,
       })
     );
+    expect(body.stats.dispatchTrend.daily).toEqual([
+      { bucket: '2026-11-15', sent: 0, junk: 1 },
+      { bucket: '2026-11-16', sent: 0, junk: 1 },
+    ]);
+    expect(capturedSql).toContain("^[0-9]{4}-(Q[1-4]|0[1-9]|1[0-2])$");
   });
 
   it('reports junk mail per report quarter, not as one running total', async () => {

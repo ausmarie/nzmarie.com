@@ -425,7 +425,7 @@ export async function GET(request: Request) {
   // succession (e.g. a React effect firing twice) don't both run the heavy
   // aggregation and burn Registers twice. It also makes a stale cached payload
   // from before a fix impossible to keep serving for the whole TTL.
-  const cacheVersion = 27;
+  const cacheVersion = 28;
 
   try {
     await ensureCampaignTablesExist();
@@ -999,10 +999,10 @@ export async function GET(request: Request) {
               FROM outreach_property_quarter_status junk
               WHERE junk.is_junk = TRUE
                 AND junk.junk_at IS NOT NULL
-                AND junk.quarter_key ~ '^[0-9]{4}-Q[1-4]$'
+                AND junk.quarter_key ~ '^[0-9]{4}-(Q[1-4]|0[1-9]|1[0-2])$'
             ),
-            -- Junk shown on the dashboard is the quarterly junk recorded
-            -- against a report (marked while Pending or during dispatch).
+            -- Junk shown on the dashboard is recorded against a report period
+            -- (quarterly or monthly, marked while Pending or during dispatch).
             -- properties.no_junk_mail is only the address-level filter used by
             -- the Properties page and Liked list, so it is intentionally not
             -- counted as quarter junk here.

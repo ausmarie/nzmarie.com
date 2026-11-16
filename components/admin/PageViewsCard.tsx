@@ -77,7 +77,7 @@ export default function PageViewsCard() {
   return (
     <section
       aria-label="Views"
-      className="min-h-[192px] rounded-lg border border-slate-100 bg-white p-5 shadow-sm lg:col-span-2"
+      className="min-h-[192px] min-w-0 rounded-lg border border-slate-100 bg-white p-5 shadow-sm"
     >
       <div className="mb-3 flex items-center justify-between">
         <div>

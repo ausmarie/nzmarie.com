@@ -446,41 +446,43 @@ export default function AdminDashboardPage() {
             )}
           </div>
         </div>
-        <PageViewsCard />
-        <div className="bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-2xl">👁</span>
-              <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-100 text-indigo-700">
-                QR Scans
-              </span>
-            </div>
-            <div className="flex items-baseline gap-2 mb-1">
-              <span className="text-3xl font-bold text-slate-900">
-                {stats?.scanStats?.total_scans ?? 0}
-              </span>
-              <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                {stats?.scanStats?.total_new_devices ?? 0} New Devices
-              </span>
-            </div>
-            <div className="text-sm text-slate-600">Total Scans</div>
-          </div>
-          <div className="mt-4 pt-3 border-t border-slate-100">
-            <div className="flex flex-wrap gap-1.5">
-              {stats?.scanStats?.campaigns && stats.scanStats.campaigns.length > 0 ? (
-                stats.scanStats.campaigns.map((c) => (
-                  <span
-                    key={c.campaign_key}
-                    className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-medium border border-indigo-100"
-                  >
-                    {c.campaign_name || c.campaign_key}: {c.new_devices ?? 0}/{c.total_pv}
-                  </span>
-                ))
-              ) : (
-                <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
-                  No scans yet
+        <div className="grid min-w-0 grid-cols-1 gap-4 md:col-span-3 md:grid-cols-[minmax(0,7fr)_minmax(0,8fr)]">
+          <PageViewsCard />
+          <div className="min-w-0 bg-white rounded-lg shadow-sm border border-slate-100 p-6 flex flex-col justify-between min-h-[192px]">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-2xl">👁</span>
+                <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-100 text-indigo-700">
+                  QR Scans
                 </span>
-              )}
+              </div>
+              <div className="flex items-baseline gap-2 mb-1">
+                <span className="text-3xl font-bold text-slate-900">
+                  {stats?.scanStats?.total_scans ?? 0}
+                </span>
+                <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  {stats?.scanStats?.total_new_devices ?? 0} New Devices
+                </span>
+              </div>
+              <div className="text-sm text-slate-600">Total Scans</div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-slate-100">
+              <div className="flex flex-wrap gap-1.5">
+                {stats?.scanStats?.campaigns && stats.scanStats.campaigns.length > 0 ? (
+                  stats.scanStats.campaigns.map((c) => (
+                    <span
+                      key={c.campaign_key}
+                      className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-md font-medium border border-indigo-100"
+                    >
+                      {c.campaign_name || c.campaign_key}: {c.new_devices ?? 0}/{c.total_pv}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md font-medium">
+                    No scans yet
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </div>
