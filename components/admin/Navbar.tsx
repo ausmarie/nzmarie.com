@@ -57,6 +57,7 @@ export function AdminNavbar() {
     { href: '/admin/realestate', label: 'Realestate', alwaysShow: true },
     { href: '/admin/analytics', label: 'Analytics', alwaysShow: false },
     { href: '/admin/market', label: 'Market', alwaysShow: false },
+    { href: '/admin/blog', label: 'Blog', alwaysShow: false },
     { href: '/admin/reports', label: 'Reports', alwaysShow: false },
     { href: '/admin/assets', label: 'Assets', alwaysShow: false },
   ];

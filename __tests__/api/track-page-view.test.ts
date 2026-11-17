@@ -68,6 +68,25 @@ describe('POST /api/track-page-view', () => {
     );
   });
 
+  it('only records published Blog articles by their published slug', async () => {
+    const response = await POST(makeRequest({
+      eventId,
+      pageType: 'blog_article',
+      language: 'en',
+      slug: 'selling-guide',
+    }));
+
+    expect(response.status).toBe(204);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("WHERE published_slug = $2 AND status = 'published'"),
+      [eventId, 'selling-guide', 'en', '/blog/selling-guide'],
+    );
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining('ON CONFLICT (event_id) DO NOTHING'),
+      expect.any(Array),
+    );
+  });
+
   it('rejects invalid event IDs, unsupported pages, and malformed report slugs', async () => {
     const badId = await POST(makeRequest({
       eventId: 'not-a-uuid',
@@ -85,10 +104,17 @@ describe('POST /api/track-page-view', () => {
       language: 'en',
       slug: 'not-a-period',
     }));
+    const badBlogSlug = await POST(makeRequest({
+      eventId,
+      pageType: 'blog_article',
+      language: 'en',
+      slug: 'Not A Slug',
+    }));
 
     expect(badId.status).toBe(400);
     expect(unsupportedPage.status).toBe(400);
     expect(badSlug.status).toBe(400);
+    expect(badBlogSlug.status).toBe(400);
     expect(query).not.toHaveBeenCalled();
   });
 });

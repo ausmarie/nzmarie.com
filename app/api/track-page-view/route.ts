@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { isUuid } from '@/lib/uuid';
 import { marketReportUrl, parseMarketReportSlug } from '@/lib/market-report-url';
+import { isValidBlogSlug } from '@/lib/blog-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,12 @@ type PageViewPayload =
     pageType: 'market_report';
     language: 'en' | 'zh';
     slug: string;
+  }
+  | {
+    eventId: string;
+    pageType: 'blog_article';
+    language: 'en' | 'zh';
+    slug: string;
   };
 
 function isPageViewPayload(value: unknown): value is PageViewPayload {
@@ -24,7 +31,8 @@ function isPageViewPayload(value: unknown): value is PageViewPayload {
   if (!isUuid(typeof body.eventId === 'string' ? body.eventId : '')
     || (body.language !== 'en' && body.language !== 'zh')) return false;
   if (body.pageType === 'home') return body.slug === undefined;
-  return body.pageType === 'market_report' && typeof body.slug === 'string';
+  return (body.pageType === 'market_report' || body.pageType === 'blog_article')
+    && typeof body.slug === 'string';
 }
 
 export async function POST(request: Request) {
@@ -46,6 +54,22 @@ export async function POST(request: Request) {
          VALUES ($1::uuid, 'home', NULL, $2, $3)
          ON CONFLICT (event_id) DO NOTHING`,
         [body.eventId, body.language, pagePath],
+      );
+      return new NextResponse(null, { status: 204 });
+    }
+
+    if (body.pageType === 'blog_article') {
+      if (!isValidBlogSlug(body.slug)) {
+        return NextResponse.json({ success: false, error: 'Invalid Blog article.' }, { status: 400 });
+      }
+      const pagePath = `/blog/${body.slug}`;
+      await query(
+        `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
+         SELECT $1::uuid, 'blog_article', NULL, id, $3, $4
+         FROM blog_posts
+         WHERE published_slug = $2 AND status = 'published'
+         ON CONFLICT (event_id) DO NOTHING`,
+        [body.eventId, body.slug, body.language, pagePath],
       );
       return new NextResponse(null, { status: 204 });
     }

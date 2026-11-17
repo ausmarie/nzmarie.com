@@ -16,10 +16,22 @@ export interface PageViewReport {
   views: PageViewPeriods;
 }
 
+export interface PageViewBlogPost {
+  id: string;
+  slug: string;
+  title: string;
+  category_name: string | null;
+  status: 'draft' | 'published';
+  published_at: string | null;
+  views: PageViewPeriods;
+}
+
 export interface PageViewAnalytics {
   home: PageViewPeriods;
   market: PageViewPeriods;
+  blog: PageViewPeriods;
   reports: PageViewReport[];
+  blog_posts: PageViewBlogPost[];
 }
 
 export function pageViewPeriodLabel(

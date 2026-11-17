@@ -22,6 +22,10 @@ function reportsLink() {
   return screen.getByRole('link', { name: 'Reports' });
 }
 
+function blogLink() {
+  return screen.getByRole('link', { name: 'Blog' });
+}
+
 describe('AdminNavbar active state', () => {
   afterEach(() => {
     cleanup();
@@ -43,6 +47,12 @@ describe('AdminNavbar active state', () => {
     mockUsePathname.mockReturnValue('/admin/analytics');
     render(<AdminNavbar />);
     expect(reportsLink().className).not.toContain('text-blue-600');
+  });
+
+  it('highlights Blog on its module page and nested draft pages', () => {
+    mockUsePathname.mockReturnValue('/admin/blog/draft/11111111-1111-4111-8111-111111111111');
+    render(<AdminNavbar />);
+    expect(blogLink().className).toContain('text-blue-600');
   });
 });
 

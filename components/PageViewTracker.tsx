@@ -5,12 +5,12 @@ import type { MarketReportLanguage } from '@/lib/market-report-data';
 
 type PageViewTrackerProps =
   | { pageType: 'home'; language: MarketReportLanguage }
-  | { pageType: 'market_report'; language: MarketReportLanguage; slug: string };
+  | { pageType: 'market_report' | 'blog_article'; language: MarketReportLanguage; slug: string };
 
 export default function PageViewTracker(props: PageViewTrackerProps) {
   const lastTrackedKey = useRef<string | null>(null);
   const { pageType, language } = props;
-  const slug = props.pageType === 'market_report' ? props.slug : undefined;
+  const slug = props.pageType === 'home' ? undefined : props.slug;
 
   useEffect(() => {
     const key = `${pageType}:${language}:${slug ?? ''}`;
@@ -21,7 +21,7 @@ export default function PageViewTracker(props: PageViewTrackerProps) {
       eventId: crypto.randomUUID(),
       pageType,
       language,
-      ...(pageType === 'market_report' && slug ? { slug } : {}),
+      ...(pageType !== 'home' && slug ? { slug } : {}),
     };
     const body = JSON.stringify(payload);
     try {

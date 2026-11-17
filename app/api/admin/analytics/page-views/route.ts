@@ -13,7 +13,7 @@ interface PeriodCountRow {
 }
 
 interface SummaryRow extends PeriodCountRow {
-  page_type: 'home' | 'market_report';
+  page_type: 'home' | 'market_report' | 'blog_article';
 }
 
 interface ReportRow extends PeriodCountRow {
@@ -22,6 +22,15 @@ interface ReportRow extends PeriodCountRow {
   period_key: string;
   language: 'en' | 'zh';
   status: 'draft' | 'published' | 'withdrawn';
+}
+
+interface BlogPostRow extends PeriodCountRow {
+  id: string;
+  slug: string;
+  title: string;
+  category_name: string | null;
+  status: 'draft' | 'published';
+  published_at: string | null;
 }
 
 function counts(row?: PeriodCountRow): PageViewPeriods {
@@ -57,11 +66,11 @@ export async function GET() {
     const email = await getMarketReportAdminEmail();
     if (!email) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
-    const [summaryResult, reportsResult] = await Promise.all([
+    const [summaryResult, reportsResult, blogPostsResult] = await Promise.all([
       query<SummaryRow>(
         `${periodBounds}
          SELECT types.page_type, ${periodCountSelect}
-         FROM (VALUES ('home'::varchar), ('market_report'::varchar)) AS types(page_type)
+         FROM (VALUES ('home'::varchar), ('market_report'::varchar), ('blog_article'::varchar)) AS types(page_type)
          CROSS JOIN bounds b
          LEFT JOIN page_view_events e ON e.page_type = types.page_type
          GROUP BY types.page_type`,
@@ -75,18 +84,44 @@ export async function GET() {
          GROUP BY r.id
          ORDER BY r.period_key DESC, r.period_type ASC, r.language ASC`,
       ),
+      query<BlogPostRow>(
+        `${periodBounds}
+         SELECT p.id,
+                COALESCE(p.published_slug, p.slug) AS slug,
+                COALESCE(p.published_title, p.title) AS title,
+                c.name AS category_name,
+                p.status,
+                p.published_at,
+                ${periodCountSelect}
+         FROM blog_posts p
+         CROSS JOIN bounds b
+         LEFT JOIN blog_categories c ON c.id = p.category_id
+         LEFT JOIN page_view_events e ON e.blog_post_id = p.id
+         GROUP BY p.id, c.name
+         ORDER BY p.article_month DESC, p.updated_at DESC`,
+      ),
     ]);
 
     const rowsByType = new Map(summaryResult.rows.map((row) => [row.page_type, row]));
     const data: PageViewAnalytics = {
       home: counts(rowsByType.get('home')),
       market: counts(rowsByType.get('market_report')),
+      blog: counts(rowsByType.get('blog_article')),
       reports: reportsResult.rows.map((row): PageViewReport => ({
         id: row.id,
         period_type: row.period_type,
         period_key: row.period_key,
         language: row.language,
         status: row.status,
+        views: counts(row),
+      })),
+      blog_posts: blogPostsResult.rows.map((row) => ({
+        id: row.id,
+        slug: row.slug,
+        title: row.title,
+        category_name: row.category_name,
+        status: row.status,
+        published_at: row.published_at,
         views: counts(row),
       })),
     };

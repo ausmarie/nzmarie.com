@@ -70,6 +70,20 @@ body {
   min-height: 1.5em;
 }
 
+.blog-article-preview {
+  color: #0f172a;
+}
+
+.blog-article-preview .blog-richtext,
+.blog-article-preview .blog-richtext * {
+  color: #0f172a !important;
+}
+
+.blog-article-preview .blog-richtext .bn-editor {
+  padding-inline: 0;
+  font-family: inherit;
+}
+
 .market-report-richtext .market-report-heading-level-1 {
   font-size: 3em;
   line-height: 1.5;

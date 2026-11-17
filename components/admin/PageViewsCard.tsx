@@ -73,6 +73,14 @@ export default function PageViewsCard() {
     }
     return [...periods.values()].slice(0, 4);
   }, [analytics]);
+  const recentBlogPosts = useMemo(
+    () => (analytics?.blog_posts ?? [])
+      .filter((post) => post.status === 'published')
+      .slice()
+      .sort((a, b) => b.views.total - a.views.total)
+      .slice(0, 4),
+    [analytics],
+  );
 
   return (
     <section
@@ -112,6 +120,11 @@ export default function PageViewsCard() {
               <p className="mt-0.5 text-2xl font-bold text-blue-950">{formatCount(analytics.market.total)}</p>
               <PeriodCounts views={analytics.market} />
             </div>
+            <div className="rounded-md bg-violet-50 p-3">
+              <p className="text-xs font-medium text-violet-800">Blog Views</p>
+              <p className="mt-0.5 text-2xl font-bold text-violet-950">{formatCount(analytics.blog.total)}</p>
+              <PeriodCounts views={analytics.blog} />
+            </div>
             <div className="border-t border-slate-100 pt-2">
               <div className="mb-1 flex items-center justify-between">
                 <h3 className="text-xs font-semibold text-slate-700">Report Views by Period</h3>
@@ -134,6 +147,26 @@ export default function PageViewsCard() {
                 </div>
               ) : (
                 <p className="text-xs text-slate-500">No published Market reports yet.</p>
+              )}
+            </div>
+            <div className="border-t border-slate-100 pt-2">
+              <div className="mb-1 flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-700">Article Views</h3>
+                <Link href="/admin/blog" className="text-[11px] font-medium text-blue-700 hover:underline">
+                  Open Blog
+                </Link>
+              </div>
+              {recentBlogPosts.length > 0 ? (
+                <div className="space-y-1">
+                  {recentBlogPosts.map((post) => (
+                    <div key={post.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate font-medium text-slate-700">{post.title}</span>
+                      <span className="shrink-0 text-slate-500">{formatCount(post.views.total)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">No published Blog articles yet.</p>
               )}
             </div>
             <div className="rounded-md bg-slate-50 p-3">

@@ -67,6 +67,7 @@ function configureFetch(reports = [reportSummary]) {
           data: {
             home: { total: 100, week: 10, month: 25, year: 100 },
             market: { total: 50, week: 5, month: 12, year: 50 },
+            blog: { total: 0, week: 0, month: 0, year: 0 },
             reports: reports.map((item) => ({
               id: item.id,
               period_type: item.period_type,
@@ -75,6 +76,7 @@ function configureFetch(reports = [reportSummary]) {
               status: item.status,
               views: { total: 31, week: 4, month: 9, year: 31 },
             })),
+            blog_posts: [],
           },
         }),
       };
