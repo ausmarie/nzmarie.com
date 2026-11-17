@@ -1,5 +1,5 @@
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import MarketReportArticle from '@/components/market/MarketReportArticle';
@@ -98,6 +98,8 @@ describe('MarketReportArticle', () => {
     expect(quotes[0].classList.contains('market-report-note')).toBe(true);
     expect(quotes[1].classList.contains('market-report-note')).toBe(true);
     expect(quotes[2].classList.contains('market-report-note')).toBe(false);
+    expect(quotes.every((quote) => quote.classList.contains('market-report-quote'))).toBe(true);
+    expect(quotes.every((quote) => !quote.hasAttribute('style'))).toBe(true);
   });
 
   it('keeps only the report title as h1 and demotes later level-one headings to h2', () => {
@@ -156,10 +158,11 @@ describe('MarketReportArticle', () => {
       />,
     );
 
-    expect(screen.getByRole('link', { name: 'Request a Free Property Appraisal' }).getAttribute('href')).toBe('/#appraisal');
-    expect(screen.getByRole('link', { name: 'Download Your Suburb Report' }).getAttribute('href')).toBe('/#download-report');
-    expect(screen.getByRole('link', { name: 'm.nian@barfoot.co.nz' }).getAttribute('href')).toBe('mailto:m.nian@barfoot.co.nz');
-    const phoneLink = screen.getByRole('link', { name: '021 0693 089' });
+    const article = within(screen.getByRole('article'));
+    expect(article.getByRole('link', { name: 'Request a Free Property Appraisal' }).getAttribute('href')).toBe('/#appraisal');
+    expect(article.getByRole('link', { name: 'Download Your Suburb Report' }).getAttribute('href')).toBe('/#download-report');
+    expect(article.getByRole('link', { name: 'm.nian@barfoot.co.nz' }).getAttribute('href')).toBe('mailto:m.nian@barfoot.co.nz');
+    const phoneLink = article.getByRole('link', { name: '021 0693 089' });
     expect(phoneLink.getAttribute('href')).toBe('tel:+64210693089');
     const renderedNote = document.querySelector('.market-report-richtext')?.textContent ?? '';
     expect(renderedNote).toContain('Download Your Suburb Report. Contact');
@@ -276,22 +279,28 @@ describe('MarketReportArticle', () => {
     expect(spacer?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('renders a custom footer as paragraphs and aligns it with the report content', () => {
+  it('renders the standard Blog note and linked calls to action instead of a custom report footer', () => {
     render(<MarketReportArticle report={{ ...report, footer: 'Custom source note.\nCustom disclaimer.' }} />);
 
     expect(screen.getByTestId('public-header')).toBeTruthy();
-    const footer = document.querySelector('footer');
-    expect(footer?.className).toContain('market-report-footer');
-    expect(footer?.textContent).toBe('Custom source note.Custom disclaimer.');
+    const footer = document.querySelector('.market-report-footer');
+    const note = footer?.querySelector('.border-l-2');
+    expect(note?.textContent).toContain('Market data reflects broad North Shore trends.');
+    expect(note?.textContent).toContain('For a confidential, tailored valuation of your specific address,');
+    expect(note?.textContent).not.toContain('Custom source note.');
+
+    expect(screen.getByRole('link', { name: 'Request a Free Property Appraisal' }).getAttribute('href'))
+      .toBe('https://www.nzmarie.com/#appraisal');
+    expect(screen.getByRole('link', { name: 'Download Your Suburb Report' }).getAttribute('href'))
+      .toBe('https://www.nzmarie.com/#download-report');
+    expect(screen.getByRole('link', { name: 'm.nian@barfoot.co.nz' }).getAttribute('href'))
+      .toBe('mailto:m.nian@barfoot.co.nz');
+    expect(screen.getByRole('link', { name: '021 0693 089' }).getAttribute('href'))
+      .toBe('tel:+64210693089');
+
+    expect(footer?.querySelector('footer')?.textContent).toContain('Licensed Residential Sales, Barfoot & Thompson');
+    expect(footer?.querySelector('footer')?.textContent)
+      .toContain('This publication is independent editorial content provided for general reference only.');
     expect(document.querySelector('main')?.nextElementSibling).toBe(footer);
-    expect(footer?.firstElementChild?.className).toContain('max-w-6xl');
-    expect(footer?.querySelector('div > div')?.className).toContain('sm:px-8');
-  });
-
-  it('uses the generated footer when a report has no custom footer', () => {
-    render(<MarketReportArticle report={report} />);
-
-    expect(screen.getByText('Source: Test source. Property type: House.')).toBeTruthy();
-    expect(screen.getByText('This report is an independent market analysis and is not a formal property valuation or financial advice.')).toBeTruthy();
   });
 });

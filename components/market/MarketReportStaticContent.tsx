@@ -340,7 +340,9 @@ function renderBlock(
     case 'quote': {
       const isNote = /^(?:note\s*:|提示\s*[:：])/i.test(inlineText(block.content).trim());
       content = (
-        <blockquote className={`bn-inline-content${isNote ? ' market-report-note' : ''}`}>
+        <blockquote
+          className={`bn-inline-content market-report-quote${isNote ? ' market-report-note' : ''}`}
+        >
           {children}
         </blockquote>
       );

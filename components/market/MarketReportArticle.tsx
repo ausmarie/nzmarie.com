@@ -2,9 +2,9 @@ import Header from '@/components/Header';
 import type { ReportEditorContent } from '@/types/report';
 import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
 import { ensureMarketReportRichTextContent, ensureMarketReportTitleIcon } from '@/lib/market-report-document';
-import { getDefaultMarketReportFooter } from '@/lib/market-report-footer';
 import { marketReportUrl } from '@/lib/market-report-url';
 import { buildMarketReportArticleStructuredData } from '@/lib/market-report-seo';
+import BlogArticleFooter from '@/components/blog/BlogArticleFooter';
 import MarketReportStaticContent from './MarketReportStaticContent';
 
 export interface MarketReportArticleData {
@@ -27,7 +27,6 @@ export default function MarketReportArticle({
   const content = ensureMarketReportTitleIcon(
     ensureMarketReportRichTextContent(report.content ?? [], snapshot, language),
   );
-  const footer = report.footer ?? getDefaultMarketReportFooter(snapshot, language);
   const structuredData = !preview
     ? buildMarketReportArticleStructuredData({
         period_type: snapshot.periodType,
@@ -63,17 +62,11 @@ export default function MarketReportArticle({
         </article>
       </main>
 
-      {footer.length > 0 && (
-        <footer className="market-report-footer border-t border-slate-200">
-          <div className="mx-auto max-w-6xl px-4 py-5 text-sm leading-6 text-slate-500 sm:px-6 lg:px-8">
-            <div className="px-4 sm:px-8">
-              {footer.split(/\r?\n/).map((line, index) => (
-                <p key={`${index}-${line}`} className={index > 0 ? 'mt-1' : undefined}>{line || '\u00a0'}</p>
-              ))}
-            </div>
-          </div>
-        </footer>
-      )}
+      <div className="market-report-footer mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="px-4 sm:px-8">
+          <BlogArticleFooter />
+        </div>
+      </div>
     </div>
   );
 }
