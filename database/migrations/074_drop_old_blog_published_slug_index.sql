@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS blog_posts_published_slug_unique_idx;

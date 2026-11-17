@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   createBlogArticleSlug,
+  blogLanguageLabel,
+  blogPreviewPath,
   hasBlogArticleText,
   isValidBlogMonth,
   isValidBlogSlug,
   monthLabel,
+  otherBlogLanguage,
   shortMonthLabel,
   slugifyBlogValue,
 } from '@/lib/blog-data';
@@ -22,6 +25,15 @@ describe('Blog content helpers', () => {
       'Selling Your Home in New Zealand: A Step-by-Step Guide for Homeowners',
     )).toBe('selling-your-home-in-new-zealand');
     expect(createBlogArticleSlug('中文标题')).toBe('article');
+  });
+
+  it('labels languages and builds language-specific admin preview paths', () => {
+    expect(blogLanguageLabel('en')).toBe('English');
+    expect(blogLanguageLabel('cn')).toBe('中文');
+    expect(otherBlogLanguage('en')).toBe('cn');
+    expect(otherBlogLanguage('cn')).toBe('en');
+    expect(blogPreviewPath('selling-your-home', 'en')).toBe('/admin/blog/preview/selling-your-home');
+    expect(blogPreviewPath('selling-your-home', 'cn')).toBe('/admin/blog/preview/selling-your-home/cn');
   });
 
   it('validates article month keys and formats month labels', () => {

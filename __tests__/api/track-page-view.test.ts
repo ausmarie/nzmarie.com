@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/db', () => ({
-  query: vi.fn(),
-}));
+vi.mock('@/lib/page-view-queue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/page-view-queue')>();
+  return { ...actual, enqueuePageViewEvent: vi.fn() };
+});
 
-import { query } from '@/lib/db';
+import { enqueuePageViewEvent } from '@/lib/page-view-queue';
 import { POST } from '../../app/api/track-page-view/route';
 
 const eventId = 'c0a80123-4567-489a-8abc-0123456789ab';
@@ -20,74 +21,53 @@ function makeRequest(body: unknown) {
 describe('POST /api/track-page-view', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(query).mockResolvedValue({ rows: [], rowCount: 1 } as never);
+    vi.mocked(enqueuePageViewEvent).mockResolvedValue();
   });
 
-  it('records English and Chinese home page views using canonical paths', async () => {
+  it('queues English and Chinese home page views', async () => {
     const english = await POST(makeRequest({
       eventId,
       pageType: 'home',
       language: 'en',
     }));
-    const chinese = await POST(makeRequest({
+    const chineseEvent = {
       eventId: 'c0a80123-4567-489a-8abc-0123456789ac',
       pageType: 'home',
       language: 'zh',
-    }));
+    } as const;
+    const chinese = await POST(makeRequest(chineseEvent));
 
     expect(english.status).toBe(204);
     expect(chinese.status).toBe(204);
-    expect(query).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining('ON CONFLICT (event_id) DO NOTHING'),
-      [eventId, 'en', '/'],
-    );
-    expect(query).toHaveBeenNthCalledWith(
-      2,
-      expect.any(String),
-      ['c0a80123-4567-489a-8abc-0123456789ac', 'zh', '/cn'],
-    );
+    expect(enqueuePageViewEvent).toHaveBeenNthCalledWith(1, {
+      eventId,
+      pageType: 'home',
+      language: 'en',
+    });
+    expect(enqueuePageViewEvent).toHaveBeenNthCalledWith(2, chineseEvent);
   });
 
-  it('only records published reports and stores the normalized language URL', async () => {
-    const response = await POST(makeRequest({
+  it('queues validated report and Blog article events', async () => {
+    const report = {
       eventId,
       pageType: 'market_report',
       language: 'zh',
       slug: 'October-2026',
-    }));
-
-    expect(response.status).toBe(204);
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("status = 'published'"),
-      [eventId, 'monthly', '2026-10', 'zh', '/market-reports/october-2026/cn'],
-    );
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('ON CONFLICT (event_id) DO NOTHING'),
-      expect.any(Array),
-    );
-  });
-
-  it('only records published Blog articles by their published slug', async () => {
-    const response = await POST(makeRequest({
+    } as const;
+    const blog = {
       eventId,
       pageType: 'blog_article',
       language: 'en',
       slug: 'selling-guide',
-    }));
+    } as const;
 
-    expect(response.status).toBe(204);
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("WHERE published_slug = $2 AND status = 'published'"),
-      [eventId, 'selling-guide', 'en', '/blog/selling-guide'],
-    );
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining('ON CONFLICT (event_id) DO NOTHING'),
-      expect.any(Array),
-    );
+    expect((await POST(makeRequest(report))).status).toBe(204);
+    expect((await POST(makeRequest(blog))).status).toBe(204);
+    expect(enqueuePageViewEvent).toHaveBeenNthCalledWith(1, report);
+    expect(enqueuePageViewEvent).toHaveBeenNthCalledWith(2, blog);
   });
 
-  it('rejects invalid event IDs, unsupported pages, and malformed report slugs', async () => {
+  it('rejects invalid event IDs, unsupported pages, and malformed slugs', async () => {
     const badId = await POST(makeRequest({
       eventId: 'not-a-uuid',
       pageType: 'home',
@@ -115,6 +95,18 @@ describe('POST /api/track-page-view', () => {
     expect(unsupportedPage.status).toBe(400);
     expect(badSlug.status).toBe(400);
     expect(badBlogSlug.status).toBe(400);
-    expect(query).not.toHaveBeenCalled();
+    expect(enqueuePageViewEvent).not.toHaveBeenCalled();
+  });
+
+  it('returns service unavailable when Redis enqueue fails', async () => {
+    vi.mocked(enqueuePageViewEvent).mockRejectedValueOnce(new Error('Redis unavailable'));
+
+    const response = await POST(makeRequest({
+      eventId,
+      pageType: 'home',
+      language: 'en',
+    }));
+
+    expect(response.status).toBe(503);
   });
 });

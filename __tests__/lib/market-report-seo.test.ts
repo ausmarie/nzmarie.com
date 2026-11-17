@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 
 vi.mock('@/lib/db', () => ({ query: mocks.query }));
+vi.mock('next/cache', () => ({
+  unstable_cache: (callback: () => unknown) => callback,
+}));
 
 import {
   buildMarketReportArticleStructuredData,

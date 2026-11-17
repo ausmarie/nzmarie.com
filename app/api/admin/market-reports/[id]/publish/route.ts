@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
-import { revalidateMarketReportHomePages } from '@/lib/market-report-cache';
+import { revalidateMarketReportHomePages, revalidatePublishedMarketReport } from '@/lib/market-report-cache';
+import type { MarketReportLanguage, MarketReportPeriodType } from '@/lib/market-report-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,8 +33,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!isUuid(id)) return NextResponse.json({ success: false, error: 'Invalid report id.' }, { status: 400 });
 
   try {
-    const existing = await query(
-      `SELECT title, content, footer, data_snapshot, updated_at::text AS updated_at
+    const existing = await query<{
+      title: string;
+      content: unknown;
+      data_snapshot: unknown;
+      period_type: MarketReportPeriodType;
+      period_key: string;
+      language: MarketReportLanguage;
+      updated_at: string;
+    }>(
+      `SELECT title, content, footer, data_snapshot, period_type, period_key, language,
+              updated_at::text AS updated_at
        FROM north_shore_market_reports
        WHERE id = $1`,
       [id]
@@ -73,6 +83,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (published.rows.length === 0) {
       return NextResponse.json({ success: false, error: 'The report changed while publishing. Reload and try again.' }, { status: 409 });
     }
+    revalidatePublishedMarketReport(report);
     revalidateMarketReportHomePages();
     return NextResponse.json({ success: true, ...published.rows[0] });
   } catch (error) {

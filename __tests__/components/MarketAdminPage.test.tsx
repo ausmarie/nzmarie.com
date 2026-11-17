@@ -1,5 +1,5 @@
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -118,13 +118,26 @@ describe('MarketAdminPage report editing', () => {
     configureFetch();
     render(<MarketAdminPage />);
 
-    const reportLabel = await screen.findByText('October 2026');
-    expect(screen.getByText('En')).toBeTruthy();
+    const sidebar = screen.getByRole('complementary');
+    const reportLabel = await within(sidebar).findByText('October 2026');
+    expect(within(sidebar).getByText('En')).toBeTruthy();
     const reportButton = reportLabel.closest('button');
     if (!reportButton) throw new Error('October report button was not rendered.');
     fireEvent.click(reportButton);
 
     expect(mocks.push).toHaveBeenCalledWith('/admin/market/draft/October-2026');
+  });
+
+  it('shows previous reports with links on the Market home', async () => {
+    configureFetch([{ ...reportSummary, status: 'published' }]);
+    render(<MarketAdminPage />);
+
+    const reportList = await screen.findByRole('region', { name: 'Previous reports' });
+    expect(within(reportList).getByText('Existing introduction')).toBeTruthy();
+    expect(within(reportList).getByRole('link', { name: 'Open October 2026 English report' }).getAttribute('href'))
+      .toBe('/admin/market/draft/October-2026');
+    expect(within(reportList).getByRole('link', { name: 'View published October 2026 English report' }).getAttribute('href'))
+      .toBe('/admin/market/public/October-2026');
   });
 
   it('shows language badges and uses a distinct draft URL for Chinese reports', async () => {
@@ -134,8 +147,9 @@ describe('MarketAdminPage report editing', () => {
     ]);
     render(<MarketAdminPage />);
 
-    const chineseBadge = await screen.findByText('中');
-    expect(screen.getByText('En')).toBeTruthy();
+    const sidebar = screen.getByRole('complementary');
+    const chineseBadge = await within(sidebar).findByText('中');
+    expect(within(sidebar).getByText('En')).toBeTruthy();
     const chineseReportButton = chineseBadge.closest('button');
     if (!chineseReportButton) throw new Error('Chinese report button was not rendered.');
     fireEvent.click(chineseReportButton);

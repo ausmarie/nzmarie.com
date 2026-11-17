@@ -24,14 +24,6 @@ export default function PageViewTracker(props: PageViewTrackerProps) {
       ...(pageType !== 'home' && slug ? { slug } : {}),
     };
     const body = JSON.stringify(payload);
-    try {
-      if (navigator.sendBeacon?.('/api/track-page-view', new Blob([body], { type: 'application/json' }))) {
-        return;
-      }
-    } catch (error) {
-      console.warn('Page-view beacon failed:', error);
-    }
-
     void fetch('/api/track-page-view', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

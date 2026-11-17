@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Trash2 } from 'lucide-react';
 import MarketReportEditor from '@/components/market/MarketReportEditor';
@@ -549,23 +550,89 @@ export default function MarketAdminPage({
           {notice && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
 
           {!active ? (
-            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-              <div className="max-w-2xl">
-                <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">North Shore</p>
-                <h1 className="mt-2 text-3xl font-bold text-slate-900">Market Reports</h1>
-                <p className="mt-3 text-slate-600">
-                  Create monthly or quarterly market reports using North Shore sales data from Analytics. Your generated reports will appear in the sidebar.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => { setShowCreate(true); setError(null); }}
-                  disabled={!latestAvailableMonth}
-                  className={`${buttonClass} mt-6 bg-blue-600 text-white hover:bg-blue-700`}
-                >
-                  + New report
-                </button>
-              </div>
-            </section>
+            <>
+              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
+                <div className="max-w-2xl">
+                  <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">North Shore</p>
+                  <h1 className="mt-2 text-3xl font-bold text-slate-900">Market Reports</h1>
+                  <p className="mt-3 text-slate-600">
+                    Review previous reports or create a monthly or quarterly report using North Shore sales data from Analytics.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowCreate(true); setError(null); }}
+                    disabled={!latestAvailableMonth}
+                    className={`${buttonClass} mt-6 bg-blue-600 text-white hover:bg-blue-700`}
+                  >
+                    + New report
+                  </button>
+                </div>
+              </section>
+
+              <section aria-labelledby="market-home-reports-heading" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+                  <div>
+                    <h2 id="market-home-reports-heading" className="text-lg font-semibold text-slate-900">Previous reports</h2>
+                    <p className="mt-1 text-sm text-slate-500">Open a report to continue editing or view its published version.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{reports.length}</span>
+                </div>
+                {loadingList ? (
+                  <p className="px-5 py-8 text-sm text-slate-500">Loading reports…</p>
+                ) : sortedReports.length === 0 ? (
+                  <p className="px-5 py-8 text-sm text-slate-500">No reports yet. Create your first report to get started.</p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {sortedReports.map((report) => {
+                      const label = periodLabel(report);
+                      const language = report.language === 'zh' ? 'Chinese' : 'English';
+                      const reportViews = pageViews?.reports.find((item) => item.id === report.id)?.views.total ?? 0;
+                      return (
+                        <article key={report.id} className="flex flex-col justify-between gap-4 px-5 py-4 sm:flex-row sm:items-center">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="truncate text-base font-semibold text-slate-900">{report.title || label}</h3>
+                              <span className={`rounded-full px-2.5 py-1 text-xs capitalize ${
+                                report.status === 'published' ? 'bg-emerald-100 text-emerald-800'
+                                  : report.status === 'withdrawn' ? 'bg-amber-100 text-amber-800'
+                                    : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {report.status}{report.has_unpublished_changes ? ' · edited' : ''}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {label} <span aria-hidden="true">·</span> {report.period_type === 'monthly' ? 'Monthly' : 'Quarterly'} <span aria-hidden="true">·</span> {language}
+                            </p>
+                            {report.summary && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{report.summary}</p>}
+                            <p className="mt-1 text-xs text-slate-500">
+                              {pageViewsLoading && !pageViews ? 'Loading views…' : `Views: ${formatViewCount(reportViews)}`}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <Link
+                              href={marketReportDraftUrl(report)}
+                              aria-label={`Open ${label} ${language} report`}
+                              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              Open report
+                            </Link>
+                            {report.status === 'published' && (
+                              <Link
+                                href={marketReportAdminPublicUrl(report)}
+                                aria-label={`View published ${label} ${language} report`}
+                                className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100"
+                              >
+                                View published
+                              </Link>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
           ) : (
             <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">

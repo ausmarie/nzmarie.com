@@ -1,16 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import BlogEditor from '@/components/blog/BlogEditor';
 import {
   createBlogArticleSlug,
+  blogLanguageLabel,
+  blogPreviewPath,
   currentBlogMonth,
   initialBlogContent,
   monthInputValue,
   monthLabel,
+  otherBlogLanguage,
   type BlogCategory,
+  type BlogLanguage,
   type BlogPost,
   type BlogPostSummary,
 } from '@/lib/blog-data';
@@ -60,6 +65,7 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [createLanguageDialogOpen, setCreateLanguageDialogOpen] = useState(false);
   const [categoryEditingId, setCategoryEditingId] = useState<string | null>(null);
   const [categoryDraft, setCategoryDraft] = useState<CategoryDraft>(categoryDraftFrom());
   const [categoryWorking, setCategoryWorking] = useState(false);
@@ -131,7 +137,11 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
       const post = data.post as BlogPost;
       setActive(post);
       setTitle(post.title);
-      setSlug(createBlogArticleSlug(post.title));
+      setSlug(
+        post.language === 'en' && post.slug.startsWith('draft-')
+          ? createBlogArticleSlug(post.title)
+          : post.slug,
+      );
       setSummary(post.summary || '');
       setCategoryId(post.category_id || '');
       setAuthor(post.author || '');
@@ -175,6 +185,22 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
     }),
     [filteredPosts],
   );
+  const articleGroups = useMemo(() => {
+    const groups = new Map<string, BlogPostSummary[]>();
+    for (const post of sortedPosts) {
+      const group = groups.get(post.translation_group_id) || [];
+      group.push(post);
+      groups.set(post.translation_group_id, group);
+    }
+    return Array.from(groups.values()).map((group) => {
+      const root = group.find((post) => post.id === post.translation_group_id) || group[0];
+      return [root, ...group.filter((post) => post.id !== root.id)];
+    });
+  }, [sortedPosts]);
+  const activeTranslation = active
+    ? posts.find((post) =>
+      post.translation_group_id === active.translation_group_id && post.id !== active.id)
+    : undefined;
 
   const handleSave = useCallback(async (notify = true): Promise<boolean> => {
     if (!active || saveInProgressRef.current) return false;
@@ -227,14 +253,31 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
     return () => window.clearTimeout(timeout);
   }, [active, draftRevision, handleSave, loadingPost, savedRevision, working]);
 
-  const handleCreate = async () => {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!active || categoryDialogOpen || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
+      event.preventDefault();
+      void handleSave();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [active, categoryDialogOpen, handleSave]);
+
+  const openCreateLanguageDialog = () => setCreateLanguageDialogOpen(true);
+
+  const handleCreate = async (language: BlogLanguage) => {
     setError(null);
     setWorking(true);
     try {
-      const response = await fetch('/api/admin/blog/posts', { method: 'POST' });
+      const response = await fetch('/api/admin/blog/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language }),
+      });
       const data = await response.json();
       if (!response.ok || !data.success || !data.id) throw new Error(data.error || 'Failed to create Blog draft.');
       await loadLists();
+      setCreateLanguageDialogOpen(false);
       router.push(`/admin/blog/draft/${data.id}`);
       await loadPost(data.id);
     } catch (caught) {
@@ -253,10 +296,30 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
     if (!active) return;
     if (await handleSave()) {
       window.open(
-        `/admin/blog/preview/${encodeURIComponent(slug)}`,
+        blogPreviewPath(slug, active.language),
         '_blank',
         'noopener,noreferrer',
       );
+    }
+  };
+
+  const handleGenerateTranslation = async () => {
+    if (!active || activeTranslation || !(await handleSave())) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/blog/posts/${active.id}/translation`, { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.id) {
+        throw new Error(data.error || 'Failed to create the other language version.');
+      }
+      await loadLists();
+      router.push(`/admin/blog/draft/${data.id}`);
+      await loadPost(data.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to create the other language version.');
+    } finally {
+      setWorking(false);
     }
   };
 
@@ -430,8 +493,8 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
           <div className="flex items-center justify-between border-t border-[#e8e7e4] px-4 pb-2 pt-3">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Articles</span>
             <button
-              type="button"
-              onClick={() => void handleCreate()}
+            type="button"
+            onClick={openCreateLanguageDialog}
               disabled={working}
               title="Create an article"
               aria-label="Create an article"
@@ -449,45 +512,58 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                 {categoryFilter ? 'No articles in this category.' : 'No articles yet. Use + to create the first draft.'}
               </p>
             ) : (
-              <div className="space-y-1">
-                {sortedPosts.map((post) => {
-                  const isSelected = active?.id === post.id;
-                  return (
-                    <div
-                      key={post.id}
-                      className={`group flex items-center rounded-md transition-colors ${isSelected ? 'bg-blue-100 text-blue-900' : 'text-slate-700 hover:bg-white/80'}`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void handleSelectPost(post)}
-                        aria-current={isSelected ? 'page' : undefined}
-                        className="min-w-0 flex-1 px-3 py-2.5 text-left"
-                      >
-                        <span className="block truncate text-sm font-medium">{post.title}</span>
-                        <span className="mt-1 flex items-center justify-between gap-2">
-                          <span className="truncate text-[11px] text-slate-500">{monthLabel(post.article_month)}</span>
-                          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] capitalize ${post.status === 'published' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
-                            {post.status}{post.has_unpublished_changes ? ' · edited' : ''}
-                          </span>
-                        </span>
-                        <span className="mt-1 block truncate text-[10px] text-slate-500">{post.category_name || 'Uncategorised'}</span>
-                        <span className="mt-1 block text-[10px] text-slate-500">
-                          Views: {formatViewCount(pageViews?.blog_posts.find((item) => item.id === post.id)?.views.total ?? 0)}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleDeletePost(post)}
-                        disabled={working || deletingId !== null}
-                        title={`Delete ${post.title}`}
-                        aria-label={`Delete ${post.title}`}
-                        className="mr-2 rounded p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
-                      >
-                        <Trash2 size={15} aria-hidden="true" />
-                      </button>
-                    </div>
-                  );
-                })}
+              <div className="space-y-2">
+                {articleGroups.map((group) => (
+                  <div key={group[0].translation_group_id} className="space-y-1">
+                    {group.map((post) => {
+                      const isSelected = active?.id === post.id;
+                      const isTranslation = post.id !== group[0].id;
+                      return (
+                        <div
+                          key={post.id}
+                          className={`group flex items-center rounded-md transition-colors ${
+                            isSelected ? 'bg-blue-100 text-blue-900' : 'text-slate-700 hover:bg-white/80'
+                          } ${isTranslation ? 'ml-4 border-l-2 border-slate-300 pl-1' : ''}`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => void handleSelectPost(post)}
+                            aria-current={isSelected ? 'page' : undefined}
+                            className="min-w-0 flex-1 px-3 py-2.5 text-left"
+                          >
+                            <span className="flex items-start gap-1.5">
+                              {isTranslation && <span aria-hidden="true" className="text-xs text-slate-400">↳</span>}
+                              <span className="min-w-0 flex-1 truncate text-sm font-medium">{post.title}</span>
+                              <span className="shrink-0 rounded bg-white/80 px-1.5 py-0.5 text-[9px] text-slate-600">
+                                {blogLanguageLabel(post.language)}
+                              </span>
+                            </span>
+                            <span className="mt-1 flex items-center justify-between gap-2">
+                              <span className="truncate text-[11px] text-slate-500">{monthLabel(post.article_month)}</span>
+                              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] capitalize ${post.status === 'published' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
+                                {post.status}{post.has_unpublished_changes ? ' · edited' : ''}
+                              </span>
+                            </span>
+                            <span className="mt-1 block truncate text-[10px] text-slate-500">{post.category_name || 'Uncategorised'}</span>
+                            <span className="mt-1 block text-[10px] text-slate-500">
+                              Views: {formatViewCount(pageViews?.blog_posts.find((item) => item.id === post.id)?.views.total ?? 0)}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeletePost(post)}
+                            disabled={working || deletingId !== null}
+                            title={`Delete ${post.title}`}
+                            aria-label={`Delete ${post.title}`}
+                            className="mr-2 rounded p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                          >
+                            <Trash2 size={15} aria-hidden="true" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -500,22 +576,92 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
           {notice && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
 
           {!active ? (
-            <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
-              <div className="max-w-2xl">
-                <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">Editorial</p>
-                <h1 className="mt-2 text-3xl font-bold text-slate-900">Blog</h1>
-                <p className="mt-3 text-slate-600">Create, organise, preview, and publish Blog articles.</p>
-                <button type="button" onClick={() => void handleCreate()} disabled={working} className={`${buttonClass} mt-6 bg-blue-600 text-white hover:bg-blue-700`}>
-                  + New article
-                </button>
-              </div>
-            </section>
+            <>
+              <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
+                <div className="max-w-2xl">
+                  <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">Editorial</p>
+                  <h1 className="mt-2 text-3xl font-bold text-slate-900">Blog</h1>
+                  <p className="mt-3 text-slate-600">Browse previous articles or create, preview, and publish a new one.</p>
+                  <button type="button" onClick={openCreateLanguageDialog} disabled={working} className={`${buttonClass} mt-6 bg-blue-600 text-white hover:bg-blue-700`}>
+                    + New article
+                  </button>
+                </div>
+              </section>
+
+              <section aria-labelledby="blog-home-articles-heading" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+                  <div>
+                    <h2 id="blog-home-articles-heading" className="text-lg font-semibold text-slate-900">Previous articles</h2>
+                    <p className="mt-1 text-sm text-slate-500">Open an article to edit it or preview the current draft.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{sortedPosts.length}</span>
+                </div>
+                {loadingList ? (
+                  <p className="px-5 py-8 text-sm text-slate-500">Loading articles…</p>
+                ) : sortedPosts.length === 0 ? (
+                  <p className="px-5 py-8 text-sm text-slate-500">
+                    {categoryFilter ? 'No articles in this category.' : 'No articles yet. Create your first article to get started.'}
+                  </p>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {sortedPosts.map((post) => {
+                      const views = pageViews?.blog_posts.find((item) => item.id === post.id)?.views.total ?? 0;
+                      return (
+                        <article key={post.id} className="flex flex-col justify-between gap-4 px-5 py-4 sm:flex-row sm:items-center">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="truncate text-base font-semibold text-slate-900">{post.title}</h3>
+                              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-800">
+                                {blogLanguageLabel(post.language)}
+                              </span>
+                              <span className={`rounded-full px-2.5 py-1 text-xs capitalize ${
+                                post.status === 'published' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {post.status}{post.has_unpublished_changes ? ' · edited' : ''}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {monthLabel(post.article_month)} <span aria-hidden="true">·</span> {post.category_name || 'Uncategorised'}
+                            </p>
+                            {post.summary && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{post.summary}</p>}
+                            <p className="mt-1 text-xs text-slate-500">
+                              {pageViewsError ? 'Views unavailable' : `Views: ${formatViewCount(views)}`}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <Link
+                              href={`/admin/blog/draft/${encodeURIComponent(post.id)}`}
+                              aria-label={`Edit ${post.title}`}
+                              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              Edit
+                            </Link>
+                            <Link
+                              href={blogPreviewPath(post.slug, post.language)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Preview ${post.title}`}
+                              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100"
+                            >
+                              Preview
+                            </Link>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </>
           ) : (
             <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-lg font-semibold text-slate-900">{title || 'Untitled article'}</h1>
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-800">
+                      {blogLanguageLabel(active.language)}
+                    </span>
                     <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs capitalize text-slate-700">{statusLabel}</span>
                   </div>
                 </div>
@@ -529,6 +675,25 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                   <button type="button" onClick={() => void handlePreview()} disabled={working || loadingPost} className={`${buttonClass} border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100`}>
                     Preview
                   </button>
+                  {activeTranslation ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSelectPost(activeTranslation)}
+                      disabled={working || loadingPost}
+                      className={`${buttonClass} border border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100`}
+                    >
+                      Open {blogLanguageLabel(activeTranslation.language)}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleGenerateTranslation()}
+                      disabled={working || loadingPost}
+                      className={`${buttonClass} border border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100`}
+                    >
+                      Generate {blogLanguageLabel(otherBlogLanguage(active.language))}
+                    </button>
+                  )}
                   <button type="button" onClick={() => void handlePublish()} disabled={working || loadingPost} className={`${buttonClass} bg-blue-600 text-white hover:bg-blue-700`}>
                     {working ? 'Working…' : active.status === 'published' ? 'Publish update' : 'Publish'}
                   </button>
@@ -547,7 +712,7 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                         onChange={(event) => {
                           const nextTitle = event.target.value;
                           setTitle(nextTitle);
-                          setSlug(createBlogArticleSlug(nextTitle));
+                          if (active.language === 'en') setSlug(createBlogArticleSlug(nextTitle));
                           markDraftChanged();
                         }}
                         maxLength={255}
@@ -584,15 +749,22 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                         className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                       />
                     </label>
-                    <label className="block text-sm font-medium text-slate-700">
-                      Article month
+                    <div>
+                      <label htmlFor="blog-article-month" className="block text-sm font-medium text-slate-700">
+                        Article month
+                      </label>
                       <input
+                        id="blog-article-month"
                         type="month"
                         value={articleMonth}
                         onChange={(event) => { setArticleMonth(event.target.value); markDraftChanged(); }}
+                        aria-describedby="blog-article-month-help"
                         className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                       />
-                    </label>
+                      <p id="blog-article-month-help" className="mt-1 text-xs font-normal text-slate-500">
+                        Defaults to the current month. Select another month if needed.
+                      </p>
+                    </div>
                     <label className="block text-sm font-medium text-slate-700">
                       Reading time (minutes)
                       <input
@@ -674,6 +846,51 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
           )}
         </div>
       </main>
+
+      {createLanguageDialogOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="blog-language-title"
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="blog-language-title" className="text-lg font-semibold text-slate-900">Choose article language</h2>
+                <p className="mt-1 text-sm text-slate-600">You can add the other language version later.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateLanguageDialogOpen(false)}
+                disabled={working}
+                aria-label="Close language selection"
+                className="rounded px-2 py-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => void handleCreate('en')}
+                disabled={working}
+                className={`${buttonClass} border border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}
+              >
+                {working ? 'Creating…' : 'English'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCreate('cn')}
+                disabled={working}
+                className={`${buttonClass} border border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}
+              >
+                {working ? 'Creating…' : '中文'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {categoryDialogOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 p-4">

@@ -90,6 +90,12 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 This site is deployed on Vercel for global edge delivery. Push to the main branch triggers automatic production deployment.
 
+### Page-view event processing
+
+Public page views are queued in Upstash Redis Streams and written to `page_view_events` by a Vercel Cron job. Configure `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, and `CRON_SECRET` in the Vercel project. The cron runs daily at 14:00 UTC to stay within Vercel Hobby's daily schedule limit. Hobby cron timing can vary by up to 59 minutes, so dashboard view counts may lag by about a day.
+
+The English and Chinese homepages use five-minute ISR. Published Market Report pages use one-hour ISR and a shared data cache, invalidated when a report is published, withdrawn, or deleted. The public Blog frontend is maintained in a separate repository and needs its own article-page cache and publish-time invalidation.
+
 ## 📚 Learn More
 
 - [Next.js Documentation](https://nextjs.org/docs) - Features & API reference

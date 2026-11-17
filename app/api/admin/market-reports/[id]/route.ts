@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
-import { revalidateMarketReportHomePages } from '@/lib/market-report-cache';
+import { revalidateMarketReportHomePages, revalidatePublishedMarketReport } from '@/lib/market-report-cache';
+import type { MarketReportLanguage, MarketReportPeriodType } from '@/lib/market-report-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +64,11 @@ export async function PUT(request: Request, { params }: RouteContext) {
   }
 
   try {
-    const result = await query(
+    const result = await query<{
+      updated_at: string | Date;
+      status: string;
+      has_unpublished_changes: boolean;
+    }>(
       `UPDATE north_shore_market_reports
        SET title = $2,
            summary = $3,
@@ -92,11 +97,19 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
   if (!isUuid(id)) return NextResponse.json({ success: false, error: 'Invalid report id.' }, { status: 400 });
 
   try {
-    const result = await query(
-      `DELETE FROM north_shore_market_reports WHERE id = $1 RETURNING id`,
+    const result = await query<{
+      id: string;
+      period_type: MarketReportPeriodType;
+      period_key: string;
+      language: MarketReportLanguage;
+    }>(
+      `DELETE FROM north_shore_market_reports
+       WHERE id = $1
+       RETURNING id, period_type, period_key, language`,
       [id]
     );
     if (result.rows.length === 0) return NextResponse.json({ success: false, error: 'Report not found.' }, { status: 404 });
+    revalidatePublishedMarketReport(result.rows[0]);
     revalidateMarketReportHomePages();
     return NextResponse.json({ success: true });
   } catch (error) {

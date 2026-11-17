@@ -1,5 +1,7 @@
 import type { ReportEditorContent } from '@/types/report';
 
+export type BlogLanguage = 'en' | 'cn';
+
 export interface BlogCategory {
   id: string;
   name: string;
@@ -11,6 +13,8 @@ export interface BlogCategory {
 export interface BlogPostSummary {
   id: string;
   slug: string;
+  language: BlogLanguage;
+  translation_group_id: string;
   title: string;
   summary: string;
   category_id: string | null;
@@ -33,6 +37,23 @@ export interface BlogCategoryInput {
   name: string;
   slug: string;
   description: string;
+}
+
+export function isBlogLanguage(value: unknown): value is BlogLanguage {
+  return value === 'en' || value === 'cn';
+}
+
+export function otherBlogLanguage(language: BlogLanguage): BlogLanguage {
+  return language === 'en' ? 'cn' : 'en';
+}
+
+export function blogLanguageLabel(language: BlogLanguage): string {
+  return language === 'en' ? 'English' : '中文';
+}
+
+export function blogPreviewPath(slug: string, language: BlogLanguage): string {
+  const basePath = `/admin/blog/preview/${encodeURIComponent(slug)}`;
+  return language === 'cn' ? `${basePath}/cn` : basePath;
 }
 
 export function slugifyBlogValue(value: string): string {

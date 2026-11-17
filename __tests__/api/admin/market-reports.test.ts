@@ -5,12 +5,17 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn(),
   isSuperAdmin: vi.fn(),
   revalidatePath: vi.fn(),
+  revalidateTag: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/db', () => ({ query: mocks.query }));
 vi.mock('@/lib/permissions', () => ({ isSuperAdmin: mocks.isSuperAdmin }));
-vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock('next/cache', () => ({
+  revalidatePath: mocks.revalidatePath,
+  revalidateTag: mocks.revalidateTag,
+  unstable_cache: (callback: () => unknown) => callback,
+}));
 vi.mock('@/components/market/MarketReportArticle', () => ({
   default: (props: unknown) => props,
 }));
@@ -50,6 +55,7 @@ describe('Market reports API', () => {
     mocks.query.mockReset();
     mocks.isSuperAdmin.mockReset();
     mocks.revalidatePath.mockReset();
+    mocks.revalidateTag.mockReset();
     mocks.auth.mockResolvedValue({ user: { email: 'admin@example.com' } });
     mocks.isSuperAdmin.mockReturnValue(true);
   });
@@ -396,17 +402,21 @@ describe('Market reports API', () => {
   });
 
   it('deletes the selected Market report and returns not found for a missing report', async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [{ id: reportId }] });
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ id: reportId, period_type: 'monthly', period_key: '2026-10', language: 'en' }],
+    });
 
     const response = await deleteMarketReport(new Request('http://localhost'), context());
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ success: true });
-    expect(mocks.query.mock.calls[0][0]).toContain('DELETE FROM north_shore_market_reports WHERE id = $1');
+    expect(mocks.query.mock.calls[0][0]).toContain('DELETE FROM north_shore_market_reports');
     expect(mocks.query.mock.calls[0][1]).toEqual([reportId]);
     expect(mocks.revalidatePath.mock.calls).toEqual([
+      ['/market-reports/october-2026', 'page'],
       ['/', 'page'],
       ['/cn', 'page'],
+      ['/market-reports', 'page'],
     ]);
 
     mocks.query.mockResolvedValueOnce({ rows: [] });
@@ -437,6 +447,8 @@ describe('Market reports API', () => {
       .mockResolvedValueOnce({
         rows: [{
           title: 'October report',
+          period_type: 'monthly',
+          period_key: '2026-10',
           language,
           summary: '',
           content: validContent,
@@ -458,8 +470,10 @@ describe('Market reports API', () => {
     expect(mocks.query.mock.calls[1][0]).toContain('published_data_snapshot = data_snapshot');
     expect(mocks.query.mock.calls[1][1]).toEqual([reportId, updatedAt, 'admin@example.com']);
     expect(mocks.revalidatePath.mock.calls).toEqual([
+      [language === 'zh' ? '/market-reports/october-2026/cn' : '/market-reports/october-2026', 'page'],
       ['/', 'page'],
       ['/cn', 'page'],
+      ['/market-reports', 'page'],
     ]);
   });
 
@@ -475,14 +489,24 @@ describe('Market reports API', () => {
   });
 
   it('revalidates both localized homepages after withdrawing a report', async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [{ id: reportId, status: 'withdrawn' }] });
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        id: reportId,
+        period_type: 'monthly',
+        period_key: '2026-10',
+        language: 'en',
+        status: 'withdrawn',
+      }],
+    });
 
     const response = await withdrawReport(new Request('http://localhost'), context());
 
     expect(response.status).toBe(200);
     expect(mocks.revalidatePath.mock.calls).toEqual([
+      ['/market-reports/october-2026', 'page'],
       ['/', 'page'],
       ['/cn', 'page'],
+      ['/market-reports', 'page'],
     ]);
     expect(mocks.query.mock.calls[0][0]).not.toContain('DELETE');
   });

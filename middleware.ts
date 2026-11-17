@@ -15,9 +15,20 @@ function looksLikeSessionToken(value: string): boolean {
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const publicMarketReportPath = /^\/market-reports\/([^/]+)(\/cn)?$/i.exec(pathname);
-  if (publicMarketReportPath && publicMarketReportPath[1] !== publicMarketReportPath[1].toLowerCase()) {
+  const requestedLanguage = request.nextUrl.searchParams.get('lang');
+  if (publicMarketReportPath && requestedLanguage && requestedLanguage !== 'en' && requestedLanguage !== 'zh') {
+    return new NextResponse(null, { status: 404 });
+  }
+  if (publicMarketReportPath && (
+    publicMarketReportPath[1] !== publicMarketReportPath[1].toLowerCase()
+    || requestedLanguage !== null
+  )) {
     const url = request.nextUrl.clone();
     url.pathname = pathname.replace(publicMarketReportPath[1], publicMarketReportPath[1].toLowerCase());
+    if (requestedLanguage === 'zh' && !publicMarketReportPath[2]) {
+      url.pathname = `${url.pathname}/cn`;
+    }
+    url.searchParams.delete('lang');
     return NextResponse.redirect(url, 301);
   }
 

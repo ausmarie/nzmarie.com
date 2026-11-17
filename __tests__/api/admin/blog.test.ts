@@ -12,9 +12,11 @@ vi.mock('@/lib/permissions', () => ({ isSuperAdmin: mocks.isSuperAdmin }));
 
 import { GET as getCategories, POST as createCategory } from '@/app/api/admin/blog/categories/route';
 import { DELETE as deleteCategory, PUT as updateCategory } from '@/app/api/admin/blog/categories/[id]/route';
-import { POST as createPost } from '@/app/api/admin/blog/posts/route';
+import { GET as getPosts, POST as createPost } from '@/app/api/admin/blog/posts/route';
 import { GET as getPost, PUT as updatePost } from '@/app/api/admin/blog/posts/[id]/route';
+import { POST as createTranslation } from '@/app/api/admin/blog/posts/[id]/translation/route';
 import { POST as publishPost } from '@/app/api/admin/blog/posts/[id]/publish/route';
+import { currentBlogMonth } from '@/lib/blog-data';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const categoryId = '22222222-2222-4222-8222-222222222222';
@@ -89,25 +91,132 @@ describe('Blog admin APIs', () => {
   });
 
   it('creates a new Blog article as a draft', async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [{ id }] });
+    mocks.query.mockResolvedValueOnce({ rows: [{ id, language: 'cn', translation_group_id: id }] });
 
-    const response = await createPost();
+    const response = await createPost(request({ language: 'cn' }));
     const body = await response.json();
 
     expect(response.status).toBe(201);
     expect(body.id).toBe(id);
-    expect(mocks.query.mock.calls[0][1][0]).toBe('untitled-article');
+    expect(body.language).toBe('cn');
+    expect(mocks.query.mock.calls[0][0]).toContain('translation_group_id');
+    expect(mocks.query.mock.calls[0][1][0]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(mocks.query.mock.calls[0][1][2]).toBe('cn');
+    expect(mocks.query.mock.calls[0][1][3]).toBe('未命名文章');
+    expect(mocks.query.mock.calls[0][1][4]).toBe(`${currentBlogMonth()}-01`);
+    expect(mocks.query.mock.calls[0][1][5]).toBe('admin@example.com');
+  });
+
+  it('creates the missing language version in the same article group', async () => {
+    const translationId = '33333333-3333-4333-8333-333333333333';
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [{
+          slug: 'selling-your-home-in-new-zealand',
+          language: 'en',
+          translation_group_id: id,
+          category_id: categoryId,
+          author: 'Marie Nian',
+          article_month: '2026-11-01',
+          reading_minutes: '6',
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ id: translationId, language: 'cn', translation_group_id: id }],
+      });
+
+    const response = await createTranslation(new Request('http://localhost'), context());
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.id).toBe(translationId);
+    expect(body.language).toBe('cn');
+    expect(mocks.query.mock.calls[1][1][4]).toBe('未命名文章');
+    expect(mocks.query.mock.calls[1][1][1]).toBe('selling-your-home-in-new-zealand');
+    expect(mocks.query.mock.calls[1][1][2]).toBe('cn');
+    expect(mocks.query.mock.calls[1][1][3]).toBe(id);
+    expect(mocks.query.mock.calls[1][1][7]).toBe('2026-11-01');
+  });
+
+  it('creates an English sibling when the source article is Chinese', async () => {
+    const translationId = '33333333-3333-4333-8333-333333333333';
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [{
+          slug: 'article',
+          language: 'cn',
+          translation_group_id: id,
+          category_id: null,
+          author: 'Marie Nian',
+          article_month: '2026-11-01',
+          reading_minutes: '5',
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ id: translationId, language: 'en', translation_group_id: id }],
+      });
+
+    const response = await createTranslation(new Request('http://localhost'), context());
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.language).toBe('en');
+    expect(mocks.query.mock.calls[1][1][1]).toBe('article');
+    expect(mocks.query.mock.calls[1][1][2]).toBe('en');
+  });
+
+  it('reports a duplicate translation instead of creating a second sibling', async () => {
+    const conflict = Object.assign(new Error('duplicate key'), { code: '23505' });
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [{
+          slug: 'selling-your-home-in-new-zealand',
+          language: 'en',
+          translation_group_id: id,
+          category_id: categoryId,
+          author: 'Marie Nian',
+          article_month: '2026-11-01',
+          reading_minutes: '6',
+        }],
+      })
+      .mockRejectedValueOnce(conflict);
+
+    const response = await createTranslation(new Request('http://localhost'), context());
+
+    expect(response.status).toBe(409);
+  });
+
+  it('returns article months as timezone-independent calendar dates', async () => {
+    mocks.query.mockResolvedValueOnce({
+      rows: [{ id, article_month: '2026-11-01', reading_minutes: '5' }],
+    });
+
+    const response = await getPosts();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.query.mock.calls[0][0]).toContain("TO_CHAR(p.article_month, 'YYYY-MM-DD') AS article_month");
+    expect(body.posts[0].article_month).toBe('2026-11-01');
   });
 
   it('returns reading time fields as numbers', async () => {
     mocks.query.mockResolvedValueOnce({
-      rows: [{ id, reading_minutes: '7', published_reading_minutes: '6' }],
+      rows: [{
+        id,
+        language: 'en',
+        translation_group_id: id,
+        article_month: '2026-11-01',
+        reading_minutes: '7',
+        published_reading_minutes: '6',
+      }],
     });
 
     const response = await getPost(new Request('http://localhost'), context());
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(mocks.query.mock.calls[0][0]).toContain("TO_CHAR(p.article_month, 'YYYY-MM-DD') AS article_month");
+    expect(body.post.article_month).toBe('2026-11-01');
     expect(body.post.reading_minutes).toBe(7);
     expect(body.post.published_reading_minutes).toBe(6);
   });
@@ -142,7 +251,10 @@ describe('Blog admin APIs', () => {
     }, 'PUT'), context());
 
     expect(response.status).toBe(200);
-    expect(mocks.query.mock.calls[0][0]).toContain('reading_minutes = $9');
+    expect(mocks.query.mock.calls[0][0]).toContain('reading_minutes = CASE WHEN post.id = $1 THEN $9');
+    expect(mocks.query.mock.calls[0][0]).toContain("WHEN language = 'en' THEN $2");
+    expect(mocks.query.mock.calls[0][0]).toContain("sibling.language = 'en'");
+    expect(mocks.query.mock.calls[0][0]).toContain('post.translation_group_id = resolved.translation_group_id');
     expect(mocks.query.mock.calls[0][1]).toEqual([
       id,
       'selling-your-home-in-new-zealand',

@@ -1,0 +1,3 @@
+ALTER TABLE blog_posts
+  ADD COLUMN IF NOT EXISTS language VARCHAR(2) NOT NULL DEFAULT 'en',
+  ADD COLUMN IF NOT EXISTS translation_group_id UUID;

@@ -10,6 +10,7 @@ import {
 } from '@/lib/market-report-data';
 import { formatMillions } from '@/lib/market-pulse';
 import { marketReportUrl, parseMarketReportSlug } from '@/lib/market-report-url';
+import { getPublishedMarketReport } from '@/lib/market-report-public-cache';
 
 const SITE_URL = 'https://www.nzmarie.com';
 
@@ -79,15 +80,7 @@ export async function getPublishedMarketReportMetadata(
     };
   }
 
-  const result = await query<PublishedReportRow>(
-    `SELECT period_type, period_key, language, published_data_snapshot, published_at
-     FROM north_shore_market_reports
-     WHERE period_type = $1 AND period_key = $2 AND status = 'published'
-       AND language = $3
-     LIMIT 1`,
-    [period.periodType, period.periodKey, language],
-  );
-  const report = result.rows[0];
+  const report = await getPublishedMarketReport(slug, language);
   if (!report) {
     return {
       title: 'North Shore Market Report | NZ Marie',

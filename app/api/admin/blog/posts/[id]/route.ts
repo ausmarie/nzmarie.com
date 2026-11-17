@@ -16,7 +16,8 @@ export async function GET(_request: Request, { params }: RouteContext) {
 
   try {
     const result = await query(
-      `SELECT p.*, c.name AS category_name
+      `SELECT p.*, TO_CHAR(p.article_month, 'YYYY-MM-DD') AS article_month,
+              c.name AS category_name
        FROM blog_posts p
        LEFT JOIN blog_categories c ON c.id = p.category_id
        WHERE p.id = $1`,
@@ -85,24 +86,57 @@ export async function PUT(request: Request, { params }: RouteContext) {
 
   try {
     const result = await query(
-      `UPDATE blog_posts
-       SET slug = $2,
-           title = $3,
-           summary = $4,
-           content = $5::jsonb,
-           category_id = $6,
-           author = $7,
-           article_month = $8::date,
-           reading_minutes = $9,
-           has_unpublished_changes = CASE WHEN status = 'draft' THEN FALSE ELSE TRUE END,
-           updated_by = $10,
-           updated_at = NOW()
-       WHERE id = $1
-       RETURNING id, status, has_unpublished_changes, updated_at`,
+      `WITH target AS (
+         SELECT translation_group_id, language, slug
+         FROM blog_posts
+         WHERE id = $1
+       ),
+       resolved AS (
+         SELECT translation_group_id,
+                CASE
+                  WHEN language = 'en' THEN $2
+                  ELSE COALESCE(
+                    (SELECT sibling.slug
+                     FROM blog_posts sibling
+                     WHERE sibling.translation_group_id = target.translation_group_id
+                       AND sibling.language = 'en'
+                     LIMIT 1),
+                    slug
+                  )
+                END AS slug
+         FROM target
+       )
+       UPDATE blog_posts AS post
+       SET slug = resolved.slug,
+           title = CASE WHEN post.id = $1 THEN $3 ELSE post.title END,
+           summary = CASE WHEN post.id = $1 THEN $4 ELSE post.summary END,
+           content = CASE WHEN post.id = $1 THEN $5::jsonb ELSE post.content END,
+           category_id = CASE WHEN post.id = $1 THEN $6 ELSE post.category_id END,
+           author = CASE WHEN post.id = $1 THEN $7 ELSE post.author END,
+           article_month = CASE WHEN post.id = $1 THEN $8::date ELSE post.article_month END,
+           reading_minutes = CASE WHEN post.id = $1 THEN $9 ELSE post.reading_minutes END,
+           has_unpublished_changes = CASE
+             WHEN post.id = $1 AND post.status = 'draft' THEN FALSE
+             WHEN post.id = $1 THEN TRUE
+             WHEN post.status = 'published' AND post.slug IS DISTINCT FROM resolved.slug THEN TRUE
+             ELSE post.has_unpublished_changes
+           END,
+           updated_by = CASE
+             WHEN post.id = $1 OR post.slug IS DISTINCT FROM resolved.slug THEN $10
+             ELSE post.updated_by
+           END,
+           updated_at = CASE
+             WHEN post.id = $1 OR post.slug IS DISTINCT FROM resolved.slug THEN NOW()
+             ELSE post.updated_at
+           END
+       FROM resolved
+       WHERE post.translation_group_id = resolved.translation_group_id
+       RETURNING post.id, post.status, post.has_unpublished_changes, post.updated_at`,
       [id, slug, title, summary, JSON.stringify(body.content), categoryId, author, `${articleMonth}-01`, readingMinutes, email]
     );
-    if (!result.rows[0]) return NextResponse.json({ success: false, error: 'Blog article not found.' }, { status: 404 });
-    return NextResponse.json({ success: true, ...result.rows[0] });
+    const updatedPost = result.rows.find((post) => post.id === id);
+    if (!updatedPost) return NextResponse.json({ success: false, error: 'Blog article not found.' }, { status: 404 });
+    return NextResponse.json({ success: true, ...updatedPost });
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {
       return NextResponse.json({ success: false, error: 'An article with this URL slug already exists.' }, { status: 409 });

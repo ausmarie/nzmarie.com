@@ -1,10 +1,9 @@
 import { notFound } from 'next/navigation';
 import MarketReportArticle from '@/components/market/MarketReportArticle';
 import PageViewTracker from '@/components/PageViewTracker';
-import { query } from '@/lib/db';
 import { parseMarketReportSlug } from '@/lib/market-report-url';
-import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
-import type { ReportEditorContent } from '@/types/report';
+import type { MarketReportLanguage } from '@/lib/market-report-data';
+import { getPublishedMarketReport } from '@/lib/market-report-public-cache';
 
 export default async function PublishedMarketReportPage({
   slug,
@@ -16,16 +15,8 @@ export default async function PublishedMarketReportPage({
   const period = parseMarketReportSlug(slug);
   if (!period) notFound();
 
-  const result = await query(
-    `SELECT published_content, published_footer, published_data_snapshot, published_at
-     FROM north_shore_market_reports
-     WHERE period_type = $1 AND period_key = $2 AND status = 'published'
-       AND language = $3
-     LIMIT 1`,
-    [period.periodType, period.periodKey, language],
-  );
-  const report = result.rows[0];
-  if (!report) notFound();
+  const report = await getPublishedMarketReport(slug, language);
+  if (!report || !report.published_data_snapshot) notFound();
 
   return (
     <>
@@ -33,11 +24,9 @@ export default async function PublishedMarketReportPage({
       <MarketReportArticle
         report={{
           language,
-          content: Array.isArray(report.published_content)
-            ? report.published_content as ReportEditorContent
-            : [],
+          content: Array.isArray(report.published_content) ? report.published_content : [],
           footer: typeof report.published_footer === 'string' ? report.published_footer : null,
-          dataSnapshot: report.published_data_snapshot as MarketReportSnapshot,
+          dataSnapshot: report.published_data_snapshot,
           publishedAt: typeof report.published_at === 'string' || report.published_at instanceof Date
             ? report.published_at
             : null,
