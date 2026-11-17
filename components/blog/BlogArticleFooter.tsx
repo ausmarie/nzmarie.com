@@ -33,7 +33,7 @@ export default function BlogArticleFooter({
             <a className="font-semibold underline" href="mailto:m.nian@barfoot.co.nz">
               m.nian@barfoot.co.nz
             </a>
-            或
+            {' '}或{' '}
             <a className="font-semibold underline" href="tel:+64210693089">
               021 0693 089
             </a>

@@ -2,12 +2,16 @@
 
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/mantine';
+import { trimTrailingEmptyParagraphs } from '@/lib/report-content';
 import type { ReportEditorContent } from '@/types/report';
 import '@blocknote/mantine/style.css';
 
 export default function BlogRichText({ content }: { content: ReportEditorContent }) {
+  const contentWithoutTrailingEmptyParagraphs = trimTrailingEmptyParagraphs(content);
   const editor = useCreateBlockNote({
-    initialContent: content.length > 0 ? content : [{ type: 'paragraph' }],
+    initialContent: contentWithoutTrailingEmptyParagraphs.length > 0
+      ? contentWithoutTrailingEmptyParagraphs
+      : [{ type: 'paragraph' }],
   });
 
   return (

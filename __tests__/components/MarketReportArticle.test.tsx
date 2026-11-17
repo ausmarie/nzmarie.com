@@ -280,6 +280,29 @@ describe('MarketReportArticle', () => {
     expect(spacer?.getAttribute('aria-hidden')).toBe('true');
   });
 
+  it('removes trailing empty editor paragraphs before the footer', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          content: [{
+            type: 'paragraph',
+            content: [{ type: 'text', text: 'Final report paragraph', styles: {} }],
+          }, {
+            type: 'paragraph',
+            content: [],
+          }, {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '  ', styles: {} }],
+          }] as unknown as MarketReportArticleData['content'],
+        }}
+      />,
+    );
+
+    expect(document.querySelector('.market-report-richtext')?.textContent).toContain('Final report paragraph');
+    expect(document.querySelector('.market-report-empty-paragraph')).toBeNull();
+  });
+
   it('renders the standard Blog note and linked calls to action instead of a custom report footer', () => {
     render(<MarketReportArticle report={{ ...report, footer: 'Custom source note.\nCustom disclaimer.' }} />);
 

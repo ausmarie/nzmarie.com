@@ -32,6 +32,7 @@ describe('BlogArticleFooter', () => {
     const note = document.querySelector('p.border-l-2');
     expect(note?.textContent).toContain('说明：');
     expect(note?.textContent).toContain('北岸市场数据反映整体趋势。');
+    expect(note?.textContent).toContain('m.nian@barfoot.co.nz 或 021 0693 089');
     expect(screen.getByRole('link', { name: '预约免费房产评估' }).getAttribute('href'))
       .toBe('https://www.nzmarie.com/cn#appraisal');
     expect(screen.getByRole('link', { name: '下载专属子区报告' }).getAttribute('href'))

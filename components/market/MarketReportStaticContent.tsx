@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from 'react';
 import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
 import { buildMarketPulseHTML, type MarketPulseProps } from '@/lib/market-pulse';
 import { marketReportChartName } from '@/lib/market-report-document';
+import { trimTrailingEmptyParagraphs } from '@/lib/report-content';
 import type { ReportEditorContent } from '@/types/report';
 import '@blocknote/mantine/style.css';
 
@@ -440,9 +441,10 @@ export default function MarketReportStaticContent({
   language: MarketReportLanguage;
 }) {
   const headingState = { primaryHeadingRendered: false };
+  const contentBlocks = trimTrailingEmptyParagraphs(content) as RichTextBlock[];
   return (
     <div className="market-report-richtext bn-default-styles">
-      {(content as RichTextBlock[]).map((block, index) =>
+      {contentBlocks.map((block, index) =>
         renderBlock(block, index, snapshot, language, headingState),
       )}
     </div>
