@@ -56,15 +56,15 @@ export default function MarketReportArticle({
           {language === 'zh' ? '仅供预览 — 此草稿尚未公开。' : 'Preview only — this draft is not public.'}
         </div>
       )}
-      <main className="market-report-body mx-auto max-w-6xl space-y-8 px-4 py-10 sm:px-6 lg:px-8">
-        <article className="px-4 py-6 sm:px-8">
+      <main className="market-report-body mx-auto max-w-6xl space-y-8 px-4 pt-10 pb-4 sm:px-6 lg:px-8">
+        <article className="px-4 pt-6 pb-3 sm:px-8">
           <MarketReportStaticContent content={content} snapshot={snapshot} language={language} />
         </article>
       </main>
 
       <div className="market-report-footer mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="px-4 sm:px-8">
-          <BlogArticleFooter />
+          <BlogArticleFooter language={language === 'zh' ? 'cn' : 'en'} />
         </div>
       </div>
     </div>

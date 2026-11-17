@@ -213,8 +213,9 @@ describe('MarketReportArticle', () => {
       />,
     );
 
-    expect(screen.getByRole('link', { name: '预约免费房产评估' }).getAttribute('href')).toBe('/cn#appraisal');
-    expect(screen.getByRole('link', { name: '下载专属子区报告' }).getAttribute('href')).toBe('/cn#download-report');
+    const article = within(screen.getByRole('article'));
+    expect(article.getByRole('link', { name: '预约免费房产评估' }).getAttribute('href')).toBe('/cn#appraisal');
+    expect(article.getByRole('link', { name: '下载专属子区报告' }).getAttribute('href')).toBe('/cn#download-report');
   });
 
   it('includes report text and descriptive chart alt text in server-rendered HTML', () => {
@@ -283,7 +284,7 @@ describe('MarketReportArticle', () => {
     render(<MarketReportArticle report={{ ...report, footer: 'Custom source note.\nCustom disclaimer.' }} />);
 
     expect(screen.getByTestId('public-header')).toBeTruthy();
-    const footer = document.querySelector('.market-report-footer');
+    const footer = document.querySelector<HTMLElement>('.market-report-footer');
     const note = footer?.querySelector('.border-l-2');
     expect(note?.textContent).toContain('Market data reflects broad North Shore trends.');
     expect(note?.textContent).toContain('For a confidential, tailored valuation of your specific address,');
@@ -302,5 +303,19 @@ describe('MarketReportArticle', () => {
     expect(footer?.querySelector('footer')?.textContent)
       .toContain('This publication is independent editorial content provided for general reference only.');
     expect(document.querySelector('main')?.nextElementSibling).toBe(footer);
+  });
+
+  it('uses the Chinese Blog footer for Chinese Market reports', () => {
+    render(<MarketReportArticle report={{ ...report, language: 'zh' }} />);
+
+    const footer = document.querySelector<HTMLElement>('.market-report-footer');
+    const footerQueries = within(footer!);
+    expect(footer?.textContent).toContain('说明：');
+    expect(footer?.textContent).toContain('北岸市场数据反映整体趋势。');
+    expect(footerQueries.getByRole('link', { name: '预约免费房产评估' }).getAttribute('href'))
+      .toBe('https://www.nzmarie.com/cn#appraisal');
+    expect(footerQueries.getByRole('link', { name: '下载专属子区报告' }).getAttribute('href'))
+      .toBe('https://www.nzmarie.com/cn#download-report');
+    expect(footer?.textContent).toContain('本出版物为独立编辑内容，仅供一般参考。');
   });
 });

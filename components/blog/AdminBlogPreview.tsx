@@ -68,7 +68,7 @@ export default async function AdminBlogPreview({
         <div className="mt-8">
           <BlogRichTextPreview content={initialBlogContent(post.content)} />
         </div>
-        <BlogArticleFooter />
+        <BlogArticleFooter language={language} />
       </div>
     </main>
   );
