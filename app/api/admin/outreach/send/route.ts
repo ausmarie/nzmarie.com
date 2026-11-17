@@ -20,12 +20,27 @@ function campaignKeyForSuburb(campaignKey: string, suburb: string): string {
   return trimmed;
 }
 
-function extractQuarterInfo(campaignKey: string): { quarter: string; year: number } | null {
-  const match = campaignKey.match(/^(\d{4})[_-]([Qq][1-4])/);
+function extractQuarterInfo(campaignKey: string): {
+  quarter: string;
+  reportQuarters: string[];
+  year: number;
+} | null {
+  const match = campaignKey.match(
+    /^(\d{4})[_-](Q[1-4]|M(?:0[1-9]|1[0-2])|(?:0[1-9]|1[0-2]))(?:[_-]|$)/i
+  );
   if (!match) return null;
   const year = parseInt(match[1], 10);
   if (!year) return null;
-  return { quarter: match[2].toUpperCase(), year };
+
+  const period = match[2].toUpperCase();
+  if (period.startsWith('M')) {
+    const month = period.slice(1);
+    return { quarter: month, reportQuarters: [period, month], year };
+  }
+  if (/^(0[1-9]|1[0-2])$/.test(period)) {
+    return { quarter: period, reportQuarters: [period, `M${period}`], year };
+  }
+  return { quarter: period, reportQuarters: [period], year };
 }
 
 export async function POST(request: Request) {
@@ -152,11 +167,17 @@ export async function POST(request: Request) {
       if (!suburb_report_id) {
         const reportSuburbs = [...new Set(affectedSuburbs)];
         if (reportSuburbs.length > 0) {
+          const quarterCondition = quarterInfo.reportQuarters.length > 1
+            ? 'quarter = ANY($1::text[])'
+            : 'quarter = $1';
+          const reportQuarter = quarterInfo.reportQuarters.length > 1
+            ? quarterInfo.reportQuarters
+            : quarterInfo.reportQuarters[0];
           const reportResult = await transactionClient.query(
             `SELECT id, suburb
              FROM suburb_reports
-             WHERE status = 'active' AND quarter = $1 AND year = $2 AND suburb = ANY($3::text[])`,
-            [quarterInfo.quarter, quarterInfo.year, reportSuburbs]
+             WHERE status = 'active' AND ${quarterCondition} AND year = $2 AND suburb = ANY($3::text[])`,
+            [reportQuarter, quarterInfo.year, reportSuburbs]
           );
           reportBySuburb = new Map(
             (reportResult.rows as Array<{ id: string; suburb: string }>).map((report) => [

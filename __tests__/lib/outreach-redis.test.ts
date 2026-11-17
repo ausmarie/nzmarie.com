@@ -9,6 +9,7 @@ const { mockRedisInstance } = vi.hoisted(() => {
     del: vi.fn(),
     sadd: vi.fn(),
     smembers: vi.fn(),
+    keys: vi.fn().mockResolvedValue([]),
     expire: vi.fn(),
   };
   return { mockRedisInstance };
@@ -23,6 +24,7 @@ import {
   outreachCardsKey,
   getOutreachCardsFromCache,
   setOutreachCardsInCache,
+  setStreetClustersInCache,
   invalidateOutreachCardsForSuburb,
   invalidateStreetClustersForSuburb,
   getDashboardStatsCached,
@@ -62,6 +64,8 @@ describe('Outreach Redis Cache Functions', () => {
       'outreach_cards:pinehill:query1'
     );
     expect(mockRedisInstance.expire).toHaveBeenCalledWith('outreach_cards_keys:pinehill', 3600);
+    expect(mockRedisInstance.sadd.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRedisInstance.set.mock.invocationCallOrder[0]);
   });
 
   it('invalidates all tracked card keys for a suburb', async () => {
@@ -78,6 +82,56 @@ describe('Outreach Redis Cache Functions', () => {
       'outreach_cards:pinehill:q2'
     );
     expect(mockRedisInstance.del).toHaveBeenCalledWith('outreach_cards_keys:pinehill');
+  });
+
+  it('registers a street-cluster key before caching it', async () => {
+    await setStreetClustersInCache(
+      'street_clusters:mairangi bay:pending:unsent:2026-10:30:v3',
+      { success: true }
+    );
+
+    expect(mockRedisInstance.sadd.mock.invocationCallOrder[0])
+      .toBeLessThan(mockRedisInstance.set.mock.invocationCallOrder[0]);
+    expect(mockRedisInstance.set).toHaveBeenCalledWith(
+      'street_clusters:mairangi bay:pending:unsent:2026-10:30:v3',
+      JSON.stringify({ success: true }),
+      { ex: 1800 }
+    );
+  });
+
+  it('invalidates untracked outreach card keys for a suburb', async () => {
+    const monthlyKey = 'outreach_cards:mairangi bay:status=pending&report_quarter=2026-10';
+    mockRedisInstance.smembers.mockResolvedValueOnce([]);
+    mockRedisInstance.keys.mockResolvedValueOnce([monthlyKey]);
+
+    await invalidateOutreachCardsForSuburb('Mairangi Bay');
+
+    expect(mockRedisInstance.keys).toHaveBeenCalledWith('outreach_cards:mairangi bay:*');
+    expect(mockRedisInstance.del).toHaveBeenCalledWith(monthlyKey);
+  });
+
+  it('does not cache a street-cluster result when its key cannot be tracked', async () => {
+    mockRedisInstance.sadd.mockRejectedValueOnce(new Error('Redis unavailable'));
+
+    await setStreetClustersInCache(
+      'street_clusters:mairangi bay:pending:unsent:2026-10:30:v3',
+      { success: true }
+    );
+
+    expect(mockRedisInstance.set).not.toHaveBeenCalled();
+  });
+
+  it('invalidates untracked monthly cache keys for a suburb', async () => {
+    const monthlyKey = 'street_clusters:mairangi bay:pending:unsent:2026-10:30:v3';
+    mockRedisInstance.smembers.mockResolvedValueOnce([]);
+    mockRedisInstance.keys
+      .mockResolvedValueOnce([monthlyKey])
+      .mockResolvedValueOnce([]);
+
+    await invalidateStreetClustersForSuburb('Mairangi Bay');
+
+    expect(mockRedisInstance.keys).toHaveBeenCalledWith('street_clusters:mairangi bay:*');
+    expect(mockRedisInstance.del).toHaveBeenCalledWith(monthlyKey);
   });
 
   it('invalidates outreach cards when invalidateStreetClustersForSuburb is called', async () => {

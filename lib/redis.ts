@@ -203,7 +203,6 @@ export async function getStreetClustersFromCache<T>(key: string): Promise<T | nu
 export async function setStreetClustersInCache(key: string, data: unknown): Promise<void> {
   if (!redis) return;
   try {
-    await redis.set(key, JSON.stringify(data), { ex: STREET_CLUSTERS_TTL });
     const parts = key.split(':');
     const suburb = parts[1];
     if (suburb) {
@@ -211,6 +210,7 @@ export async function setStreetClustersInCache(key: string, data: unknown): Prom
       await redis.sadd(indexKey, key);
       await redis.expire(indexKey, STREET_CLUSTERS_TTL * 2);
     }
+    await redis.set(key, JSON.stringify(data), { ex: STREET_CLUSTERS_TTL });
   } catch {
   }
 }
@@ -221,25 +221,11 @@ export async function invalidateStreetClustersForSuburb(suburb: string): Promise
   const indexKey = `street_clusters_keys:${s}`;
 
   try {
-    const trackedKeys = await redis.smembers<string[]>(indexKey);
-    const keysToDelete = new Set<string>(trackedKeys ?? []);
-
-    const statuses = ['pending', 'liked', 'sent', 'all'];
-    const sentStatuses = ['all', 'unsent', 'sent'];
-    const quarters = ['all', null, '2026-Q1', '2026-Q2', '2026-Q3', '2026-Q4', '2026_Q1', '2026_Q2', '2026_Q3', '2026_Q4'];
-    const budgets = [10, 15, 20, 25, 30, 35, 40, 50, 100];
-
-    for (const st of statuses) {
-      for (const ss of sentStatuses) {
-        for (const q of quarters) {
-          for (const b of budgets) {
-            const base = streetClustersKey(s, st, ss, q, b);
-            keysToDelete.add(base);
-            keysToDelete.add(`${base}:coords`);
-          }
-        }
-      }
-    }
+    const [trackedKeys, matchingKeys] = await Promise.all([
+      redis.smembers<string[]>(indexKey),
+      redis.keys(`street_clusters:${s}:*`),
+    ]);
+    const keysToDelete = new Set<string>([...(trackedKeys ?? []), ...matchingKeys]);
 
     const allKeys = Array.from(keysToDelete);
     if (allKeys.length > 0) {
@@ -280,11 +266,11 @@ export async function setOutreachCardsInCache(
 ): Promise<void> {
   if (!redis) return;
   try {
-    await redis.set(key, JSON.stringify(data), { ex: ttlSeconds });
     const s = suburb ? suburb.toLowerCase().trim() : 'all';
     const indexKey = `outreach_cards_keys:${s}`;
     await redis.sadd(indexKey, key);
     await redis.expire(indexKey, ttlSeconds * 2);
+    await redis.set(key, JSON.stringify(data), { ex: ttlSeconds });
   } catch {
   }
 }
@@ -294,9 +280,13 @@ export async function invalidateOutreachCardsForSuburb(suburb: string): Promise<
   const s = suburb.toLowerCase().trim();
   const indexKey = `outreach_cards_keys:${s}`;
   try {
-    const trackedKeys = await redis.smembers<string[]>(indexKey);
-    if (trackedKeys && trackedKeys.length > 0) {
-      await redis.del(...trackedKeys);
+    const [trackedKeys, matchingKeys] = await Promise.all([
+      redis.smembers<string[]>(indexKey),
+      redis.keys(`outreach_cards:${s}:*`),
+    ]);
+    const keysToDelete = new Set<string>([...(trackedKeys ?? []), ...matchingKeys]);
+    if (keysToDelete.size > 0) {
+      await redis.del(...Array.from(keysToDelete));
     }
     await redis.del(indexKey);
   } catch {

@@ -192,6 +192,67 @@ describe('Outreach Send and History API Routes', () => {
       ]);
     });
 
+    it('upserts month status for a monthly campaign with an explicit report id', async () => {
+      const mockQuery = mockSendQueries({
+        properties: [{ id: 'prop-1', suburb: 'Mairangi Bay' }],
+      });
+
+      const response = await POST(
+        sendRequest({
+          property_ids: ['prop-1'],
+          suburb_report_id: 'report-month',
+          campaign_key: '2026_M10_Mairangi Bay',
+        })
+      );
+      expect(response.status).toBe(200);
+
+      const upsertCall = mockQuery.mock.calls.find((call) =>
+        String(call[0]).includes('INSERT INTO outreach_property_quarter_status')
+      );
+      expect(upsertCall).toBeDefined();
+      expect(upsertCall![1]).toEqual([
+        ['prop-1'],
+        ['report-month'],
+        '10',
+        2026,
+        ['Mairangi Bay'],
+        ['2026_M10_Mairangi Bay'],
+      ]);
+    });
+
+    it('looks up monthly reports using both Mxx and numeric month formats', async () => {
+      const mockQuery = mockSendQueries({
+        properties: [{ id: 'prop-1', suburb: 'Mairangi Bay' }],
+        reports: [{ id: 'report-month', suburb: 'Mairangi Bay' }],
+      });
+
+      const response = await POST(
+        sendRequest({
+          property_ids: ['prop-1'],
+          campaign_key: '2026_M10_Mairangi Bay',
+        })
+      );
+      expect(response.status).toBe(200);
+
+      const reportLookup = mockQuery.mock.calls.find((call) =>
+        String(call[0]).includes('FROM suburb_reports')
+      );
+      expect(reportLookup![0]).toContain('quarter = ANY($1::text[])');
+      expect(reportLookup![1]).toEqual([['M10', '10'], 2026, ['Mairangi Bay']]);
+
+      const upsertCall = mockQuery.mock.calls.find((call) =>
+        String(call[0]).includes('INSERT INTO outreach_property_quarter_status')
+      );
+      expect(upsertCall![1]).toEqual([
+        ['prop-1'],
+        ['report-month'],
+        '10',
+        2026,
+        ['Mairangi Bay'],
+        ['2026_M10_Mairangi Bay'],
+      ]);
+    });
+
     it('changes an existing pending quarter status to sent even when it has historical sends', async () => {
       const mockQuery = mockSendQueries({
         properties: [{ id: 'prop-1', suburb: 'Oteha' }],
