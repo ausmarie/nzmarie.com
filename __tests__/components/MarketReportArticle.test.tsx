@@ -35,13 +35,18 @@ const report: MarketReportArticleData = {
 describe('MarketReportArticle', () => {
   afterEach(cleanup);
 
-  it('does not render a separate report title or summary and preserves the page width', () => {
+  it('renders the structured article header and preserves the page width', () => {
     render(<MarketReportArticle report={report} preview />);
 
     expect(screen.queryByTestId('public-header')).toBeNull();
     expect(document.querySelector('body > div > div')?.className).toContain('overflow-y-auto');
-    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
-    expect(screen.queryByText('North Shore Property Market Report', { exact: true })).toBeNull();
+    expect(screen.getByRole('heading', { level: 1, name: 'North Shore Market Report' })).toBeTruthy();
+    expect(screen.getByText('By Marie Nian')).toBeTruthy();
+    expect(screen.getByText('Barfoot & Thompson')).toBeTruthy();
+    expect(screen.getByText('5 min read')).toBeTruthy();
+    expect(screen.getByText('Nov 2026')).toBeTruthy();
+    const metadata = document.querySelector('main > article > header > div:last-child');
+    expect(metadata?.textContent).toBe('By Marie Nian•Barfoot & Thompson•5 min read•Nov 2026');
     expect(screen.queryByText('October 2026 · Draft preview')).toBeNull();
 
     expect(document.querySelector('body > div > div')?.className).toContain('bg-white');
@@ -51,6 +56,48 @@ describe('MarketReportArticle', () => {
     expect(main?.className).toContain('market-report-body');
     expect(article?.className).toContain('px-4');
     expect(article?.className).not.toMatch(/bg-white|border|rounded|shadow/);
+  });
+
+  it('uses the Chinese header metadata and responsive wrapping layout', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          language: 'zh',
+          articleHeader: {
+            icon: 'none',
+            title: '北岸市场报告',
+            subtitle: '2026年10月市场更新',
+            author: 'Marie Nian',
+            organization: 'Barfoot & Thompson',
+            readingMinutes: 6,
+            articleMonth: '2026-11',
+          },
+        }}
+        preview
+      />,
+    );
+
+    expect(screen.getByRole('heading', { level: 1, name: '北岸市场报告' })).toBeTruthy();
+    expect(screen.getByText('2026年10月市场更新')).toBeTruthy();
+    expect(screen.getByText('作者：Marie Nian')).toBeTruthy();
+    expect(screen.getByText('Barfoot & Thompson')).toBeTruthy();
+    expect(screen.getByText('6 分钟阅读')).toBeTruthy();
+    expect(screen.getByText('2026年11月')).toBeTruthy();
+    const metadata = document.querySelector('main > article > header > div:last-child');
+    expect(metadata?.textContent).toBe('作者：Marie Nian•Barfoot & Thompson•6 分钟阅读•2026年11月');
+    expect(screen.queryByText('△')).toBeNull();
+    expect(document.querySelector('main > article > header > div:last-child')?.className)
+      .toContain('flex-wrap');
+  });
+
+  it('renders the outlined market report icon with its baseline', () => {
+    render(<MarketReportArticle report={report} preview />);
+    const icon = document.querySelector('main > article > header svg');
+
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(icon?.querySelectorAll('path')).toHaveLength(2);
+    expect(icon?.querySelector('path')?.getAttribute('stroke')).toBe('#244fc4');
   });
 
   it('renders the report heading as semantic HTML', () => {

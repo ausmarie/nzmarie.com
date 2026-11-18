@@ -28,6 +28,7 @@ describe('published Market report cache', () => {
       period_key: '2026-10',
       language: 'zh',
       published_content: [],
+      published_article_header: null,
       published_footer: null,
       published_data_snapshot: { periodType: 'monthly', periodKey: '2026-10' },
       published_at: '2026-11-01T00:00:00.000Z',

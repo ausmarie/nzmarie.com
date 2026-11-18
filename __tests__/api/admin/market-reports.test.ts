@@ -362,10 +362,20 @@ describe('Market reports API', () => {
       rows: [{ status: 'published', has_unpublished_changes: true, updated_at: '2026-11-14T00:00:00Z' }],
     });
 
+    const articleHeader = {
+      icon: 'delta',
+      title: 'Updated article title',
+      subtitle: 'Spring update',
+      author: 'Marie Nian',
+      organization: 'Barfoot & Thompson',
+      readingMinutes: 5,
+      articleMonth: '2026-11',
+    };
     const response = await PUT(request({
       title: 'Updated report',
       summary: 'Updated summary',
       footer: 'Custom footer text',
+      articleHeader,
       content: validContent,
     }, 'PUT'), context());
 
@@ -374,7 +384,28 @@ describe('Market reports API', () => {
     expect(sql).toContain('has_unpublished_changes = CASE WHEN status =');
     expect(sql).toContain('footer = COALESCE($5, footer)');
     expect(mocks.query.mock.calls[0][1][4]).toBe('Custom footer text');
+    expect(sql).toContain('article_header = COALESCE($6::jsonb, article_header)');
+    expect(JSON.parse(String(mocks.query.mock.calls[0][1][5]))).toEqual(articleHeader);
     expect(sql).not.toContain('published_content =');
+  });
+
+  it('rejects invalid article header fields before database access', async () => {
+    const response = await PUT(request({
+      title: 'October report',
+      content: validContent,
+      articleHeader: {
+        icon: 'delta',
+        title: 'October',
+        subtitle: '',
+        author: '',
+        organization: '',
+        readingMinutes: 5,
+        articleMonth: '2026-13',
+      },
+    }, 'PUT'), context());
+
+    expect(response.status).toBe(400);
+    expect(mocks.query).not.toHaveBeenCalled();
   });
 
   it('rejects footers longer than 4,000 characters before database access', async () => {
@@ -466,6 +497,7 @@ describe('Market reports API', () => {
     expect(mocks.query.mock.calls[0][0]).toContain('updated_at::text AS updated_at');
     expect(mocks.query.mock.calls[0][0]).not.toContain('summary');
     expect(mocks.query.mock.calls[1][0]).toContain('published_content = content');
+    expect(mocks.query.mock.calls[1][0]).toContain('published_article_header = article_header');
     expect(mocks.query.mock.calls[1][0]).toContain('published_footer = footer');
     expect(mocks.query.mock.calls[1][0]).toContain('published_data_snapshot = data_snapshot');
     expect(mocks.query.mock.calls[1][1]).toEqual([reportId, updatedAt, 'admin@example.com']);
@@ -600,6 +632,7 @@ describe('Market reports API', () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         content: validContent,
+        article_header: { title: 'Draft title' },
         footer: 'Custom draft footer',
         data_snapshot: { periodKey: '2026-10' },
         published_at: null,
@@ -614,6 +647,7 @@ describe('Market reports API', () => {
     expect(page.props.report.language).toBe('zh');
     expect(page.props.report.title).toBeUndefined();
     expect(page.props.report.summary).toBeUndefined();
+    expect(page.props.report.articleHeader).toEqual({ title: 'Draft title' });
     expect(page.props.report.footer).toBe('Custom draft footer');
     expect(mocks.query.mock.calls[0][0]).toContain('FROM north_shore_market_reports');
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'zh']);
@@ -639,6 +673,7 @@ describe('Market reports API', () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         content: validContent,
+        article_header: { title: 'Preview title' },
         footer: 'Draft footer',
         data_snapshot: { periodKey: '2026-10' },
       }],
@@ -652,6 +687,7 @@ describe('Market reports API', () => {
     expect(page.props.report.language).toBe('en');
     expect(page.props.report.title).toBeUndefined();
     expect(page.props.report.summary).toBeUndefined();
+    expect(page.props.report.articleHeader).toEqual({ title: 'Preview title' });
     expect(page.props.report.footer).toBe('Draft footer');
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);
   });
@@ -666,6 +702,7 @@ describe('Market reports API', () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         published_content: validContent,
+        published_article_header: { title: 'Published title' },
         published_footer: 'Published custom footer',
         published_data_snapshot: { periodKey: '2026-10' },
       }],
@@ -681,7 +718,7 @@ describe('Market reports API', () => {
         pageType?: string;
         slug?: string;
         language?: string;
-        report?: { title?: string; summary?: string; footer?: string };
+        report?: { title?: string; summary?: string; articleHeader?: { title?: string }; footer?: string };
       };
     }>;
     const tracker = children.find((child) => child.props.pageType === 'market_report');
@@ -694,6 +731,7 @@ describe('Market reports API', () => {
     });
     expect(article?.props.report?.title).toBeUndefined();
     expect(article?.props.report?.summary).toBeUndefined();
+    expect(article?.props.report?.articleHeader).toEqual({ title: 'Published title' });
     expect(article?.props.report?.footer).toBe('Published custom footer');
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);
@@ -708,6 +746,7 @@ describe('Market reports API', () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         published_content: validContent,
+        published_article_header: { title: 'Chinese title' },
         published_footer: 'Chinese published footer',
         published_data_snapshot: { periodKey: '2026-10' },
       }],
@@ -722,7 +761,7 @@ describe('Market reports API', () => {
       props: {
         pageType?: string;
         language?: string;
-        report?: { language?: string; footer?: string };
+        report?: { language?: string; articleHeader?: { title?: string }; footer?: string };
       };
     }>;
     const tracker = children.find((child) => child.props.pageType === 'market_report');
@@ -730,6 +769,7 @@ describe('Market reports API', () => {
 
     expect(tracker?.props).toMatchObject({ pageType: 'market_report', language: 'zh' });
     expect(article?.props.report?.language).toBe('zh');
+    expect(article?.props.report?.articleHeader).toEqual({ title: 'Chinese title' });
     expect(article?.props.report?.footer).toBe('Chinese published footer');
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'zh']);
   });
@@ -738,6 +778,7 @@ describe('Market reports API', () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         published_content: validContent,
+        published_article_header: { title: 'Published preview title' },
         published_footer: 'Published footer',
         published_data_snapshot: { periodKey: '2026-10' },
       }],
@@ -750,6 +791,7 @@ describe('Market reports API', () => {
     expect(page.props.preview).toBeUndefined();
     expect(page.props.report.title).toBeUndefined();
     expect(page.props.report.summary).toBeUndefined();
+    expect(page.props.report.articleHeader).toEqual({ title: 'Published preview title' });
     expect(page.props.report.footer).toBe('Published footer');
     expect(mocks.query.mock.calls[0][0]).toContain("status = 'published'");
     expect(mocks.query.mock.calls[0][1]).toEqual(['monthly', '2026-10', 'en']);

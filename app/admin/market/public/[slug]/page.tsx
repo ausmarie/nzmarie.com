@@ -25,7 +25,8 @@ export default async function AdminMarketReportPublicPage({
   if (!period || !language) notFound();
 
   const result = await query(
-    `SELECT published_content, published_footer, published_data_snapshot
+    `SELECT published_content, published_article_header, published_footer, published_data_snapshot,
+            published_at
      FROM north_shore_market_reports
      WHERE period_type = $1 AND period_key = $2 AND status = 'published'
        AND language = $3
@@ -42,8 +43,12 @@ export default async function AdminMarketReportPublicPage({
         content: Array.isArray(report.published_content)
           ? report.published_content as ReportEditorContent
           : [],
+        articleHeader: report.published_article_header,
         footer: typeof report.published_footer === 'string' ? report.published_footer : null,
         dataSnapshot: report.published_data_snapshot as MarketReportSnapshot,
+        publishedAt: typeof report.published_at === 'string' || report.published_at instanceof Date
+          ? report.published_at
+          : null,
       }}
     />
   );

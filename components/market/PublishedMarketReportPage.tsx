@@ -25,6 +25,7 @@ export default async function PublishedMarketReportPage({
         report={{
           language,
           content: Array.isArray(report.published_content) ? report.published_content : [],
+          articleHeader: report.published_article_header,
           footer: typeof report.published_footer === 'string' ? report.published_footer : null,
           dataSnapshot: report.published_data_snapshot,
           publishedAt: typeof report.published_at === 'string' || report.published_at instanceof Date

@@ -604,6 +604,7 @@ describe('buildMarketPulseHTML', () => {
     container.innerHTML = buildMarketPulseHTML(baseProps);
     const kpiRow = container.firstElementChild?.firstElementChild as HTMLElement;
 
+    expect(kpiRow.classList.contains('market-pulse-kpi-grid')).toBe(true);
     expect(kpiRow.style.marginBottom).toBe('8px');
   });
 

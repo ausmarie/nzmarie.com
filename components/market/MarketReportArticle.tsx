@@ -1,14 +1,21 @@
 import Header from '@/components/Header';
 import type { ReportEditorContent } from '@/types/report';
 import type { MarketReportLanguage, MarketReportSnapshot } from '@/lib/market-report-data';
-import { ensureMarketReportRichTextContent, ensureMarketReportTitleIcon } from '@/lib/market-report-document';
+import {
+  normalizeMarketReportArticleHeader,
+  marketReportArticleMonthForDate,
+  removeLegacyMarketReportArticleHeader,
+} from '@/lib/market-report-article-header';
+import { ensureMarketReportRichTextContent } from '@/lib/market-report-document';
 import { marketReportUrl } from '@/lib/market-report-url';
 import { buildMarketReportArticleStructuredData } from '@/lib/market-report-seo';
 import BlogArticleFooter from '@/components/blog/BlogArticleFooter';
 import MarketReportStaticContent from './MarketReportStaticContent';
+import MarketReportArticleHeader from './MarketReportArticleHeader';
 
 export interface MarketReportArticleData {
   language?: MarketReportLanguage;
+  articleHeader?: unknown;
   footer?: string | null;
   publishedAt?: string | Date | null;
   content: ReportEditorContent;
@@ -24,8 +31,15 @@ export default function MarketReportArticle({
 }) {
   const { dataSnapshot: snapshot } = report;
   const language = report.language ?? 'en';
-  const content = ensureMarketReportTitleIcon(
+  const articleHeader = normalizeMarketReportArticleHeader(
+    report.articleHeader,
+    snapshot,
+    language,
+    report.publishedAt ? marketReportArticleMonthForDate(report.publishedAt) : undefined,
+  );
+  const content = removeLegacyMarketReportArticleHeader(
     ensureMarketReportRichTextContent(report.content ?? [], snapshot, language),
+    articleHeader,
   );
   const structuredData = !preview
     ? buildMarketReportArticleStructuredData({
@@ -58,6 +72,7 @@ export default function MarketReportArticle({
       )}
       <main className="market-report-body mx-auto max-w-6xl space-y-8 px-4 pt-10 pb-4 sm:px-6 lg:px-8">
         <article className="px-4 pt-6 pb-3 sm:px-8">
+          <MarketReportArticleHeader header={articleHeader} language={language} />
           <MarketReportStaticContent content={content} snapshot={snapshot} language={language} />
         </article>
       </main>

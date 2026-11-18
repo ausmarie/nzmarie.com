@@ -440,7 +440,7 @@ export default function MarketReportStaticContent({
   snapshot: MarketReportSnapshot;
   language: MarketReportLanguage;
 }) {
-  const headingState = { primaryHeadingRendered: false };
+  const headingState = { primaryHeadingRendered: true };
   const contentBlocks = trimTrailingEmptyParagraphs(content) as RichTextBlock[];
   return (
     <div className="market-report-richtext bn-default-styles">

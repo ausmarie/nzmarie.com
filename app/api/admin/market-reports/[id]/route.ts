@@ -3,6 +3,7 @@ import { query } from '@/lib/db';
 import { getMarketReportAdminEmail, isUuid } from '@/lib/market-report-access';
 import { revalidateMarketReportHomePages, revalidatePublishedMarketReport } from '@/lib/market-report-cache';
 import type { MarketReportLanguage, MarketReportPeriodType } from '@/lib/market-report-data';
+import { parseMarketReportArticleHeader } from '@/lib/market-report-article-header';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,6 +48,9 @@ export async function PUT(request: Request, { params }: RouteContext) {
     : typeof body.footer === 'string'
       ? body.footer
       : null;
+  const articleHeader = body.articleHeader === undefined
+    ? null
+    : parseMarketReportArticleHeader(body.articleHeader);
   if (!title || title.length > 255) {
     return NextResponse.json({ success: false, error: 'Title is required and must be 255 characters or fewer.' }, { status: 400 });
   }
@@ -55,6 +59,9 @@ export async function PUT(request: Request, { params }: RouteContext) {
   }
   if (body.footer !== undefined && typeof body.footer !== 'string') {
     return NextResponse.json({ success: false, error: 'Footer must be text.' }, { status: 400 });
+  }
+  if (body.articleHeader !== undefined && !articleHeader) {
+    return NextResponse.json({ success: false, error: 'Article header fields are invalid.' }, { status: 400 });
   }
   if (footer !== null && footer.length > 4000) {
     return NextResponse.json({ success: false, error: 'Footer must be 4,000 characters or fewer.' }, { status: 400 });
@@ -74,12 +81,13 @@ export async function PUT(request: Request, { params }: RouteContext) {
            summary = $3,
            content = $4::jsonb,
            footer = COALESCE($5, footer),
+           article_header = COALESCE($6::jsonb, article_header),
            has_unpublished_changes = CASE WHEN status = 'draft' THEN FALSE ELSE TRUE END,
-           updated_by = $6,
+           updated_by = $7,
            updated_at = NOW()
        WHERE id = $1
        RETURNING updated_at, status, has_unpublished_changes`,
-      [id, title, summary, JSON.stringify(content), footer, email]
+      [id, title, summary, JSON.stringify(content), footer, articleHeader ? JSON.stringify(articleHeader) : null, email]
     );
     if (result.rows.length === 0) return NextResponse.json({ success: false, error: 'Report not found.' }, { status: 404 });
     return NextResponse.json({ success: true, ...result.rows[0] });

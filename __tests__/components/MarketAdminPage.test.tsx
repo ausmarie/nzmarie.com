@@ -49,14 +49,29 @@ const report = {
   ...reportSummary,
   content: [{ type: 'paragraph' }],
   data_snapshot: {
+    periodType: 'monthly',
+    periodKey: '2026-10',
+    periodLabel: 'October 2026',
     source: 'REINZ',
     propertyType: 'Residential',
     generatedAt: '2026-10-01T00:00:00.000Z',
+    metrics: { medianPrice: null, salesCount: 0, daysToSell: null },
+    charts: { medianPrice: [], salesCount: [], daysToSell: [] },
+    dataNotes: '',
+  },
+  article_header: {
+    icon: 'delta',
+    title: 'North Shore Market Report',
+    subtitle: 'October 2026 Housing Market Update (Spring Edition)',
+    author: 'Marie Nian',
+    organization: 'Barfoot & Thompson',
+    readingMinutes: 5,
+    articleMonth: '2026-11',
   },
   footer: 'Existing footer',
 };
 
-function configureFetch(reports = [reportSummary]) {
+function configureFetch(reports = [reportSummary], reportDetails = report) {
   const savedBodies: Record<string, unknown>[] = [];
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input === '/api/admin/analytics/page-views') {
@@ -92,7 +107,7 @@ function configureFetch(reports = [reportSummary]) {
       };
     }
     if (input === `/api/admin/market-reports/${report.id}` && !init?.method) {
-      return { ok: true, json: async () => ({ success: true, report }) };
+      return { ok: true, json: async () => ({ success: true, report: reportDetails }) };
     }
     if (input === `/api/admin/market-reports/${report.id}` && init?.method === 'PUT') {
       savedBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
@@ -180,7 +195,7 @@ describe('MarketAdminPage report editing', () => {
     expect(screen.getByRole('region', { name: 'Report views' }).textContent).toContain('English');
   });
 
-  it('saves footer edits with Ctrl+S while keeping Title out of the editor and Edit dialog', async () => {
+  it('saves article metadata and footer together with Ctrl+S in the Edit dialog', async () => {
     const { savedBodies } = configureFetch();
     render(<MarketAdminPage initialSlug="October-2026" />);
 
@@ -189,8 +204,8 @@ describe('MarketAdminPage report editing', () => {
     expect(edit.compareDocumentPosition(publish) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(edit);
 
-    const footer = screen.getByLabelText('Page footer');
-    expect(screen.queryByLabelText('Title')).toBeNull();
+    const footer = screen.getByLabelText('Footer');
+    expect(screen.getByLabelText('Article title')).toBeTruthy();
     fireEvent.change(footer, { target: { value: 'Updated footer' } });
     fireEvent.keyDown(window, { key: 's', ctrlKey: true });
 
@@ -200,17 +215,58 @@ describe('MarketAdminPage report editing', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('saves footer edits from the Edit dialog without exposing a Title field', async () => {
+  it('saves header and footer edits together from the Edit dialog', async () => {
     const { savedBodies } = configureFetch();
     render(<MarketAdminPage initialSlug="October-2026" />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    expect(screen.queryByLabelText('Title')).toBeNull();
-    fireEvent.change(screen.getByLabelText('Page footer'), { target: { value: 'Updated footer' } });
+    fireEvent.change(screen.getByLabelText('Article title'), { target: { value: 'Updated article title' } });
+    fireEvent.change(screen.getByLabelText('Footer'), { target: { value: 'Updated footer' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(savedBodies).toHaveLength(1));
     expect(savedBodies[0].title).toBe('October 2026');
     expect(savedBodies[0].footer).toBe('Updated footer');
+    expect(savedBodies[0].articleHeader).toMatchObject({ title: 'Updated article title' });
+  });
+
+  it('saves bilingual article header fields separately from the page footer', async () => {
+    const { savedBodies } = configureFetch();
+    render(<MarketAdminPage initialSlug="October-2026" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByLabelText('Article title'), { target: { value: 'North Shore in October' } });
+    fireEvent.change(screen.getByLabelText('Subtitle'), { target: { value: 'Spring market update' } });
+    fireEvent.change(screen.getByLabelText('Author'), { target: { value: 'Marie Nian' } });
+    fireEvent.change(screen.getByLabelText('Reading time (minutes)'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Footer'), { target: { value: 'Updated from combined dialog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(savedBodies).toHaveLength(1));
+    expect(savedBodies[0].articleHeader).toMatchObject({
+      title: 'North Shore in October',
+      subtitle: 'Spring market update',
+      author: 'Marie Nian',
+      readingMinutes: 7,
+      articleMonth: '2026-11',
+    });
+    expect(savedBodies[0].footer).toBe('Updated from combined dialog');
+    expect(screen.queryByRole('button', { name: 'Edit header' })).toBeNull();
+  });
+
+  it('localizes the article header editor for Chinese reports', async () => {
+    configureFetch(
+      [{ ...reportSummary, language: 'zh' }],
+      { ...report, ...reportSummary, language: 'zh' },
+    );
+    render(<MarketAdminPage initialSlug="October-2026" initialLanguage="zh" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText('文章标题')).toBeTruthy();
+    expect(screen.getByLabelText('文章月份')).toBeTruthy();
+    expect(screen.getByLabelText('阅读时间（分钟）')).toBeTruthy();
+    expect(screen.getByLabelText('页脚')).toBeTruthy();
+    const labels = [...screen.getByRole('dialog').querySelectorAll('label')].map((label) => label.textContent);
+    expect(labels[labels.length - 1]).toContain('页脚');
   });
 });

@@ -7,7 +7,12 @@ import { Trash2 } from 'lucide-react';
 import MarketReportEditor from '@/components/market/MarketReportEditor';
 import MarketGenerateReportModal from '@/components/market/MarketGenerateReportModal';
 import type { MarketReportLanguage, MarketReportSnapshot, MarketReportPeriodType } from '@/lib/market-report-data';
-import { ensureMarketReportTitleIcon, refreshMarketReportGeneratedBlocks } from '@/lib/market-report-document';
+import { refreshMarketReportGeneratedBlocks } from '@/lib/market-report-document';
+import {
+  normalizeMarketReportArticleHeader,
+  removeLegacyMarketReportArticleHeader,
+  type MarketReportArticleHeader,
+} from '@/lib/market-report-article-header';
 import type { PageViewAnalytics } from '@/lib/page-view-analytics';
 import { pageViewPeriodLabel } from '@/lib/page-view-analytics';
 import {
@@ -36,10 +41,20 @@ interface MarketReportSummary {
 interface MarketReport extends MarketReportSummary {
   content: ReportEditorContent;
   data_snapshot: MarketReportSnapshot;
+  article_header: unknown;
   footer: string | null;
 }
 
 const buttonClass = 'rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+const EMPTY_ARTICLE_HEADER: MarketReportArticleHeader = {
+  icon: 'delta',
+  title: '',
+  subtitle: '',
+  author: '',
+  organization: '',
+  readingMinutes: 5,
+  articleMonth: '',
+};
 
 function periodLabel(report: Pick<MarketReportSummary, 'period_type' | 'period_key'>): string {
   if (report.period_type === 'quarterly') {
@@ -98,7 +113,9 @@ export default function MarketAdminPage({
   const [summary, setSummary] = useState('');
   const [footer, setFooter] = useState('');
   const [footerDraft, setFooterDraft] = useState('');
-  const [footerDialogOpen, setFooterDialogOpen] = useState(false);
+  const [articleHeader, setArticleHeader] = useState<MarketReportArticleHeader>(EMPTY_ARTICLE_HEADER);
+  const [articleHeaderDraft, setArticleHeaderDraft] = useState<MarketReportArticleHeader>(EMPTY_ARTICLE_HEADER);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [pageViews, setPageViews] = useState<PageViewAnalytics | null>(null);
   const [pageViewsError, setPageViewsError] = useState<string | null>(null);
   const [pageViewsLoading, setPageViewsLoading] = useState(true);
@@ -142,19 +159,29 @@ export default function MarketAdminPage({
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load report.');
       const report = data.report as MarketReport;
+      const loadedHeader = normalizeMarketReportArticleHeader(
+        report.article_header,
+        report.data_snapshot,
+        report.language,
+      );
+      const loadedContent = refreshMarketReportGeneratedBlocks(
+        initialContent(report.content),
+        report.data_snapshot,
+        report.language,
+      );
       setActive(report);
       setTitle(report.title);
       setSummary(report.summary || '');
       setFooter(report.footer ?? getDefaultMarketReportFooter(report.data_snapshot, report.language));
-      setContent(ensureMarketReportTitleIcon(
-        refreshMarketReportGeneratedBlocks(initialContent(report.content), report.data_snapshot, report.language),
-      ));
+      setArticleHeader(loadedHeader);
+      setArticleHeaderDraft(loadedHeader);
+      setContent(removeLegacyMarketReportArticleHeader(loadedContent, loadedHeader));
       setEditorRevision((revision) => revision + 1);
       draftRevisionRef.current = 0;
       setDraftRevision(0);
       setSavedRevision(0);
       setSaveStatus('saved');
-      setFooterDialogOpen(false);
+      setEditDialogOpen(false);
       return report;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Failed to load report.');
@@ -236,11 +263,13 @@ export default function MarketAdminPage({
   const handleSave = useCallback(async ({
     titleToSave = title,
     footerToSave = footer,
+    articleHeaderToSave = articleHeader,
     notify = true,
     refreshReports = notify,
   }: {
     titleToSave?: string;
     footerToSave?: string;
+    articleHeaderToSave?: MarketReportArticleHeader;
     notify?: boolean;
     refreshReports?: boolean;
   } = {}) => {
@@ -259,6 +288,7 @@ export default function MarketAdminPage({
           title: titleToSave,
           summary,
           footer: footerToSave,
+          articleHeader: articleHeaderToSave,
           content: contentToSave,
         }),
       });
@@ -266,6 +296,7 @@ export default function MarketAdminPage({
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to save report.');
       setTitle(titleToSave);
       setFooter(footerToSave);
+      setArticleHeader(articleHeaderToSave);
       if (notify) setNotice('Draft saved.');
       if (revisionAtSave === draftRevisionRef.current) {
         setSavedRevision(revisionAtSave);
@@ -283,35 +314,37 @@ export default function MarketAdminPage({
       saveInProgressRef.current = false;
       setWorking(false);
     }
-  }, [active, content, footer, loadList, summary, title]);
+  }, [active, articleHeader, content, footer, loadList, summary, title]);
 
   useEffect(() => {
-    if (!active || loadingReport || working || footerDialogOpen || draftRevision === savedRevision) return;
+    if (!active || loadingReport || working || editDialogOpen || draftRevision === savedRevision) return;
     const timeout = window.setTimeout(() => {
       void handleSave({ notify: false, refreshReports: false });
     }, 800);
     return () => window.clearTimeout(timeout);
-  }, [active, draftRevision, footer, footerDialogOpen, handleSave, loadingReport, savedRevision, working]);
+  }, [active, draftRevision, editDialogOpen, footer, handleSave, loadingReport, savedRevision, working]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!active || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
       event.preventDefault();
       void handleSave({
-        footerToSave: footerDialogOpen ? footerDraft : footer,
+        footerToSave: editDialogOpen ? footerDraft : footer,
+        articleHeaderToSave: editDialogOpen ? articleHeaderDraft : articleHeader,
       }).then((saved) => {
-        if (saved && footerDialogOpen) {
-          setFooterDialogOpen(false);
+        if (saved && editDialogOpen) {
+          setArticleHeader(articleHeaderDraft);
+          setEditDialogOpen(false);
         }
       });
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [active, footer, footerDialogOpen, footerDraft, handleSave]);
+  }, [active, articleHeader, articleHeaderDraft, editDialogOpen, footer, footerDraft, handleSave]);
 
-  const saveFooter = async () => {
-    if (await handleSave({ footerToSave: footerDraft })) {
-      setFooterDialogOpen(false);
+  const saveEdits = async () => {
+    if (await handleSave({ footerToSave: footerDraft, articleHeaderToSave: articleHeaderDraft })) {
+      setEditDialogOpen(false);
     }
   };
 
@@ -335,8 +368,9 @@ export default function MarketAdminPage({
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || 'Failed to regenerate Analytics data.');
       const currentContent = getContentRef.current?.() ?? content;
-      setContent(ensureMarketReportTitleIcon(
+      setContent(removeLegacyMarketReportArticleHeader(
         refreshMarketReportGeneratedBlocks(currentContent, data.snapshot, active.language),
+        articleHeader,
       ));
       setEditorRevision((revision) => revision + 1);
       markDraftChanged();
@@ -406,6 +440,8 @@ export default function MarketAdminPage({
         setTitle('');
         setSummary('');
         setFooter('');
+        setArticleHeader(EMPTY_ARTICLE_HEADER);
+        setArticleHeaderDraft(EMPTY_ARTICLE_HEADER);
         setContent([{ type: 'paragraph' }]);
       }
       setNotice('Report deleted.');
@@ -670,7 +706,11 @@ export default function MarketAdminPage({
                   )}
                   <button
                     type="button"
-                    onClick={() => { setFooterDraft(footer); setFooterDialogOpen(true); }}
+                    onClick={() => {
+                      setArticleHeaderDraft(articleHeader);
+                      setFooterDraft(footer);
+                      setEditDialogOpen(true);
+                    }}
                     disabled={working || loadingReport}
                     className={`${buttonClass} border border-slate-300 bg-white text-slate-700 hover:bg-slate-50`}
                   >
@@ -745,43 +785,146 @@ export default function MarketAdminPage({
           )}
         </div>
       </main>
-      {footerDialogOpen && (
+      {editDialogOpen && active && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <section
             role="dialog"
             aria-modal="true"
-            aria-labelledby="market-report-footer-title"
-            className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl"
+            aria-labelledby="market-report-edit-title"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
           >
-            <h2 id="market-report-footer-title" className="text-lg font-semibold text-slate-900">Edit Footer</h2>
-            <p className="mt-1 text-sm text-slate-600">Update the page footer. Use a new line for each paragraph.</p>
-            <label htmlFor="market-report-footer" className="mb-1 mt-4 block text-sm font-medium text-slate-700">
-              Page footer
-            </label>
-            <textarea
-              id="market-report-footer"
-              value={footerDraft}
-              onChange={(event) => setFooterDraft(event.target.value)}
-              maxLength={4000}
-              rows={7}
-              className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            />
-            <div className="mt-4 flex justify-end gap-2">
+            <h2 id="market-report-edit-title" className="text-lg font-semibold text-slate-900">
+              {active.language === 'zh' ? '编辑报告' : 'Edit report'}
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {active.language === 'zh'
+                ? '编辑文章标题、作者信息和页面页脚。'
+                : 'Edit the article title, metadata, and page footer.'}
+            </p>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-medium text-slate-700">
+                {active.language === 'zh' ? '文章图标' : 'Article icon'}
+                <select
+                  value={articleHeaderDraft.icon}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    icon: event.target.value === 'none' ? 'none' : 'delta',
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                >
+                  <option value="delta">{active.language === 'zh' ? '显示品牌图标' : 'Show brand icon'}</option>
+                  <option value="none">{active.language === 'zh' ? '不显示' : 'None'}</option>
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                {active.language === 'zh' ? '文章月份' : 'Article month'}
+                <input
+                  type="month"
+                  value={articleHeaderDraft.articleMonth}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    articleMonth: event.target.value,
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700 sm:col-span-2">
+                {active.language === 'zh' ? '文章标题' : 'Article title'}
+                <input
+                  value={articleHeaderDraft.title}
+                  maxLength={255}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    title: event.target.value,
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700 sm:col-span-2">
+                {active.language === 'zh' ? '副标题' : 'Subtitle'}
+                <input
+                  value={articleHeaderDraft.subtitle}
+                  maxLength={500}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    subtitle: event.target.value,
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                {active.language === 'zh' ? '作者' : 'Author'}
+                <input
+                  value={articleHeaderDraft.author}
+                  maxLength={120}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    author: event.target.value,
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">
+                {active.language === 'zh' ? '机构' : 'Organization'}
+                <input
+                  value={articleHeaderDraft.organization}
+                  maxLength={160}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    organization: event.target.value,
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium text-slate-700 sm:col-span-2">
+                {active.language === 'zh' ? '阅读时间（分钟）' : 'Reading time (minutes)'}
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={articleHeaderDraft.readingMinutes}
+                  onChange={(event) => setArticleHeaderDraft({
+                    ...articleHeaderDraft,
+                    readingMinutes: Number(event.target.value),
+                  })}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+            </div>
+            <div className="mt-5 border-t border-slate-200 pt-4">
+              <label htmlFor="market-report-footer" className="mb-1 block text-sm font-medium text-slate-700">
+                {active.language === 'zh' ? '页脚' : 'Footer'}
+              </label>
+              <p className="mb-2 text-xs text-slate-500">
+                {active.language === 'zh' ? '每段内容另起一行。' : 'Use a new line for each paragraph.'}
+              </p>
+              <textarea
+                id="market-report-footer"
+                value={footerDraft}
+                onChange={(event) => setFooterDraft(event.target.value)}
+                maxLength={4000}
+                rows={7}
+                className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setFooterDialogOpen(false)}
+                onClick={() => setEditDialogOpen(false)}
                 disabled={working}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                Cancel
+                {active.language === 'zh' ? '取消' : 'Cancel'}
               </button>
               <button
                 type="button"
-                onClick={() => void saveFooter()}
+                onClick={() => void saveEdits()}
                 disabled={working}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {working ? 'Saving…' : 'Save'}
+                {working
+                  ? active.language === 'zh' ? '保存中…' : 'Saving…'
+                  : active.language === 'zh' ? '保存' : 'Save'}
               </button>
             </div>
           </section>

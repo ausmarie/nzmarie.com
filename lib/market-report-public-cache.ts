@@ -9,12 +9,14 @@ import {
 } from '@/lib/market-report-data';
 import { marketReportSlug, parseMarketReportSlug } from '@/lib/market-report-url';
 import type { ReportEditorContent } from '@/types/report';
+import type { MarketReportArticleHeader } from '@/lib/market-report-article-header';
 
 export interface PublishedMarketReport {
   period_type: MarketReportPeriodType;
   period_key: string;
   language: MarketReportLanguage;
   published_content: ReportEditorContent | null;
+  published_article_header: MarketReportArticleHeader | null;
   published_footer: string | null;
   published_data_snapshot: MarketReportSnapshot | null;
   published_at: string | Date | null;
@@ -60,7 +62,7 @@ export async function getPublishedMarketReport(
   return unstable_cache(
     async () => {
       const result = await query<PublishedMarketReport>(
-        `SELECT period_type, period_key, language, published_content, published_footer,
+        `SELECT period_type, period_key, language, published_content, published_article_header, published_footer,
                 published_data_snapshot, published_at
          FROM north_shore_market_reports
          WHERE period_type = $1 AND period_key = $2 AND status = 'published'
