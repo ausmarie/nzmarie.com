@@ -17,6 +17,7 @@ import BlogAdminPage from '@/components/blog/BlogAdminPage';
 const category = {
   id: '22222222-2222-4222-8222-222222222222',
   name: 'Buy',
+  name_cn: '买房',
   slug: 'buy',
   description: '',
   post_count: 0,

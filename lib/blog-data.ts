@@ -5,6 +5,7 @@ export type BlogLanguage = 'en' | 'cn';
 export interface BlogCategory {
   id: string;
   name: string;
+  name_cn: string;
   slug: string;
   description: string;
   post_count?: number;
@@ -35,6 +36,7 @@ export interface BlogPost extends BlogPostSummary {
 
 export interface BlogCategoryInput {
   name: string;
+  nameCn: string;
   slug: string;
   description: string;
 }
@@ -51,9 +53,31 @@ export function blogLanguageLabel(language: BlogLanguage): string {
   return language === 'en' ? 'English' : '中文';
 }
 
+export function localizedBlogCategoryName(
+  category: { name: string; name_cn: string; slug: string },
+  language: BlogLanguage,
+): string {
+  if (language === 'en') return category.name;
+  if (category.name_cn.trim()) return category.name_cn;
+  if (category.slug === 'buy') return '买房';
+  if (category.slug === 'sell') return '卖房';
+  return category.name;
+}
+
+export function defaultBlogCategoryNameCn(slug: string, name: string): string {
+  if (slug === 'buy') return '买房';
+  if (slug === 'sell') return '卖房';
+  return name;
+}
+
 export function blogPreviewPath(slug: string, language: BlogLanguage): string {
   const basePath = `/admin/blog/preview/${encodeURIComponent(slug)}`;
   return language === 'cn' ? `${basePath}/cn` : basePath;
+}
+
+export function blogArticlePath(slug: string, language: BlogLanguage): string {
+  const path = `/blog/${encodeURIComponent(slug)}`;
+  return language === 'cn' ? `${path}/cn` : path;
 }
 
 export function slugifyBlogValue(value: string): string {
@@ -82,11 +106,13 @@ export function parseBlogCategoryInput(body: unknown): BlogCategoryInput | null 
   if (!body || typeof body !== 'object') return null;
   const input = body as Record<string, unknown>;
   const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const nameCn = typeof input.nameCn === 'string' ? input.nameCn.trim() : '';
   const rawSlug = typeof input.slug === 'string' ? input.slug.trim() : '';
   const slug = slugifyBlogValue(rawSlug || name);
   const description = typeof input.description === 'string' ? input.description.trim() : '';
-  if (!name || name.length > 80 || !slug || slug.length > 100 || description.length > 500) return null;
-  return { name, slug, description };
+  if (!name || name.length > 80 || !nameCn || nameCn.length > 80
+    || !slug || slug.length > 100 || description.length > 500) return null;
+  return { name, nameCn, slug, description };
 }
 
 export function isValidBlogSlug(value: string): boolean {

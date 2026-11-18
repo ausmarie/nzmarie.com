@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getBlogAdminEmail, isUuid } from '@/lib/blog-access';
 import { createBlogArticleSlug, isValidBlogMonth } from '@/lib/blog-data';
+import { revalidatePublishedBlogArticle } from '@/lib/blog-public-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -157,8 +158,42 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
   if (!isUuid(id)) return NextResponse.json({ success: false, error: 'Invalid article id.' }, { status: 400 });
 
   try {
+    const existing = await query<{
+      slug: string;
+      published_slug: string | null;
+      language: 'en' | 'cn';
+      translation_group_id: string;
+    }>(
+      `SELECT slug, published_slug, language, translation_group_id
+       FROM blog_posts
+       WHERE id = $1`,
+      [id],
+    );
+    const post = existing.rows[0];
+    if (!post) return NextResponse.json({ success: false, error: 'Blog article not found.' }, { status: 404 });
+    const siblingResult = post.published_slug
+      ? await query<{ language: 'en' | 'cn'; published_slug: string }>(
+        `SELECT language, published_slug
+         FROM blog_posts
+         WHERE translation_group_id = $1
+           AND id <> $2
+           AND status = 'published'
+           AND published_slug IS NOT NULL
+         LIMIT 1`,
+        [post.translation_group_id, id],
+      )
+      : { rows: [] };
     const result = await query(`DELETE FROM blog_posts WHERE id = $1 RETURNING id`, [id]);
     if (!result.rows[0]) return NextResponse.json({ success: false, error: 'Blog article not found.' }, { status: 404 });
+    if (post.published_slug) {
+      revalidatePublishedBlogArticle(
+        post.language,
+        post.published_slug,
+        siblingResult.rows[0]
+          ? { language: siblingResult.rows[0].language, slug: siblingResult.rows[0].published_slug }
+          : null,
+      );
+    }
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Failed to delete Blog article:', error);

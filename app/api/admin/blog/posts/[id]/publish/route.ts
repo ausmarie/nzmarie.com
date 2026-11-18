@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getBlogAdminEmail, isUuid } from '@/lib/blog-access';
-import { hasBlogArticleText, isValidBlogSlug } from '@/lib/blog-data';
+import { hasBlogArticleText, isValidBlogSlug, type BlogLanguage } from '@/lib/blog-data';
+import { revalidatePublishedBlogArticle } from '@/lib/blog-public-cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,8 +14,22 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!isUuid(id)) return NextResponse.json({ success: false, error: 'Invalid article id.' }, { status: 400 });
 
   try {
-    const existing = await query(
-      `SELECT slug, title, summary, content, category_id, author, article_month, reading_minutes,
+    const existing = await query<{
+      slug: string;
+      published_slug: string | null;
+      language: BlogLanguage;
+      translation_group_id: string;
+      title: string;
+      summary: string;
+      content: unknown;
+      category_id: string | null;
+      author: string;
+      article_month: string;
+      reading_minutes: number | string;
+      updated_at: string;
+    }>(
+      `SELECT slug, published_slug, language, translation_group_id,
+              title, summary, content, category_id, author, article_month, reading_minutes,
               updated_at::text AS updated_at
        FROM blog_posts
        WHERE id = $1`,
@@ -41,6 +56,20 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ success: false, error: 'Add article text before publishing.' }, { status: 400 });
     }
 
+    const siblingResult = await query<{
+      language: 'en' | 'cn';
+      published_slug: string;
+    }>(
+      `SELECT language, published_slug
+       FROM blog_posts
+       WHERE translation_group_id = $1
+         AND id <> $2
+         AND status = 'published'
+         AND published_slug IS NOT NULL
+       LIMIT 1`,
+      [post.translation_group_id, id],
+    );
+    const translated = siblingResult.rows[0];
     const published = await query(
       `UPDATE blog_posts
        SET status = 'published',
@@ -63,6 +92,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     if (!published.rows[0]) {
       return NextResponse.json({ success: false, error: 'The article changed while publishing. Reload and try again.' }, { status: 409 });
     }
+    revalidatePublishedBlogArticle(
+      post.language,
+      post.slug,
+      translated ? { language: translated.language, slug: translated.published_slug } : null,
+      post.published_slug,
+    );
     return NextResponse.json({ success: true, ...published.rows[0] });
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === '23505') {

@@ -4,11 +4,18 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   query: vi.fn(),
   isSuperAdmin: vi.fn(),
+  revalidateTag: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
 
 vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
 vi.mock('@/lib/db', () => ({ query: mocks.query }));
 vi.mock('@/lib/permissions', () => ({ isSuperAdmin: mocks.isSuperAdmin }));
+vi.mock('next/cache', () => ({
+  unstable_cache: (callback: () => unknown) => callback,
+  revalidateTag: mocks.revalidateTag,
+  revalidatePath: mocks.revalidatePath,
+}));
 
 import { GET as getCategories, POST as createCategory } from '@/app/api/admin/blog/categories/route';
 import { DELETE as deleteCategory, PUT as updateCategory } from '@/app/api/admin/blog/categories/[id]/route';
@@ -39,6 +46,8 @@ describe('Blog admin APIs', () => {
     mocks.auth.mockReset();
     mocks.query.mockReset();
     mocks.isSuperAdmin.mockReset();
+    mocks.revalidateTag.mockReset();
+    mocks.revalidatePath.mockReset();
     mocks.auth.mockResolvedValue({ user: { email: 'admin@example.com' } });
     mocks.isSuperAdmin.mockReturnValue(true);
   });
@@ -55,12 +64,22 @@ describe('Blog admin APIs', () => {
   it('normalizes and stores new categories', async () => {
     mocks.query.mockResolvedValueOnce({ rows: [{ id: categoryId, name: 'Buying Advice', slug: 'buying-advice' }] });
 
-    const response = await createCategory(request({ name: 'Buying Advice', description: 'Buyer guidance' }));
+    const response = await createCategory(request({
+      name: 'Buying Advice',
+      nameCn: '买房建议',
+      description: 'Buyer guidance',
+    }));
     const body = await response.json();
 
     expect(response.status).toBe(201);
     expect(body.category.slug).toBe('buying-advice');
-    expect(mocks.query.mock.calls[0][1]).toEqual(['Buying Advice', 'buying-advice', 'Buyer guidance', 'admin@example.com']);
+    expect(mocks.query.mock.calls[0][1]).toEqual([
+      'Buying Advice',
+      '买房建议',
+      'buying-advice',
+      'Buyer guidance',
+      'admin@example.com',
+    ]);
   });
 
   it('prevents deleting categories that still have articles', async () => {
@@ -81,7 +100,12 @@ describe('Blog admin APIs', () => {
     });
 
     const response = await updateCategory(
-      request({ name: 'Buying Tips', slug: 'Buying Tips', description: 'Buyer advice' }, 'PUT'),
+      request({
+        name: 'Buying Tips',
+        nameCn: '买房技巧',
+        slug: 'Buying Tips',
+        description: 'Buyer advice',
+      }, 'PUT'),
       context(categoryId),
     );
     const body = await response.json();
@@ -288,6 +312,9 @@ describe('Blog admin APIs', () => {
     mocks.query.mockResolvedValueOnce({
       rows: [{
         slug: 'buying-guide',
+        published_slug: null,
+        language: 'en',
+        translation_group_id: id,
         title: 'Buying guide',
         summary: '',
         content: [],
@@ -312,6 +339,9 @@ describe('Blog admin APIs', () => {
       .mockResolvedValueOnce({
         rows: [{
           slug: 'buying-guide',
+          published_slug: null,
+          language: 'en',
+          translation_group_id: id,
           title: 'Buying guide',
           summary: 'A practical guide',
           content: articleContent,
@@ -321,13 +351,15 @@ describe('Blog admin APIs', () => {
           updated_at: '2026-11-01T00:00:00.000Z',
         }],
       })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id, status: 'published', published_at: '2026-11-01T01:00:00.000Z' }] });
 
     const response = await publishPost(new Request('http://localhost'), context());
 
     expect(response.status).toBe(200);
-    expect(mocks.query.mock.calls[1][0]).toContain('published_content = content');
-    expect(mocks.query.mock.calls[1][0]).toContain('published_reading_minutes = reading_minutes');
-    expect(mocks.query.mock.calls[1][0]).toContain('updated_at = $2');
+    expect(mocks.query.mock.calls[2][0]).toContain('published_content = content');
+    expect(mocks.query.mock.calls[2][0]).toContain('published_reading_minutes = reading_minutes');
+    expect(mocks.query.mock.calls[2][0]).toContain('updated_at = $2');
+    expect(mocks.revalidateTag).toHaveBeenCalledWith('published-blog-list:en');
   });
 });

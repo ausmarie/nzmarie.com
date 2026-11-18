@@ -50,11 +50,13 @@ body {
   color: #0f172a !important;
 }
 
-.market-report-richtext.bn-default-styles {
+.market-report-richtext.bn-default-styles,
+.blog-public-richtext.bn-default-styles {
   font-size: 18px;
 }
 
-.market-report-richtext.bn-default-styles p.bn-inline-content:not(.market-report-empty-paragraph) {
+.market-report-richtext.bn-default-styles p.bn-inline-content:not(.market-report-empty-paragraph),
+.blog-public-richtext.bn-default-styles p.bn-inline-content:not(.market-report-empty-paragraph) {
   font-size: 16px;
   line-height: 1.7;
 }
@@ -98,6 +100,21 @@ body {
 .market-report-richtext .market-report-heading-level-1 {
   font-size: 3em;
   line-height: 1.5;
+}
+
+.blog-public-richtext,
+.blog-public-richtext :not(.market-report-pulse, .market-report-pulse *) {
+  color: #0f172a !important;
+}
+
+.blog-public-richtext .market-report-heading-level-1 {
+  font-size: 3em;
+  line-height: 1.5;
+}
+
+.blog-public-richtext .bn-block-content[data-native-list-marker="true"]::before {
+  content: none !important;
+  display: none !important;
 }
 
 /* Custom styles for Marie website */

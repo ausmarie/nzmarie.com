@@ -11,7 +11,7 @@ export async function GET() {
 
   try {
     const result = await query(
-      `SELECT c.id, c.name, c.slug, c.description, c.sort_order,
+      `SELECT c.id, c.name, c.name_cn, c.slug, c.description, c.sort_order,
               COUNT(p.id)::int AS post_count
        FROM blog_categories c
        LEFT JOIN blog_posts p ON p.category_id = c.id
@@ -37,15 +37,15 @@ export async function POST(request: Request) {
   }
   const category = parseBlogCategoryInput(body);
   if (!category) {
-    return NextResponse.json({ success: false, error: 'Enter a category name, valid slug, and description up to 500 characters.' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'Enter English and Chinese category names, a valid slug, and a description up to 500 characters.' }, { status: 400 });
   }
 
   try {
     const result = await query(
-      `INSERT INTO blog_categories (name, slug, description, created_by, updated_by)
-       VALUES ($1, $2, $3, $4, $4)
-       RETURNING id, name, slug, description, sort_order`,
-      [category.name, category.slug, category.description, email]
+      `INSERT INTO blog_categories (name, name_cn, slug, description, created_by, updated_by)
+       VALUES ($1, $2, $3, $4, $5, $5)
+       RETURNING id, name, name_cn, slug, description, sort_order`,
+      [category.name, category.nameCn, category.slug, category.description, email]
     );
     return NextResponse.json({ success: true, category: result.rows[0] }, { status: 201 });
   } catch (error) {

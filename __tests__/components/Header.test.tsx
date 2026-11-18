@@ -68,13 +68,36 @@ describe('public Header Market Reports link', () => {
     expect(reportsLink.className).toContain('text-blue-600');
   });
 
-  it.each(['en', 'zh'] as const)('hides the Blog link from desktop and mobile navigation (%s)', (language) => {
+  it.each([
+    ['en', 'Blog', '/blog'],
+    ['zh', '博客', '/blog/cn'],
+  ] as const)('links to the localized Blog from desktop and mobile navigation (%s)', (language, label, href) => {
     vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
 
     render(<Header lang={language} />);
 
-    expect(screen.queryByRole('link', { name: /blog|博客/i })).toBeNull();
+    const links = screen.getAllByRole('link', { name: label });
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute('href')).toBe(href);
+    const contactLink = screen.getByRole('link', { name: language === 'en' ? 'Contact' : '联系我' });
+    const languageLink = screen.getAllByRole('link', { name: language === 'en' ? '中文' : 'English' })[0];
+    expect(Boolean(contactLink.compareDocumentPosition(links[0]) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(links[0].compareDocumentPosition(languageLink) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
     fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }));
-    expect(screen.queryByRole('link', { name: /blog|博客/i })).toBeNull();
+    const mobileLinks = screen.getAllByRole('link', { name: label });
+    expect(mobileLinks).toHaveLength(2);
+    expect(mobileLinks.every((link) => link.getAttribute('href') === href)).toBe(true);
+  });
+
+  it('uses the translated published article path when switching language from a Blog article', () => {
+    mocks.usePathname.mockReturnValue('/blog/selling-your-home');
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+
+    render(<Header lang="en" blogLanguageHref="/blog/卖房指南/cn" />);
+
+    expect(screen.getAllByRole('link', { name: '中文' }).every(
+      (link) => link.getAttribute('href') === '/blog/卖房指南/cn',
+    )).toBe(true);
   });
 });

@@ -1,0 +1,2 @@
+ALTER TABLE blog_categories
+  ADD COLUMN IF NOT EXISTS name_cn VARCHAR(80) NOT NULL DEFAULT '';

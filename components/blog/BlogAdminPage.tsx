@@ -10,6 +10,7 @@ import {
   blogLanguageLabel,
   blogPreviewPath,
   currentBlogMonth,
+  defaultBlogCategoryNameCn,
   initialBlogContent,
   monthInputValue,
   monthLabel,
@@ -26,14 +27,17 @@ const buttonClass = 'rounded-lg px-4 py-2 text-sm font-medium transition-colors 
 
 interface CategoryDraft {
   name: string;
+  nameCn: string;
   slug: string;
   description: string;
 }
 
 function categoryDraftFrom(category?: BlogCategory): CategoryDraft {
+  const slug = category?.slug || '';
   return {
     name: category?.name || '',
-    slug: category?.slug || '',
+    nameCn: category?.name_cn || defaultBlogCategoryNameCn(slug, category?.name || ''),
+    slug,
     description: category?.description || '',
   };
 }
@@ -940,6 +944,16 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                 />
               </label>
               <label className="text-sm font-medium text-slate-700">
+                Chinese category name
+                <input
+                  required
+                  value={categoryDraft.nameCn}
+                  onChange={(event) => setCategoryDraft((current) => ({ ...current, nameCn: event.target.value }))}
+                  maxLength={80}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-normal"
+                />
+              </label>
+              <label className="text-sm font-medium text-slate-700">
                 URL slug
                 <input
                   required
@@ -976,6 +990,7 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                 <div key={category.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-800">{category.name}</p>
+                    <p className="truncate text-xs text-slate-600">{category.name_cn}</p>
                     <p className="text-xs text-slate-500">/{category.slug} · {category.post_count ?? 0} articles</p>
                   </div>
                   <div className="flex shrink-0 gap-2">

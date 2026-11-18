@@ -12,9 +12,11 @@ import { parseMarketReportSlug } from "@/lib/market-report-url";
 export default function Header({
   lang = "en",
   marketReportsHref,
+  blogLanguageHref,
 }: {
   lang?: Language;
   marketReportsHref?: string;
+  blogLanguageHref?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("home");
@@ -23,11 +25,22 @@ export default function Header({
   const homeHref = lang === "zh" ? "/cn" : "/";
   const marketReportSlug = pathname?.match(/^\/market-reports\/([^/]+)(?:\/cn)?$/)?.[1];
   const marketReportsActive = pathname?.startsWith('/market-reports') ?? false;
-  const langHref = marketReportSlug && parseMarketReportSlug(marketReportSlug)
-    ? lang === "zh"
-      ? `/market-reports/${marketReportSlug}`
-      : `/market-reports/${marketReportSlug}/cn`
-    : t.langLink;
+  const blogActive = pathname?.startsWith('/blog') ?? false;
+  const blogHref = lang === 'zh' ? '/blog/cn' : '/blog';
+  const defaultBlogLanguageHref = pathname === '/blog'
+    ? '/blog/cn'
+    : pathname === '/blog/cn'
+      ? '/blog'
+      : lang === 'zh'
+        ? '/blog'
+        : '/blog/cn';
+  const langHref = blogActive
+    ? blogLanguageHref || defaultBlogLanguageHref
+    : marketReportSlug && parseMarketReportSlug(marketReportSlug)
+      ? lang === "zh"
+        ? `/market-reports/${marketReportSlug}`
+        : `/market-reports/${marketReportSlug}/cn`
+      : t.langLink;
 
   useEffect(() => {
     const sections = ["home", "about", "appraisal", "service", "properties", "contact"];
@@ -119,6 +132,12 @@ export default function Header({
               {t.contact}
             </Link>
             <Link
+              href={blogHref}
+              className={`hover:text-blue-600 transition-colors duration-300 ${blogActive ? "text-blue-600 font-semibold" : "text-gray-700"}`}
+            >
+              {t.blog}
+            </Link>
+            <Link
               href={langHref}
               className="ml-4 px-3 py-1 rounded-full border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all duration-300 font-semibold"
             >
@@ -195,6 +214,13 @@ export default function Header({
               className={linkCls("contact")}
             >
               {t.contact}
+            </Link>
+            <Link
+              href={blogHref}
+              onClick={() => setOpen(false)}
+              className={`hover:text-blue-600 transition-colors duration-300 ${blogActive ? "text-blue-600 font-semibold" : "text-gray-700"}`}
+            >
+              {t.blog}
             </Link>
           </div>
         </div>
