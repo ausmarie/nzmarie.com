@@ -1,6 +1,6 @@
 import type { Redis } from '@upstash/redis';
 import { query } from '@/lib/db';
-import { isValidBlogSlug } from '@/lib/blog-data';
+import { blogArticlePath, isValidBlogSlug } from '@/lib/blog-data';
 import { marketReportUrl, parseMarketReportSlug } from '@/lib/market-report-url';
 import { isUuid } from '@/lib/uuid';
 import { redis } from '@/lib/redis';
@@ -31,7 +31,7 @@ export type PageViewPayload =
 
 interface QueuedPageView {
   id: string;
-  payload: string | null;
+  payload: unknown;
 }
 
 interface NormalizedPageView {
@@ -84,13 +84,12 @@ function readStreamMessages(result: unknown): QueuedPageView[] {
         throw new Error('Unexpected Redis page-view stream entry.');
       }
 
-      let payload: string | null = null;
+      let payload: unknown = null;
       const fields = entry[1] as unknown[];
       for (let index = 0; index + 1 < fields.length; index += 2) {
         const key = fields[index];
-        const value = fields[index + 1];
-        if (key === 'payload' && typeof value === 'string') {
-          payload = value;
+        if (key === 'payload') {
+          payload = fields[index + 1];
           break;
         }
       }
@@ -115,7 +114,7 @@ function normalizeEvent(event: PageViewPayload): NormalizedPageView {
       eventId: event.eventId,
       pageType: event.pageType,
       language: event.language,
-      pagePath: `/blog/${event.slug}`,
+      pagePath: blogArticlePath(event.slug, event.language === 'zh' ? 'cn' : 'en'),
       slug: event.slug,
     };
   }
@@ -196,6 +195,7 @@ async function persistPageViews(events: NormalizedPageView[]): Promise<void> {
        JOIN blog_posts posts
          ON posts.published_slug = events.slug
         AND posts.status = 'published'
+        AND posts.language = CASE events.language WHEN 'zh' THEN 'cn' ELSE 'en' END
        ON CONFLICT (event_id) DO NOTHING`,
       blogEvents.flatMap((event) => [
         event.eventId,
@@ -244,7 +244,9 @@ export async function processPageViewQueueBatch(): Promise<number> {
   for (const message of batch) {
     let payload: unknown;
     try {
-      payload = message.payload ? JSON.parse(message.payload) : null;
+      payload = typeof message.payload === 'string'
+        ? JSON.parse(message.payload)
+        : message.payload;
     } catch {
       payload = null;
     }

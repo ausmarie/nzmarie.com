@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import Header from '@/components/Header';
+import PageViewTracker from '@/components/PageViewTracker';
 import BlogArticleFooter from '@/components/blog/BlogArticleFooter';
 import BlogRichTextRenderer from '@/components/blog/BlogRichTextRenderer';
 import {
@@ -43,6 +44,7 @@ export default async function PublishedBlogArticle({
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
+      <PageViewTracker pageType="blog_article" language={chinese ? 'zh' : 'en'} slug={slug} />
       <Header lang={chinese ? 'zh' : 'en'} blogLanguageHref={languageHref} />
       <main className="mx-auto max-w-6xl px-4 pt-10 pb-4 sm:px-6 lg:px-8">
         <Link href={chinese ? '/blog/cn' : '/blog'} className="text-sm font-medium text-blue-700 hover:text-blue-900">

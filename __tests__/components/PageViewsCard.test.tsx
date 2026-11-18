@@ -1,5 +1,5 @@
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PageViewsCard from '@/components/admin/PageViewsCard';
 
@@ -97,5 +97,9 @@ describe('PageViewsCard', () => {
       screen.getByText('Report Views by Period').compareDocumentPosition(screen.getByText('Home Views'))
         & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 });

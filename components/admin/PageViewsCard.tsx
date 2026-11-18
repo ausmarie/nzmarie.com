@@ -61,6 +61,16 @@ export default function PageViewsCard() {
     return () => controller.abort();
   }, [loadAnalytics, reloadKey]);
 
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setReloadKey((key) => key + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => document.removeEventListener('visibilitychange', refreshWhenVisible);
+  }, []);
+
   const recentPeriods = useMemo(() => {
     const periods = new Map<string, {
       label: string;

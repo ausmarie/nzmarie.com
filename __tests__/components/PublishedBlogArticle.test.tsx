@@ -14,6 +14,11 @@ vi.mock('next/link', () => ({
 }));
 
 vi.mock('@/components/Header', () => ({ default: () => null }));
+vi.mock('@/components/PageViewTracker', () => ({
+  default: ({ pageType, language, slug }: { pageType: string; language: string; slug: string }) => (
+    <span data-testid="page-view-tracker" data-page-type={pageType} data-language={language} data-slug={slug} />
+  ),
+}));
 vi.mock('@/components/blog/BlogArticleFooter', () => ({
   default: () => <div>Note</div>,
 }));
@@ -54,6 +59,11 @@ describe('PublishedBlogArticle recommendations', () => {
 
     render(await PublishedBlogArticle({ slug: 'selling-guide', language: 'en' }));
 
+    expect(screen.getByTestId('page-view-tracker').dataset).toMatchObject({
+      pageType: 'blog_article',
+      language: 'en',
+      slug: 'selling-guide',
+    });
     const reportLink = screen.getByRole('link', { name: 'Latest North Shore Market Report' });
     const note = screen.getByText('Note');
     expect(screen.getByRole('heading', {
@@ -72,6 +82,11 @@ describe('PublishedBlogArticle recommendations', () => {
 
     render(await PublishedBlogArticle({ slug: 'selling-guide-cn', language: 'cn' }));
 
+    expect(screen.getByTestId('page-view-tracker').dataset).toMatchObject({
+      pageType: 'blog_article',
+      language: 'zh',
+      slug: 'selling-guide-cn',
+    });
     const reportLink = screen.getByRole('link', { name: '北岸最新市场报告' });
     expect(screen.getByRole('heading', { name: '推荐文章：北岸最新市场报告' })).toBeTruthy();
     expect(reportLink.parentElement?.tagName).toBe('H2');

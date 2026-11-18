@@ -252,6 +252,22 @@ describe('BlogAdminPage', () => {
     expect(screen.getByRole('region', { name: 'Article views' }).textContent).toContain('Total: 23');
   });
 
+  it('refreshes article views when the editor becomes visible again', async () => {
+    const fetchMock = configureFetch([post]);
+    render(<BlogAdminPage initialPostId={post.id} />);
+
+    await screen.findByText('Total: 23');
+    const pageViewCalls = () => fetchMock.mock.calls.filter(
+      ([input]) => input === '/api/admin/analytics/page-views',
+    );
+    expect(pageViewCalls()).toHaveLength(1);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => expect(pageViewCalls()).toHaveLength(2));
+  });
+
   it('allows changing the article month and saves the selected value', async () => {
     const fetchMock = configureFetch();
     render(<BlogAdminPage initialPostId={post.id} />);

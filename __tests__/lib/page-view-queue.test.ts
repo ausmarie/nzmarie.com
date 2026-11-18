@@ -83,6 +83,12 @@ describe('page-view event queue', () => {
         language: 'en',
         slug: 'selling-guide',
       },
+      {
+        eventId: 'c0a80123-4567-489a-8abc-0123456789ae',
+        pageType: 'blog_article',
+        language: 'zh',
+        slug: 'selling-guide-cn',
+      },
     ];
     mocks.redis.xreadgroup
       .mockResolvedValueOnce([])
@@ -91,7 +97,7 @@ describe('page-view event queue', () => {
         event,
       }))));
 
-    await expect(processPageViewQueueBatch()).resolves.toBe(3);
+      await expect(processPageViewQueueBatch()).resolves.toBe(4);
 
     expect(mocks.redis.xgroup).toHaveBeenCalledWith(streamKey, {
       type: 'CREATE',
@@ -110,8 +116,19 @@ describe('page-view event queue', () => {
       '/market-reports/october-2026/cn',
     ]);
     expect(mocks.query.mock.calls[2][0]).toContain("posts.status = 'published'");
-    expect(mocks.redis.xack).toHaveBeenCalledWith(streamKey, 'page-view-database-writer', ['1-0', '2-0', '3-0']);
-    expect(mocks.redis.xdel).toHaveBeenCalledWith(streamKey, ['1-0', '2-0', '3-0']);
+    expect(mocks.query.mock.calls[2][0]).toContain("posts.language = CASE events.language WHEN 'zh' THEN 'cn' ELSE 'en' END");
+    expect(mocks.query.mock.calls[2][1]).toEqual([
+      'c0a80123-4567-489a-8abc-0123456789ad',
+      'selling-guide',
+      'en',
+      '/blog/selling-guide',
+      'c0a80123-4567-489a-8abc-0123456789ae',
+      'selling-guide-cn',
+      'zh',
+      '/blog/selling-guide-cn/cn',
+    ]);
+    expect(mocks.redis.xack).toHaveBeenCalledWith(streamKey, 'page-view-database-writer', ['1-0', '2-0', '3-0', '4-0']);
+    expect(mocks.redis.xdel).toHaveBeenCalledWith(streamKey, ['1-0', '2-0', '3-0', '4-0']);
     const queryCallOrder = mocks.query.mock.invocationCallOrder;
     expect(queryCallOrder[queryCallOrder.length - 1]).toBeLessThan(
       mocks.redis.xack.mock.invocationCallOrder[0],
@@ -129,6 +146,51 @@ describe('page-view event queue', () => {
 
     expect(mocks.redis.xack).not.toHaveBeenCalled();
     expect(mocks.redis.xdel).not.toHaveBeenCalled();
+  });
+
+  it('accepts object payloads returned by Upstash after JSON deserialization', async () => {
+    const events = [
+      {
+        eventId: validEventId,
+        pageType: 'blog_article',
+        language: 'zh',
+        slug: 'selling-your-home-in-new-zealand',
+      },
+      {
+        eventId: 'c0a80123-4567-489a-8abc-0123456789ac',
+        pageType: 'market_report',
+        language: 'en',
+        slug: 'October-2026',
+      },
+    ];
+    mocks.redis.xreadgroup.mockResolvedValueOnce([[
+      streamKey,
+      events.map((event, index) => [`${index + 6}-0`, ['payload', event]]),
+    ]]);
+
+    await expect(processPageViewQueueBatch()).resolves.toBe(2);
+
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SELECT events.event_id, 'blog_article'"),
+      [
+        validEventId,
+        'selling-your-home-in-new-zealand',
+        'zh',
+        '/blog/selling-your-home-in-new-zealand/cn',
+      ],
+    );
+    expect(mocks.query).toHaveBeenCalledWith(
+      expect.stringContaining("SELECT events.event_id, 'market_report'"),
+      [
+        'c0a80123-4567-489a-8abc-0123456789ac',
+        'monthly',
+        '2026-10',
+        'en',
+        '/market-reports/october-2026',
+      ],
+    );
+    expect(mocks.redis.xack).toHaveBeenCalledWith(streamKey, 'page-view-database-writer', ['6-0', '7-0']);
+    expect(mocks.redis.xdel).toHaveBeenCalledWith(streamKey, ['6-0', '7-0']);
   });
 
   it('processes the current consumer pending entries before reading new ones', async () => {

@@ -1,0 +1,158 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - navigation [ref=e6]:
+        - link "Go to home" [ref=e7] [cursor=pointer]:
+          - /url: /
+          - img "Marie Nian | Residential Sales, Barfoot & Thompson" [ref=e8]
+        - generic [ref=e9]:
+          - link "About" [ref=e10] [cursor=pointer]:
+            - /url: /#about
+          - link "Free Appraisal" [ref=e11] [cursor=pointer]:
+            - /url: /#appraisal
+          - link "Market Reports" [ref=e12] [cursor=pointer]:
+            - /url: /market-reports?lang=en
+          - link "Properties" [ref=e13] [cursor=pointer]:
+            - /url: /#properties
+          - link "Contact" [ref=e14] [cursor=pointer]:
+            - /url: /#contact
+          - link "Blog" [ref=e15] [cursor=pointer]:
+            - /url: /blog
+          - link "中文" [ref=e16] [cursor=pointer]:
+            - /url: /blog/selling-your-home-in-new-zealand/cn
+    - main [ref=e17]:
+      - link "← Back to Blog" [ref=e18] [cursor=pointer]:
+        - /url: /blog
+      - article [ref=e19]:
+        - paragraph [ref=e20]: Sell
+        - 'heading "Selling Your Home in New Zealand: A Step-by-Step Guide for Homeowners" [level=1] [ref=e21]'
+        - paragraph [ref=e22]: Marie Nian’s comprehensive guide to selling property in New Zealand. Learn how to prepare your home, choose the right sales method, and achieve the best outcome.
+        - paragraph [ref=e23]: By Marie Nian • Barfoot & Thompson • 6 min read • 2026 Nov
+        - generic [ref=e25]:
+          - paragraph [ref=e29]: Selling a property in Auckland is rarely just a real estate transaction. For most families, it is the single largest capital reallocation decision of the decade. Drawing on over a decade of financial analysis experience and Barfoot & Thompson's leading Auckland market network, this guide outlines a disciplined, data-driven roadmap to preparing, pricing, and selling your home with clarity.
+          - paragraph [aria-hidden] [ref=e33]
+          - heading "1. Pre-Sale Preparation and Strategic Pricing" [level=2] [ref=e37]
+          - heading "Market Assessment and Valuation" [level=3] [ref=e41]
+          - paragraph [ref=e45]: Before going to market, establishing an accurate price range is essential to attracting serious buyers without leaving money on the table.
+          - list [ref=e49]:
+            - listitem [ref=e50]:
+              - strong [ref=e52]: "Comparative Market Analysis (CMA):"
+              - text: Review recent sale prices of comparable homes in your immediate neighbourhood over the past three to six months, adjusting for land size, layout, and renovation quality.
+          - list [ref=e56]:
+            - listitem [ref=e57]:
+              - strong [ref=e59]: "School Zone and Infrastructure Impact:"
+              - text: In Auckland, school catchment boundaries, public transport links, and future zoning potential under the Auckland Unitary Plan can create significant value differences between neighbouring streets.
+          - list [ref=e63]:
+            - listitem [ref=e64]:
+              - strong [ref=e66]: "Registered Valuation:"
+              - text: If your home is architecturally unique or lacks direct comparable sales, commissioning a formal report from a registered valuer provides an independent benchmark.
+          - paragraph [aria-hidden] [ref=e70]
+          - heading "Targeted Property Presentation" [level=3] [ref=e74]
+          - paragraph [ref=e78]: First impressions directly influence buyer urgency and final sale price. Focus your budget on improvements that deliver clear returns.
+          - list [ref=e82]:
+            - listitem [ref=e83]:
+              - strong [ref=e85]: "Street Appeal:"
+              - text: Tidy lawns and gardens, water-blast driveways and exterior cladding, and ensure the front entrance looks clean and welcoming.
+          - list [ref=e89]:
+            - listitem [ref=e90]:
+              - strong [ref=e92]: "Interior Refresh:"
+              - text: Deep clean carpets and windows, fix minor maintenance items such as dripping taps or scuffed walls, and depersonalize rooms by removing excess family photos and clutter.
+          - list [ref=e96]:
+            - listitem [ref=e97]:
+              - strong [ref=e99]: "Home Staging:"
+              - text: Professional staging helps buyers visualize room proportions and lifestyle flow, particularly in vacant homes or open-plan living spaces.
+          - paragraph [aria-hidden] [ref=e103]
+          - heading "2. Choosing the Right Sales Method" [level=2] [ref=e107]
+          - paragraph [ref=e111]: Different market conditions and property types call for different selling strategies. In Auckland, the three primary methods each serve a distinct purpose.
+          - table [ref=e116]:
+            - rowgroup [ref=e117]:
+              - row [ref=e118]:
+                - cell [ref=e119]:
+                  - strong [ref=e121]: Sales Method
+                - cell [ref=e122]:
+                  - strong [ref=e124]: Core Strategic Advantage
+                - cell [ref=e125]:
+                  - strong [ref=e127]: Best Suited Property and Market Condition
+              - row [ref=e128]:
+                - cell [ref=e129]:
+                  - strong [ref=e131]: Auction
+                - cell "Generates transparent competitive bidding, delivers unconditional cash offers, and sets a clear sale timeline." [ref=e132]
+                - cell "High-demand family homes, sought-after school zones, and unique properties where price discovery works best through competition." [ref=e133]
+              - row [ref=e134]:
+                - cell [ref=e135]:
+                  - strong [ref=e137]: Tender or Deadline Sale
+                - cell "Allows both conditional and unconditional buyers to submit private offers by a fixed closing date." [ref=e138]
+                - cell "Properties where maximizing the total pool of qualified buyers, including those subject to finance or building checks, is the priority." [ref=e139]
+              - row [ref=e140]:
+                - cell [ref=e141]:
+                  - strong [ref=e143]: Price by Negotiation or Asking Price
+                - cell "Provides clear price guidance for budget-focused buyers who filter property portals by specific brackets." [ref=e144]
+                - cell "Apartments, townhouses, and properties in steadier market segments with abundant comparable sales." [ref=e145]
+          - paragraph [aria-hidden] [ref=e149]
+          - heading "3. Legal Requirements and Due Diligence" [level=2] [ref=e153]
+          - paragraph [ref=e157]: Preparing thorough documentation upfront builds buyer confidence and prevents unpleasant surprises during conditional periods or auction day.
+          - list [ref=e161]:
+            - listitem [ref=e162]:
+              - strong [ref=e164]: "Land Information Memorandum (LIM):"
+              - text: Obtained from Auckland Council, this report details property rates, building consents, drainage, and potential land hazards such as flood zones.
+          - list [ref=e168]:
+            - listitem [ref=e169]:
+              - strong [ref=e171]: "Record of Title:"
+              - text: Confirms legal ownership along with any easements, covenants, or cross lease terms attached to the land.
+          - list [ref=e175]:
+            - listitem [ref=e176]:
+              - strong [ref=e178]: "Code Compliance Certificate (CCC):"
+              - text: Essential for any historical extensions or major renovations to confirm the work meets New Zealand Building Code standards.
+          - list [ref=e182]:
+            - listitem [ref=e183]:
+              - strong [ref=e185]: "Disclosure Obligations:"
+              - text: Under New Zealand real estate regulations, vendors must disclose known weather tightness issues, structural defects, unconsented works, or ongoing neighbour disputes. Engaging a specialist property lawyer early ensures your sale and purchase agreement is watertight.
+          - paragraph [aria-hidden] [ref=e189]
+          - heading "4. Multi-Channel Marketing and Buyer Reach" [level=2] [ref=e193]
+          - paragraph [ref=e197]: Great marketing does more than list a home online. It positions your property in front of active local, out-of-town, and international buyers.
+          - list [ref=e201]:
+            - listitem [ref=e202]:
+              - strong [ref=e204]: "Visual Storytelling:"
+              - text: Invest in high-resolution architectural photography, twilight exterior shots, clear floor plans, and video walkthroughs that highlight natural light and indoor-outdoor flow.
+          - list [ref=e208]:
+            - listitem [ref=e209]:
+              - strong [ref=e211]: "Portal and Network Exposure:"
+              - text: Maximize visibility across Trade Me Property,
+              - link "realestate.co.nz" [ref=e212] [cursor=pointer]:
+                - /url: https://realestate.co.nz
+              - text: ", OneRoof, and Barfoot & Thompson's interconnected Auckland branch network, where thousands of active buyers are matched daily."
+          - list [ref=e216]:
+            - listitem [ref=e217]:
+              - strong [ref=e219]: "Targeted Digital and Bilingual Campaigns:"
+              - text: Combine social media targeting with bilingual English and Chinese marketing to capture both local Auckland families and high-net-worth Asian buyers.
+          - paragraph [aria-hidden] [ref=e223]
+          - heading "5. Negotiation, Closing, and Auckland Market Context" [level=2] [ref=e227]
+          - heading "Navigating Offers and Settlement" [level=3] [ref=e231]
+          - paragraph [ref=e235]: Once offers arrive, look beyond the headline price. Evaluate deposit size, settlement dates, and the strength of buyer conditions. During auction campaigns or multi-offer situations, calm, data-backed negotiation keeps momentum focused on securing your strongest possible terms. After an agreement goes unconditional, coordinate with your solicitor to manage mortgage discharge, pre-settlement inspection, and key handover smoothly.
+          - heading "Auckland Market Perspective" [level=3] [ref=e239]
+          - paragraph [ref=e243]: In the current Auckland market, elevated housing inventory gives buyers ample choice, making realistic pricing and standout presentation more important than ever. Well-presented homes in desirable suburbs continue to attract decisive buyer interest, while overpriced listings tend to linger. Partnering with an advisor who combines rigorous market data with wide buyer reach helps you navigate shifting conditions with confidence.
+        - region "Recommended article" [ref=e244]:
+          - heading [level=2] [ref=e245]:
+            - text: "Recommended article:"
+            - link "Latest North Shore Market Report" [ref=e246] [cursor=pointer]:
+              - /url: /market-reports/october-2026
+        - generic [ref=e247]:
+          - paragraph [ref=e248]:
+            - strong [ref=e249]: "Note:"
+            - text: Market data reflects broad North Shore trends. For a confidential, tailored valuation of your specific address,
+            - link "Request a Free Property Appraisal" [ref=e250] [cursor=pointer]:
+              - /url: https://www.nzmarie.com/#appraisal
+            - text: or
+            - link "Download Your Suburb Report" [ref=e251] [cursor=pointer]:
+              - /url: https://www.nzmarie.com/#download-report
+            - text: . You can also contact Marie directly at
+            - link "m.nian@barfoot.co.nz" [ref=e252] [cursor=pointer]:
+              - /url: mailto:m.nian@barfoot.co.nz
+            - text: or
+            - link "021 0693 089" [ref=e253] [cursor=pointer]:
+              - /url: tel:+64210693089
+            - text: .
+          - generic [ref=e254]:
+            - paragraph [ref=e255]: © 2026 Marie Nian, Licensed Residential Sales, Barfoot & Thompson (Licensed under the REAA 2008).
+            - paragraph [ref=e256]: This publication is independent editorial content provided for general reference only.
+  - region "Notifications Alt+T"

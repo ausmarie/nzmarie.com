@@ -5,8 +5,14 @@ ALTER TABLE page_view_events
   DROP CONSTRAINT IF EXISTS page_view_events_page_type_check;
 
 ALTER TABLE page_view_events
+  DROP CONSTRAINT IF EXISTS check_page_type;
+
+ALTER TABLE page_view_events
   ADD CONSTRAINT page_view_events_page_type_check
   CHECK (page_type IN ('home', 'market_report', 'blog_article'));
+
+ALTER TABLE page_view_events
+  DROP CONSTRAINT IF EXISTS check_page_type_report_id_page_type_report_id;
 
 ALTER TABLE page_view_events
   DROP CONSTRAINT IF EXISTS page_view_events_check;

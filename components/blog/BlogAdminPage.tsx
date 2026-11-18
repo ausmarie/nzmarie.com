@@ -182,6 +182,14 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
   }, [loadPageViews]);
 
   useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadPageViews();
+    };
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => document.removeEventListener('visibilitychange', refreshWhenVisible);
+  }, [loadPageViews]);
+
+  useEffect(() => {
     if (!initialPostId) return;
     void loadPost(initialPostId);
   }, [initialPostId, loadPost]);
