@@ -16,7 +16,7 @@ describe('PageViewsCard', () => {
   });
 
   it('shows Home, Market, and month-by-language view counts', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         success: true,
@@ -55,7 +55,8 @@ describe('PageViewsCard', () => {
           ],
         },
       }),
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(<PageViewsCard />);
 
@@ -69,6 +70,10 @@ describe('PageViewsCard', () => {
     expect(screen.getByText('October 2026')).toBeTruthy();
     expect(screen.getByText('English 31 · Chinese 17')).toBeTruthy();
     expect(screen.getByText('This week: 80')).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/analytics/page-views',
+      expect.objectContaining({ method: 'POST' }),
+    );
     expect(
       screen.getByText('Market Views').compareDocumentPosition(screen.getByText('Report Views by Period'))
         & Node.DOCUMENT_POSITION_FOLLOWING,

@@ -26,7 +26,7 @@ vi.mock('@/lib/market-report-document', () => ({
 }));
 
 vi.mock('@/lib/market-report-footer', () => ({
-  getDefaultMarketReportFooter: () => 'Default footer',
+  resolveMarketReportFooter: (footer: string | null | undefined) => footer || 'Default footer',
 }));
 
 import MarketAdminPage from '@/components/market/MarketAdminPage';
@@ -130,7 +130,7 @@ describe('MarketAdminPage report editing', () => {
   });
 
   it('updates the address to the selected report draft URL', async () => {
-    configureFetch();
+    const { fetchMock } = configureFetch();
     render(<MarketAdminPage />);
 
     const sidebar = screen.getByRole('complementary');
@@ -140,6 +140,10 @@ describe('MarketAdminPage report editing', () => {
     if (!reportButton) throw new Error('October report button was not rendered.');
     fireEvent.click(reportButton);
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/analytics/page-views',
+      expect.objectContaining({ method: 'POST' }),
+    );
     expect(mocks.push).toHaveBeenCalledWith('/admin/market/draft/October-2026');
   });
 

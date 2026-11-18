@@ -9,6 +9,7 @@ import {
 import { ensureMarketReportRichTextContent } from '@/lib/market-report-document';
 import { marketReportUrl } from '@/lib/market-report-url';
 import { buildMarketReportArticleStructuredData } from '@/lib/market-report-seo';
+import { resolveMarketReportFooter } from '@/lib/market-report-footer';
 import BlogArticleFooter from '@/components/blog/BlogArticleFooter';
 import MarketReportStaticContent from './MarketReportStaticContent';
 import MarketReportArticleHeader from './MarketReportArticleHeader';
@@ -31,6 +32,7 @@ export default function MarketReportArticle({
 }) {
   const { dataSnapshot: snapshot } = report;
   const language = report.language ?? 'en';
+  const footer = resolveMarketReportFooter(report.footer, snapshot, language);
   const articleHeader = normalizeMarketReportArticleHeader(
     report.articleHeader,
     snapshot,
@@ -79,7 +81,7 @@ export default function MarketReportArticle({
 
       <div className="market-report-footer mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="px-4 sm:px-8">
-          <BlogArticleFooter language={language === 'zh' ? 'cn' : 'en'} />
+          <BlogArticleFooter language={language === 'zh' ? 'cn' : 'en'} footerContent={footer} />
         </div>
       </div>
     </div>

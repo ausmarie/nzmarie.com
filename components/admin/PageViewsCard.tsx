@@ -22,14 +22,17 @@ function PeriodCounts({ views }: { views: PageViewPeriods }) {
 export default function PageViewsCard() {
   const [analytics, setAnalytics] = useState<PageViewAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [queueWarning, setQueueWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
   const loadAnalytics = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     setError(null);
+    setQueueWarning(null);
     try {
       const response = await fetch('/api/admin/analytics/page-views', {
+        method: 'POST',
         cache: 'no-store',
         signal,
       });
@@ -37,11 +40,13 @@ export default function PageViewsCard() {
         success: boolean;
         data?: PageViewAnalytics;
         error?: string;
+        queueSync?: { warning?: string };
       };
       if (!response.ok || !result.success || !result.data) {
         throw new Error(result.error || 'Failed to load page views.');
       }
       setAnalytics(result.data);
+      setQueueWarning(result.queueSync?.warning ?? null);
     } catch (caught) {
       if (signal.aborted) return;
       setError(caught instanceof Error ? caught.message : 'Failed to load page views.');
@@ -114,6 +119,7 @@ export default function PageViewsCard() {
       ) : analytics ? (
         <>
           {error && <p role="alert" className="mb-2 text-xs text-red-700">Refresh failed: {error}</p>}
+          {queueWarning && <p role="alert" className="mb-2 text-xs text-amber-700">{queueWarning}</p>}
           <div className="space-y-3">
             <div className="rounded-md bg-blue-50 p-3">
               <p className="text-xs font-medium text-blue-800">Market Views</p>

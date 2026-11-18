@@ -4,15 +4,21 @@ export default function BlogArticleFooter({
   note,
   language = 'en',
   footer,
+  footerContent,
 }: {
   note?: string | null;
   language?: BlogLanguage;
   footer?: string | null;
+  footerContent?: string | null;
 }) {
   const isChinese = language === 'cn';
   const displayFooter = footer?.trim() || (isChinese
     ? `© ${new Date().getFullYear()} Marie Nian，持牌住宅销售顾问，Barfoot & Thompson（持有 REAA 2008 牌照）。`
     : `© ${new Date().getFullYear()} Marie Nian, Licensed Residential Sales, Barfoot & Thompson (Licensed under the REAA 2008).`);
+  const customFooterParagraphs = footerContent?.trim()
+    .split(/\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
 
   return (
     <div className="mt-3 pb-8 text-slate-500">
@@ -62,12 +68,22 @@ export default function BlogArticleFooter({
         )}
       </p>
       <footer className="mt-3 border-t border-slate-200 pt-3 text-sm leading-6">
-        <p>{displayFooter}</p>
-        <p className="mt-1">
-          {isChinese
-            ? '本出版物为独立编辑内容，仅供一般参考。'
-            : 'This publication is independent editorial content provided for general reference only.'}
-        </p>
+        {customFooterParagraphs?.length
+          ? customFooterParagraphs.map((paragraph, index) => (
+            <p key={`footer-paragraph-${index}`} className={index > 0 ? 'mt-1' : undefined}>
+              {paragraph}
+            </p>
+          ))
+          : (
+            <>
+              <p>{displayFooter}</p>
+              <p className="mt-1">
+                {isChinese
+                  ? '本出版物为独立编辑内容，仅供一般参考。'
+                  : 'This publication is independent editorial content provided for general reference only.'}
+              </p>
+            </>
+          )}
       </footer>
     </div>
   );

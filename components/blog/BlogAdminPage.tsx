@@ -57,6 +57,7 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
   const [categories, setCategories] = useState<BlogCategory[]>([]);
   const [pageViews, setPageViews] = useState<PageViewAnalytics | null>(null);
   const [pageViewsError, setPageViewsError] = useState<string | null>(null);
+  const [pageViewsWarning, setPageViewsWarning] = useState<string | null>(null);
   const [active, setActive] = useState<BlogPost | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [loadingList, setLoadingList] = useState(true);
@@ -96,13 +97,20 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
 
   const loadPageViews = useCallback(async () => {
     setPageViewsError(null);
+    setPageViewsWarning(null);
     try {
-      const response = await fetch('/api/admin/analytics/page-views', { cache: 'no-store' });
-      const data = await response.json() as { success: boolean; data?: PageViewAnalytics; error?: string };
+      const response = await fetch('/api/admin/analytics/page-views', { method: 'POST', cache: 'no-store' });
+      const data = await response.json() as {
+        success: boolean;
+        data?: PageViewAnalytics;
+        error?: string;
+        queueSync?: { warning?: string };
+      };
       if (!response.ok || !data.success || !data.data) {
         throw new Error(data.error || 'Failed to load Blog article views.');
       }
       setPageViews(data.data);
+      setPageViewsWarning(data.queueSync?.warning ?? null);
     } catch (caught) {
       setPageViewsError(caught instanceof Error ? caught.message : 'Failed to load Blog article views.');
     }
@@ -827,6 +835,9 @@ export default function BlogAdminPage({ initialPostId }: { initialPostId?: strin
                           </div>
                         ))}
                       </div>
+                    )}
+                    {pageViewsWarning && (
+                      <p role="alert" className="mt-3 text-sm text-amber-700">{pageViewsWarning}</p>
                     )}
                   </section>
 

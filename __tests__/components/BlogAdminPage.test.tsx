@@ -131,6 +131,10 @@ describe('BlogAdminPage', () => {
     expect((screen.getByLabelText('Reading time (minutes)') as HTMLInputElement).value).toBe('5');
     expect(screen.getByTestId('blog-editor')).toBeTruthy();
     expect(mocks.push).toHaveBeenCalledWith(`/admin/blog/draft/${post.id}`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/analytics/page-views',
+      { method: 'POST', cache: 'no-store' },
+    );
     const createCall = fetchMock.mock.calls.find(
       ([input, init]) => input === '/api/admin/blog/posts' && init?.method === 'POST',
     );

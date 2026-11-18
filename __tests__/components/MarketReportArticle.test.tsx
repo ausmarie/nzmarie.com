@@ -350,15 +350,22 @@ describe('MarketReportArticle', () => {
     expect(document.querySelector('.market-report-empty-paragraph')).toBeNull();
   });
 
-  it('renders the standard Blog note and linked calls to action instead of a custom report footer', () => {
-    render(<MarketReportArticle report={{ ...report, footer: 'Custom source note.\nCustom disclaimer.' }} />);
+  it('keeps the standard Note and renders the report Footer text below it', () => {
+    render(
+      <MarketReportArticle
+        report={{
+          ...report,
+          footer: '© 2026 Marie Nian, custom copyright text.\nCustom publication disclaimer.',
+        }}
+      />,
+    );
 
     expect(screen.getByTestId('public-header')).toBeTruthy();
     const footer = document.querySelector<HTMLElement>('.market-report-footer');
     const note = footer?.querySelector('.border-l-2');
     expect(note?.textContent).toContain('Market data reflects broad North Shore trends.');
     expect(note?.textContent).toContain('For a confidential, tailored valuation of your specific address,');
-    expect(note?.textContent).not.toContain('Custom source note.');
+    expect(note?.textContent).not.toContain('custom copyright text.');
 
     expect(screen.getByRole('link', { name: 'Request a Free Property Appraisal' }).getAttribute('href'))
       .toBe('https://www.nzmarie.com/#appraisal');
@@ -369,14 +376,20 @@ describe('MarketReportArticle', () => {
     expect(screen.getByRole('link', { name: '021 0693 089' }).getAttribute('href'))
       .toBe('tel:+64210693089');
 
-    expect(footer?.querySelector('footer')?.textContent).toContain('Licensed Residential Sales, Barfoot & Thompson');
     expect(footer?.querySelector('footer')?.textContent)
-      .toContain('This publication is independent editorial content provided for general reference only.');
+      .toContain('© 2026 Marie Nian, custom copyright text.Custom publication disclaimer.');
+    expect(footer?.querySelector('footer')?.textContent).not.toContain('Licensed Residential Sales');
     expect(document.querySelector('main')?.nextElementSibling).toBe(footer);
   });
 
-  it('uses the Chinese Blog footer for Chinese Market reports', () => {
-    render(<MarketReportArticle report={{ ...report, language: 'zh' }} />);
+  it('keeps the Chinese Note and renders the Chinese report Footer', () => {
+    render(<MarketReportArticle
+      report={{
+        ...report,
+        language: 'zh',
+        footer: '© 2026 Marie Nian，版权自定义文本。\n自定义出版说明。',
+      }}
+    />);
 
     const footer = document.querySelector<HTMLElement>('.market-report-footer');
     const footerQueries = within(footer!);
@@ -386,6 +399,7 @@ describe('MarketReportArticle', () => {
       .toBe('https://www.nzmarie.com/cn#appraisal');
     expect(footerQueries.getByRole('link', { name: '下载专属子区报告' }).getAttribute('href'))
       .toBe('https://www.nzmarie.com/cn#download-report');
-    expect(footer?.textContent).toContain('本出版物为独立编辑内容，仅供一般参考。');
+    expect(footer?.querySelector('footer')?.textContent)
+      .toContain('© 2026 Marie Nian，版权自定义文本。自定义出版说明。');
   });
 });

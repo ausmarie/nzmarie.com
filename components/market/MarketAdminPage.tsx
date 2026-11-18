@@ -21,7 +21,7 @@ import {
   marketReportDraftUrl,
   parseMarketReportSlug,
 } from '@/lib/market-report-url';
-import { getDefaultMarketReportFooter } from '@/lib/market-report-footer';
+import { resolveMarketReportFooter } from '@/lib/market-report-footer';
 import type { ReportEditorContent } from '@/types/report';
 
 interface MarketReportSummary {
@@ -118,6 +118,7 @@ export default function MarketAdminPage({
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [pageViews, setPageViews] = useState<PageViewAnalytics | null>(null);
   const [pageViewsError, setPageViewsError] = useState<string | null>(null);
+  const [pageViewsWarning, setPageViewsWarning] = useState<string | null>(null);
   const [pageViewsLoading, setPageViewsLoading] = useState(true);
   const [pageViewsReloadKey, setPageViewsReloadKey] = useState(0);
   const [content, setContent] = useState<ReportEditorContent>([{ type: 'paragraph' }]);
@@ -172,7 +173,7 @@ export default function MarketAdminPage({
       setActive(report);
       setTitle(report.title);
       setSummary(report.summary || '');
-      setFooter(report.footer ?? getDefaultMarketReportFooter(report.data_snapshot, report.language));
+      setFooter(resolveMarketReportFooter(report.footer, report.data_snapshot, report.language));
       setArticleHeader(loadedHeader);
       setArticleHeaderDraft(loadedHeader);
       setContent(removeLegacyMarketReportArticleHeader(loadedContent, loadedHeader));
@@ -200,8 +201,10 @@ export default function MarketAdminPage({
     const loadPageViews = async () => {
       setPageViewsLoading(true);
       setPageViewsError(null);
+      setPageViewsWarning(null);
       try {
         const response = await fetch('/api/admin/analytics/page-views', {
+          method: 'POST',
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -209,11 +212,13 @@ export default function MarketAdminPage({
           success: boolean;
           data?: PageViewAnalytics;
           error?: string;
+          queueSync?: { warning?: string };
         };
         if (!response.ok || !result.success || !result.data) {
           throw new Error(result.error || 'Failed to load report views.');
         }
         setPageViews(result.data);
+        setPageViewsWarning(result.queueSync?.warning ?? null);
       } catch (caught) {
         if (controller.signal.aborted) return;
         setPageViewsError(caught instanceof Error ? caught.message : 'Failed to load report views.');
@@ -763,6 +768,9 @@ export default function MarketAdminPage({
                           <ViewMetric key={key} label={label} value={activePageViews?.views[key] ?? 0} />
                         ))}
                       </div>
+                    )}
+                    {pageViewsWarning && (
+                      <p role="alert" className="mt-3 text-sm text-amber-700">{pageViewsWarning}</p>
                     )}
                   </section>
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 p-4">

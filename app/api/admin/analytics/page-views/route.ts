@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getMarketReportAdminEmail } from '@/lib/market-report-access';
 import { query } from '@/lib/db';
+import { processPageViewQueueBatch } from '@/lib/page-view-queue';
 import type { PageViewAnalytics, PageViewPeriods, PageViewReport } from '@/lib/page-view-analytics';
 
 export const dynamic = 'force-dynamic';
+
+const ADMIN_SYNC_MAX_BATCHES = 5;
+const PAGE_VIEW_BATCH_SIZE = 100;
 
 interface PeriodCountRow {
   total: string | number;
@@ -61,10 +65,27 @@ const periodCountSelect = `
   COUNT(e.id) FILTER (WHERE e.created_at >= b.year_start) AS year
 `;
 
-export async function GET() {
+async function loadPageViewAnalytics(syncQueue: boolean) {
   try {
     const email = await getMarketReportAdminEmail();
     if (!email) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+
+    let queueSync: { processed: number; warning?: string } | undefined;
+    if (syncQueue) {
+      let processed = 0;
+      let warning: string | undefined;
+      try {
+        for (let batch = 0; batch < ADMIN_SYNC_MAX_BATCHES; batch += 1) {
+          const count = await processPageViewQueueBatch();
+          processed += count;
+          if (count < PAGE_VIEW_BATCH_SIZE) break;
+        }
+      } catch (error) {
+        console.error('Failed to sync queued page-view events from admin analytics:', error);
+        warning = 'Recent views could not be synchronized; showing saved counts.';
+      }
+      queueSync = { processed, warning };
+    }
 
     const [summaryResult, reportsResult, blogPostsResult] = await Promise.all([
       query<SummaryRow>(
@@ -126,11 +147,19 @@ export async function GET() {
       })),
     };
 
-    return NextResponse.json({ success: true, data }, {
-      headers: { 'Cache-Control': 'private, max-age=30' },
+    return NextResponse.json({ success: true, data, ...(queueSync ? { queueSync } : {}) }, {
+      headers: { 'Cache-Control': syncQueue ? 'private, no-store' : 'private, max-age=30' },
     });
   } catch (error) {
     console.error('Failed to load page-view analytics:', error);
     return NextResponse.json({ success: false, error: 'Failed to load page-view analytics.' }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return loadPageViewAnalytics(false);
+}
+
+export async function POST() {
+  return loadPageViewAnalytics(true);
 }
