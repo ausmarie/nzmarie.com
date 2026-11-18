@@ -10,6 +10,7 @@ import {
   type BlogLanguage,
 } from '@/lib/blog-data';
 import { getPublishedBlogArticle } from '@/lib/blog-public-cache';
+import { getLatestMarketReportUrl } from '@/lib/market-report-public';
 
 function displayMonth(value: string, language: BlogLanguage): string {
   if (language === 'en') return shortMonthLabel(value);
@@ -28,6 +29,7 @@ export default async function PublishedBlogArticle({
   if (!article) notFound();
 
   const chinese = language === 'cn';
+  const marketReportHref = await getLatestMarketReportUrl(chinese ? 'zh' : 'en');
   const languageHref = article.translation_slug
     ? blogArticlePath(article.translation_slug, chinese ? 'en' : 'cn')
     : chinese ? '/blog' : '/blog/cn';
@@ -60,6 +62,19 @@ export default async function PublishedBlogArticle({
           <div className="mt-4 pt-4">
             <BlogRichTextRenderer content={article.content} />
           </div>
+          {marketReportHref && (
+            <section className="mt-8 mb-6" aria-label={chinese ? '推荐文章' : 'Recommended article'}>
+              <h2 className="text-lg font-semibold text-slate-700">
+                {chinese ? '推荐文章：' : 'Recommended article: '}
+                <Link
+                  href={marketReportHref}
+                  className="text-blue-700 hover:text-blue-900 hover:underline"
+                >
+                  {chinese ? '北岸市场报告' : 'North Shore Market Report'}
+                </Link>
+              </h2>
+            </section>
+          )}
           <BlogArticleFooter language={language} />
         </article>
       </main>

@@ -79,11 +79,32 @@ export default function PageViewsCard() {
     return [...periods.values()].slice(0, 4);
   }, [analytics]);
   const recentBlogPosts = useMemo(
-    () => (analytics?.blog_posts ?? [])
-      .filter((post) => post.status === 'published')
-      .slice()
-      .sort((a, b) => b.views.total - a.views.total)
-      .slice(0, 4),
+    () => {
+      const groups = new Map<string, {
+        id: string;
+        title: string;
+        published_at: string | null;
+        en?: PageViewAnalytics['blog_posts'][number];
+        cn?: PageViewAnalytics['blog_posts'][number];
+      }>();
+      for (const post of analytics?.blog_posts ?? []) {
+        if (post.status !== 'published') continue;
+        const group = groups.get(post.translation_group_id) ?? {
+          id: post.translation_group_id,
+          title: post.title,
+          published_at: post.published_at,
+        };
+        group[post.language] = post;
+        if (post.language === 'en') group.title = post.title;
+        if (post.published_at && (!group.published_at || post.published_at > group.published_at)) {
+          group.published_at = post.published_at;
+        }
+        groups.set(post.translation_group_id, group);
+      }
+      return [...groups.values()]
+        .sort((a, b) => (b.published_at ?? '').localeCompare(a.published_at ?? ''))
+        .slice(0, 4);
+    },
     [analytics],
   );
 
@@ -157,17 +178,21 @@ export default function PageViewsCard() {
             </div>
             <div className="border-t border-slate-100 pt-2">
               <div className="mb-1 flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-slate-700">Article Views</h3>
+                <h3 className="text-xs font-semibold text-slate-700">Article Views by Language</h3>
                 <Link href="/admin/blog" className="text-[11px] font-medium text-blue-700 hover:underline">
                   Open Blog
                 </Link>
               </div>
               {recentBlogPosts.length > 0 ? (
                 <div className="space-y-1">
-                  {recentBlogPosts.map((post) => (
-                    <div key={post.id} className="flex items-center justify-between gap-2 text-xs">
-                      <span className="truncate font-medium text-slate-700">{post.title}</span>
-                      <span className="shrink-0 text-slate-500">{formatCount(post.views.total)}</span>
+                  {recentBlogPosts.map((group) => (
+                    <div key={group.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate font-medium text-slate-700">{group.title}</span>
+                      <span className="shrink-0 text-slate-500">
+                        English {group.en ? formatCount(group.en.views.total) : '—'}
+                        {' · '}
+                        Chinese {group.cn ? formatCount(group.cn.views.total) : '—'}
+                      </span>
                     </div>
                   ))}
                 </div>

@@ -23,7 +23,7 @@ describe('PageViewsCard', () => {
         data: {
           home: { total: 1300, week: 80, month: 250, year: 1300 },
           market: { total: 420, week: 20, month: 75, year: 420 },
-          blog: { total: 90, week: 8, month: 24, year: 90 },
+          blog: { total: 101, week: 10, month: 24, year: 101 },
           reports: [
             {
               id: 'report-en',
@@ -44,13 +44,26 @@ describe('PageViewsCard', () => {
           ],
           blog_posts: [
             {
-              id: 'blog-post-1',
+              id: 'blog-post-en',
+              translation_group_id: 'selling-guide-group',
+              language: 'en',
               slug: 'selling-guide',
               title: 'Selling Guide',
               category_name: 'Sell',
               status: 'published',
               published_at: '2026-10-25T00:00:00.000Z',
               views: { total: 90, week: 8, month: 24, year: 90 },
+            },
+            {
+              id: 'blog-post-cn',
+              translation_group_id: 'selling-guide-group',
+              language: 'cn',
+              slug: 'selling-guide-cn',
+              title: '出售房屋指南',
+              category_name: 'Sell',
+              status: 'published',
+              published_at: '2026-10-26T00:00:00.000Z',
+              views: { total: 11, week: 2, month: 4, year: 11 },
             },
           ],
         },
@@ -64,8 +77,10 @@ describe('PageViewsCard', () => {
     expect(screen.getByText('Home Views')).toBeTruthy();
     expect(screen.getByText('Market Views')).toBeTruthy();
     expect(screen.getByText('Blog Views')).toBeTruthy();
-    expect(screen.getByText('Article Views')).toBeTruthy();
+    expect(screen.getByText('Article Views by Language')).toBeTruthy();
     expect(screen.getByText('Selling Guide')).toBeTruthy();
+    expect(screen.getByText('English 90 · Chinese 11')).toBeTruthy();
+    expect(screen.queryByText('出售房屋指南')).toBeNull();
     expect(screen.getByRole('link', { name: 'Open Blog' }).getAttribute('href')).toBe('/admin/blog');
     expect(screen.getByText('October 2026')).toBeTruthy();
     expect(screen.getByText('English 31 · Chinese 17')).toBeTruthy();

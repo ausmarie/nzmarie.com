@@ -53,6 +53,8 @@ describe('GET /api/admin/analytics/page-views', () => {
       return {
         rows: [{
           id: 'blog-1',
+          translation_group_id: 'blog-group-1',
+          language: 'en',
           slug: 'selling-guide',
           title: 'Selling Guide',
           category_name: 'Sell',
@@ -83,6 +85,8 @@ describe('GET /api/admin/analytics/page-views', () => {
     });
     expect(body.data.blog_posts[0]).toEqual({
       id: 'blog-1',
+      translation_group_id: 'blog-group-1',
+      language: 'en',
       slug: 'selling-guide',
       title: 'Selling Guide',
       category_name: 'Sell',
@@ -96,6 +100,7 @@ describe('GET /api/admin/analytics/page-views', () => {
     expect(queries.every((sql) => sql.includes("Pacific/Auckland"))).toBe(true);
     expect(queries[1]).toContain('LEFT JOIN page_view_events e ON e.report_id = r.id');
     expect(queries[2]).toContain('LEFT JOIN page_view_events e ON e.blog_post_id = p.id');
+    expect(queries[2]).toContain('p.translation_group_id');
     expect(mocks.processQueueBatch).not.toHaveBeenCalled();
   });
 

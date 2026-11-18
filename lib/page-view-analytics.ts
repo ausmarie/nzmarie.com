@@ -18,6 +18,8 @@ export interface PageViewReport {
 
 export interface PageViewBlogPost {
   id: string;
+  translation_group_id: string;
+  language: 'en' | 'cn';
   slug: string;
   title: string;
   category_name: string | null;

@@ -30,6 +30,8 @@ interface ReportRow extends PeriodCountRow {
 
 interface BlogPostRow extends PeriodCountRow {
   id: string;
+  translation_group_id: string;
+  language: 'en' | 'cn';
   slug: string;
   title: string;
   category_name: string | null;
@@ -108,6 +110,8 @@ async function loadPageViewAnalytics(syncQueue: boolean) {
       query<BlogPostRow>(
         `${periodBounds}
          SELECT p.id,
+                p.translation_group_id,
+                p.language,
                 COALESCE(p.published_slug, p.slug) AS slug,
                 COALESCE(p.published_title, p.title) AS title,
                 c.name AS category_name,
@@ -138,6 +142,8 @@ async function loadPageViewAnalytics(syncQueue: boolean) {
       })),
       blog_posts: blogPostsResult.rows.map((row) => ({
         id: row.id,
+        translation_group_id: row.translation_group_id,
+        language: row.language,
         slug: row.slug,
         title: row.title,
         category_name: row.category_name,
