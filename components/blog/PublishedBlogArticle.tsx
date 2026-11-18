@@ -70,7 +70,7 @@ export default async function PublishedBlogArticle({
                   href={marketReportHref}
                   className="text-blue-700 hover:text-blue-900 hover:underline"
                 >
-                  {chinese ? '北岸市场报告' : 'North Shore Market Report'}
+                  {chinese ? '北岸最新市场报告' : 'Latest North Shore Market Report'}
                 </Link>
               </h2>
             </section>

@@ -54,10 +54,10 @@ describe('PublishedBlogArticle recommendations', () => {
 
     render(await PublishedBlogArticle({ slug: 'selling-guide', language: 'en' }));
 
-    const reportLink = screen.getByRole('link', { name: 'North Shore Market Report' });
+    const reportLink = screen.getByRole('link', { name: 'Latest North Shore Market Report' });
     const note = screen.getByText('Note');
     expect(screen.getByRole('heading', {
-      name: 'Recommended article: North Shore Market Report',
+      name: 'Recommended article: Latest North Shore Market Report',
     })).toBeTruthy();
     expect(reportLink.parentElement?.tagName).toBe('H2');
     expect(reportLink.getAttribute('href')).toBe('/market-reports/october-2026');
@@ -72,12 +72,12 @@ describe('PublishedBlogArticle recommendations', () => {
 
     render(await PublishedBlogArticle({ slug: 'selling-guide-cn', language: 'cn' }));
 
-    const reportLink = screen.getByRole('link', { name: '北岸市场报告' });
-    expect(screen.getByRole('heading', { name: '推荐文章：北岸市场报告' })).toBeTruthy();
+    const reportLink = screen.getByRole('link', { name: '北岸最新市场报告' });
+    expect(screen.getByRole('heading', { name: '推荐文章：北岸最新市场报告' })).toBeTruthy();
     expect(reportLink.parentElement?.tagName).toBe('H2');
     expect(reportLink.getAttribute('href'))
       .toBe('/market-reports/october-2026/cn');
     expect(mocks.getLatestMarketReportUrl).toHaveBeenCalledWith('zh');
-    expect(screen.getByRole('heading', { name: '推荐文章：北岸市场报告' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '推荐文章：北岸最新市场报告' })).toBeTruthy();
   });
 });
