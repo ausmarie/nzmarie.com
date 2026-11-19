@@ -21,6 +21,18 @@ vi.mock('@/components/admin/ScanTrendsChart', () => ({
   default: () => <div data-testid="scan-trends-chart" />,
 }));
 
+vi.mock('@/components/admin/PageViewsProvider', () => ({
+  PageViewsProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('@/components/admin/PageViewsCard', () => ({
+  default: () => <div data-testid="page-views-card" />,
+}));
+
+vi.mock('@/components/admin/PageViewsTrendChart', () => ({
+  default: () => <div data-testid="page-views-trend-chart" />,
+}));
+
 vi.mock('@/components/admin/CampaignScanLogsPanel', () => ({
   default: () => <div data-testid="campaign-scan-logs-panel" />,
 }));
@@ -273,6 +285,38 @@ describe('Dashboard Stats API', () => {
       const followupSection = screen.queryByText(/Today's Follow-ups/i);
       expect(followupSection).toBeDefined();
     }, { timeout: 3000 });
+  });
+
+  it('places content view trends above Scan Trends', async () => {
+    useSessionMock = vi.fn().mockReturnValue({
+      data: { user: { email: 'nzmarie.com@gmail.com', name: 'Marie' } },
+      status: 'authenticated',
+    });
+
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.includes('/api/admin/dashboard/stats')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true, stats: {} }),
+        });
+      }
+      if (url.includes('/api/admin/bookings')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ data: [] }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    const DashboardPage = (await import('../../../app/admin/dashboard/page')).default;
+    const { container } = render(<DashboardPage />);
+
+    const trends = screen.getByTestId('page-views-trend-chart');
+    await screen.findByTestId('scan-trends-chart');
+    const scanTrends = screen.getByText('Scan Trends');
+    expect(trends.compareDocumentPosition(scanTrends) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector('[data-testid="page-views-card"]')).toBeTruthy();
   });
 
   it('handles API errors', async () => {

@@ -143,15 +143,36 @@ function valuesClause(rowCount: number, casts: string[]): string {
   }).join(', ');
 }
 
+function dailyRollupInsert(insertSql: string): string {
+  return `WITH inserted AS (${insertSql}),
+          daily_counts AS (
+            SELECT (created_at AT TIME ZONE 'Pacific/Auckland')::DATE AS view_date,
+                   page_type,
+                   COALESCE(report_id::STRING, blog_post_id::STRING, 'home') AS content_key,
+                   language,
+                   COUNT(*)::INT8 AS view_count
+            FROM inserted
+            GROUP BY 1, 2, 3, 4
+          )
+          INSERT INTO page_view_daily_stats (view_date, page_type, content_key, language, view_count)
+          SELECT view_date, page_type, content_key, language, view_count
+          FROM daily_counts
+          ON CONFLICT (view_date, page_type, content_key, language)
+          DO UPDATE SET view_count = page_view_daily_stats.view_count + excluded.view_count`;
+}
+
 async function persistPageViews(events: NormalizedPageView[]): Promise<void> {
   const homeEvents = events.filter((event) => event.pageType === 'home');
   if (homeEvents.length > 0) {
     const values = valuesClause(homeEvents.length, ['::uuid', '::varchar', '::varchar']);
     await query(
-      `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
-       SELECT event_id, 'home', NULL, NULL, language, page_path
-       FROM (VALUES ${values}) AS events(event_id, language, page_path)
-       ON CONFLICT (event_id) DO NOTHING`,
+      dailyRollupInsert(
+        `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
+         SELECT event_id, 'home', NULL, NULL, language, page_path
+         FROM (VALUES ${values}) AS events(event_id, language, page_path)
+         ON CONFLICT (event_id) DO NOTHING
+         RETURNING created_at, page_type, report_id, blog_post_id, language`,
+      ),
       homeEvents.flatMap((event) => [event.eventId, event.language, event.pagePath]),
     );
   }
@@ -166,15 +187,18 @@ async function persistPageViews(events: NormalizedPageView[]): Promise<void> {
       '::varchar',
     ]);
     await query(
-      `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
-       SELECT events.event_id, 'market_report', reports.id, NULL, events.language, events.page_path
-       FROM (VALUES ${values}) AS events(event_id, period_type, period_key, language, page_path)
-       JOIN north_shore_market_reports reports
-         ON reports.period_type = events.period_type
-        AND reports.period_key = events.period_key
-        AND reports.language = events.language
-        AND reports.status = 'published'
-       ON CONFLICT (event_id) DO NOTHING`,
+      dailyRollupInsert(
+        `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
+         SELECT events.event_id, 'market_report', reports.id, NULL, events.language, events.page_path
+         FROM (VALUES ${values}) AS events(event_id, period_type, period_key, language, page_path)
+         JOIN north_shore_market_reports reports
+           ON reports.period_type = events.period_type
+          AND reports.period_key = events.period_key
+          AND reports.language = events.language
+          AND reports.status = 'published'
+         ON CONFLICT (event_id) DO NOTHING
+         RETURNING created_at, page_type, report_id, blog_post_id, language`,
+      ),
       marketEvents.flatMap((event) => [
         event.eventId,
         event.periodType,
@@ -189,14 +213,17 @@ async function persistPageViews(events: NormalizedPageView[]): Promise<void> {
   if (blogEvents.length > 0) {
     const values = valuesClause(blogEvents.length, ['::uuid', '::varchar', '::varchar', '::varchar']);
     await query(
-      `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
-       SELECT events.event_id, 'blog_article', NULL, posts.id, events.language, events.page_path
-       FROM (VALUES ${values}) AS events(event_id, slug, language, page_path)
-       JOIN blog_posts posts
-         ON posts.published_slug = events.slug
-        AND posts.status = 'published'
-        AND posts.language = CASE events.language WHEN 'zh' THEN 'cn' ELSE 'en' END
-       ON CONFLICT (event_id) DO NOTHING`,
+      dailyRollupInsert(
+        `INSERT INTO page_view_events (event_id, page_type, report_id, blog_post_id, language, page_path)
+         SELECT events.event_id, 'blog_article', NULL, posts.id, events.language, events.page_path
+         FROM (VALUES ${values}) AS events(event_id, slug, language, page_path)
+         JOIN blog_posts posts
+           ON posts.published_slug = events.slug
+          AND posts.status = 'published'
+          AND posts.language = CASE events.language WHEN 'zh' THEN 'cn' ELSE 'en' END
+         ON CONFLICT (event_id) DO NOTHING
+         RETURNING created_at, page_type, report_id, blog_post_id, language`,
+      ),
       blogEvents.flatMap((event) => [
         event.eventId,
         event.slug,

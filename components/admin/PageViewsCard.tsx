@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import type { PageViewAnalytics, PageViewPeriods } from '@/lib/page-view-analytics';
 import { pageViewPeriodLabel } from '@/lib/page-view-analytics';
+import { usePageViews } from '@/components/admin/PageViewsProvider';
 
 function formatCount(value: number): string {
   return value.toLocaleString('en-NZ');
@@ -12,6 +13,7 @@ function formatCount(value: number): string {
 function PeriodCounts({ views }: { views: PageViewPeriods }) {
   return (
     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500">
+      <span>Today {formatCount(views.today)}</span>
       <span>This week: {formatCount(views.week)}</span>
       <span>This month: {formatCount(views.month)}</span>
       <span>This year: {formatCount(views.year)}</span>
@@ -20,62 +22,13 @@ function PeriodCounts({ views }: { views: PageViewPeriods }) {
 }
 
 export default function PageViewsCard() {
-  const [analytics, setAnalytics] = useState<PageViewAnalytics | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [queueWarning, setQueueWarning] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const loadAnalytics = useCallback(async (signal: AbortSignal) => {
-    setLoading(true);
-    setError(null);
-    setQueueWarning(null);
-    try {
-      const response = await fetch('/api/admin/analytics/page-views', {
-        method: 'POST',
-        cache: 'no-store',
-        signal,
-      });
-      const result = await response.json() as {
-        success: boolean;
-        data?: PageViewAnalytics;
-        error?: string;
-        queueSync?: { warning?: string };
-      };
-      if (!response.ok || !result.success || !result.data) {
-        throw new Error(result.error || 'Failed to load page views.');
-      }
-      setAnalytics(result.data);
-      setQueueWarning(result.queueSync?.warning ?? null);
-    } catch (caught) {
-      if (signal.aborted) return;
-      setError(caught instanceof Error ? caught.message : 'Failed to load page views.');
-    } finally {
-      if (!signal.aborted) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadAnalytics(controller.signal);
-    return () => controller.abort();
-  }, [loadAnalytics, reloadKey]);
-
-  useEffect(() => {
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') {
-        setReloadKey((key) => key + 1);
-      }
-    };
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => document.removeEventListener('visibilitychange', refreshWhenVisible);
-  }, []);
+  const { analytics, error, loading, refresh } = usePageViews();
 
   const recentPeriods = useMemo(() => {
     const periods = new Map<string, {
       label: string;
-      en?: number;
-      zh?: number;
+      en?: PageViewPeriods;
+      zh?: PageViewPeriods;
     }>();
     for (const report of analytics?.reports ?? []) {
       if (report.status === 'draft') continue;
@@ -83,7 +36,7 @@ export default function PageViewsCard() {
       const period = periods.get(key) ?? {
         label: pageViewPeriodLabel(report),
       };
-      period[report.language] = report.views.total;
+      period[report.language] = report.views;
       periods.set(key, period);
     }
     return [...periods.values()].slice(0, 4);
@@ -141,7 +94,7 @@ export default function PageViewsCard() {
           <p role="alert" className="text-sm text-red-700">Views unavailable: {error}</p>
           <button
             type="button"
-            onClick={() => setReloadKey((key) => key + 1)}
+            onClick={refresh}
             className="mt-2 text-xs font-medium text-blue-700 hover:underline"
           >
             Retry
@@ -150,7 +103,6 @@ export default function PageViewsCard() {
       ) : analytics ? (
         <>
           {error && <p role="alert" className="mb-2 text-xs text-red-700">Refresh failed: {error}</p>}
-          {queueWarning && <p role="alert" className="mb-2 text-xs text-amber-700">{queueWarning}</p>}
           <div className="space-y-3">
             <div className="rounded-md bg-blue-50 p-3">
               <p className="text-xs font-medium text-blue-800">Market Views</p>
@@ -174,10 +126,17 @@ export default function PageViewsCard() {
                   {recentPeriods.map((period) => (
                     <div key={period.label} className="flex items-center justify-between gap-2 text-xs">
                       <span className="truncate font-medium text-slate-700">{period.label}</span>
-                      <span className="shrink-0 text-slate-500">
-                        English {period.en === undefined ? '—' : formatCount(period.en)}
-                        {' · '}
-                        Chinese {period.zh === undefined ? '—' : formatCount(period.zh)}
+                      <span className="shrink-0 text-right text-slate-500">
+                        <span className="block">
+                          Today {formatCount((period.en?.today ?? 0) + (period.zh?.today ?? 0))}
+                          {' · '}
+                          Total {formatCount((period.en?.total ?? 0) + (period.zh?.total ?? 0))}
+                        </span>
+                        <span className="block text-[10px]">
+                          English {period.en ? formatCount(period.en.total) : '—'}
+                          {' · '}
+                          Chinese {period.zh ? formatCount(period.zh.total) : '—'}
+                        </span>
                       </span>
                     </div>
                   ))}
@@ -198,10 +157,17 @@ export default function PageViewsCard() {
                   {recentBlogPosts.map((group) => (
                     <div key={group.id} className="flex items-center justify-between gap-2 text-xs">
                       <span className="truncate font-medium text-slate-700">{group.title}</span>
-                      <span className="shrink-0 text-slate-500">
-                        English {group.en ? formatCount(group.en.views.total) : '—'}
-                        {' · '}
-                        Chinese {group.cn ? formatCount(group.cn.views.total) : '—'}
+                      <span className="shrink-0 text-right text-slate-500">
+                        <span className="block">
+                          Today {formatCount((group.en?.views.today ?? 0) + (group.cn?.views.today ?? 0))}
+                          {' · '}
+                          Total {formatCount((group.en?.views.total ?? 0) + (group.cn?.views.total ?? 0))}
+                        </span>
+                        <span className="block text-[10px]">
+                          English {group.en ? formatCount(group.en.views.total) : '—'}
+                          {' · '}
+                          Chinese {group.cn ? formatCount(group.cn.views.total) : '—'}
+                        </span>
                       </span>
                     </div>
                   ))}

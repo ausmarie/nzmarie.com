@@ -183,7 +183,23 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
         [post.translation_group_id, id],
       )
       : { rows: [] };
-    const result = await query(`DELETE FROM blog_posts WHERE id = $1 RETURNING id`, [id]);
+    const result = await query<{ id: string }>(
+      `WITH deleted_post AS (
+         DELETE FROM blog_posts
+         WHERE id = $1
+         RETURNING id
+       ),
+       deleted_stats AS (
+         DELETE FROM page_view_daily_stats
+         WHERE page_type = 'blog_article'
+           AND content_key IN (SELECT id::STRING FROM deleted_post)
+         RETURNING content_key
+       )
+       SELECT deleted_post.id
+       FROM deleted_post
+       CROSS JOIN (SELECT COUNT(*) FROM deleted_stats) AS cleanup`,
+      [id],
+    );
     if (!result.rows[0]) return NextResponse.json({ success: false, error: 'Blog article not found.' }, { status: 404 });
     if (post.published_slug) {
       revalidatePublishedBlogArticle(

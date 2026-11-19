@@ -20,7 +20,7 @@ vi.mock('next/cache', () => ({
 import { GET as getCategories, POST as createCategory } from '@/app/api/admin/blog/categories/route';
 import { DELETE as deleteCategory, PUT as updateCategory } from '@/app/api/admin/blog/categories/[id]/route';
 import { GET as getPosts, POST as createPost } from '@/app/api/admin/blog/posts/route';
-import { GET as getPost, PUT as updatePost } from '@/app/api/admin/blog/posts/[id]/route';
+import { DELETE as deletePost, GET as getPost, PUT as updatePost } from '@/app/api/admin/blog/posts/[id]/route';
 import { POST as createTranslation } from '@/app/api/admin/blog/posts/[id]/translation/route';
 import { POST as publishPost } from '@/app/api/admin/blog/posts/[id]/publish/route';
 import { currentBlogMonth } from '@/lib/blog-data';
@@ -243,6 +243,21 @@ describe('Blog admin APIs', () => {
     expect(body.post.article_month).toBe('2026-11-01');
     expect(body.post.reading_minutes).toBe(7);
     expect(body.post.published_reading_minutes).toBe(6);
+  });
+
+  it('removes daily view rollups when deleting a Blog article', async () => {
+    mocks.query
+      .mockResolvedValueOnce({
+        rows: [{ slug: 'selling-guide', published_slug: null, language: 'en', translation_group_id: id }],
+      })
+      .mockResolvedValueOnce({ rows: [{ id }] });
+
+    const response = await deletePost(new Request('http://localhost'), context());
+
+    expect(response.status).toBe(200);
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.query.mock.calls[1][0]).toContain('DELETE FROM page_view_daily_stats');
+    expect(mocks.query.mock.calls[1][0]).toContain('SELECT id::STRING FROM deleted_post');
   });
 
   it('rejects invalid article month values without writing', async () => {

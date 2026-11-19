@@ -10,6 +10,8 @@ import DispatchTrendSection, { DispatchTrend } from "@/components/admin/Dispatch
 import ScanTrendsChart from "@/components/admin/ScanTrendsChart";
 import CampaignScanLogsPanel from "@/components/admin/CampaignScanLogsPanel";
 import PageViewsCard from "@/components/admin/PageViewsCard";
+import { PageViewsProvider } from "@/components/admin/PageViewsProvider";
+import PageViewsTrendChart from "@/components/admin/PageViewsTrendChart";
 import { SUBURB_PRIORITY_ORDER } from "@/lib/suburb-order";
 
 interface SentSummaryItem {
@@ -272,6 +274,7 @@ export default function AdminDashboardPage() {
   });
 
   return (
+    <PageViewsProvider>
     <div className="space-y-6">
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
@@ -554,6 +557,8 @@ export default function AdminDashboardPage() {
 
       {stats?.dispatchTrend && <DispatchTrendSection trend={stats.dispatchTrend} />}
 
+      <PageViewsTrendChart />
+
       {showDeferred && (
         <>
       <div className="bg-white rounded-lg shadow-sm border border-slate-100">
@@ -803,5 +808,6 @@ export default function AdminDashboardPage() {
         </>
       )}
     </div>
+    </PageViewsProvider>
   );
 }

@@ -107,6 +107,12 @@ describe('page-view event queue', () => {
     });
     expect(mocks.query).toHaveBeenCalledTimes(3);
     expect(mocks.query.mock.calls[0][0]).toContain("SELECT event_id, 'home'");
+    expect(mocks.query.mock.calls.every(([sql]) => (
+      sql.includes('WITH inserted AS')
+      && sql.includes("AT TIME ZONE 'Pacific/Auckland'")
+      && sql.includes('INSERT INTO page_view_daily_stats')
+      && sql.includes('ON CONFLICT (event_id) DO NOTHING')
+    ))).toBe(true);
     expect(mocks.query.mock.calls[1][0]).toContain("reports.status = 'published'");
     expect(mocks.query.mock.calls[1][1]).toEqual([
       'c0a80123-4567-489a-8abc-0123456789ac',

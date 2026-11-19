@@ -1,7 +1,8 @@
 import React from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PageViewsCard from '@/components/admin/PageViewsCard';
+import { PageViewsProvider } from '@/components/admin/PageViewsProvider';
 
 vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -15,15 +16,16 @@ describe('PageViewsCard', () => {
     vi.unstubAllGlobals();
   });
 
-  it('shows Home, Market, and month-by-language view counts', async () => {
+  it('shows Today and period-by-language view counts from a shared read-only request', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         success: true,
         data: {
-          home: { total: 1300, week: 80, month: 250, year: 1300 },
-          market: { total: 420, week: 20, month: 75, year: 420 },
-          blog: { total: 101, week: 10, month: 24, year: 101 },
+          today_date: '2026-11-20',
+          home: { total: 1300, today: 11, week: 80, month: 250, year: 1300 },
+          market: { total: 420, today: 7, week: 20, month: 75, year: 420 },
+          blog: { total: 101, today: 4, week: 10, month: 24, year: 101 },
           reports: [
             {
               id: 'report-en',
@@ -31,7 +33,7 @@ describe('PageViewsCard', () => {
               period_key: '2026-10',
               language: 'en',
               status: 'published',
-              views: { total: 31, week: 4, month: 9, year: 31 },
+              views: { total: 31, today: 3, week: 4, month: 9, year: 31 },
             },
             {
               id: 'report-zh',
@@ -39,7 +41,7 @@ describe('PageViewsCard', () => {
               period_key: '2026-10',
               language: 'zh',
               status: 'published',
-              views: { total: 17, week: 2, month: 5, year: 17 },
+              views: { total: 17, today: 1, week: 2, month: 5, year: 17 },
             },
           ],
           blog_posts: [
@@ -52,7 +54,7 @@ describe('PageViewsCard', () => {
               category_name: 'Sell',
               status: 'published',
               published_at: '2026-10-25T00:00:00.000Z',
-              views: { total: 90, week: 8, month: 24, year: 90 },
+              views: { total: 90, today: 3, week: 8, month: 24, year: 90 },
             },
             {
               id: 'blog-post-cn',
@@ -63,15 +65,20 @@ describe('PageViewsCard', () => {
               category_name: 'Sell',
               status: 'published',
               published_at: '2026-10-26T00:00:00.000Z',
-              views: { total: 11, week: 2, month: 4, year: 11 },
+              views: { total: 11, today: 1, week: 2, month: 4, year: 11 },
             },
           ],
+          trend: [],
         },
       }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<PageViewsCard />);
+    render(
+      <PageViewsProvider>
+        <PageViewsCard />
+      </PageViewsProvider>,
+    );
 
     expect(await screen.findByText('1,300')).toBeTruthy();
     expect(screen.getByText('Home Views')).toBeTruthy();
@@ -80,14 +87,15 @@ describe('PageViewsCard', () => {
     expect(screen.getByText('Article Views by Language')).toBeTruthy();
     expect(screen.getByText('Selling Guide')).toBeTruthy();
     expect(screen.getByText('English 90 · Chinese 11')).toBeTruthy();
+    expect(screen.getByText('Today 4 · Total 101')).toBeTruthy();
     expect(screen.queryByText('出售房屋指南')).toBeNull();
     expect(screen.getByRole('link', { name: 'Open Blog' }).getAttribute('href')).toBe('/admin/blog');
     expect(screen.getByText('October 2026')).toBeTruthy();
-    expect(screen.getByText('English 31 · Chinese 17')).toBeTruthy();
+    expect(screen.getByText('Today 4 · Total 48')).toBeTruthy();
     expect(screen.getByText('This week: 80')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/admin/analytics/page-views',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ cache: 'no-store' }),
     );
     expect(
       screen.getByText('Market Views').compareDocumentPosition(screen.getByText('Report Views by Period'))
@@ -97,9 +105,6 @@ describe('PageViewsCard', () => {
       screen.getByText('Report Views by Period').compareDocumentPosition(screen.getByText('Home Views'))
         & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
-    document.dispatchEvent(new Event('visibilitychange'));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

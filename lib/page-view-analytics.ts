@@ -2,9 +2,18 @@ import type { MarketReportLanguage, MarketReportPeriodType } from '@/lib/market-
 
 export interface PageViewPeriods {
   total: number;
+  today: number;
   week: number;
   month: number;
   year: number;
+}
+
+export interface PageViewTrendPoint {
+  page_type: 'market_report' | 'blog_article';
+  content_id: string;
+  language: 'en' | 'zh';
+  date: string;
+  views: number;
 }
 
 export interface PageViewReport {
@@ -29,11 +38,13 @@ export interface PageViewBlogPost {
 }
 
 export interface PageViewAnalytics {
+  today_date: string;
   home: PageViewPeriods;
   market: PageViewPeriods;
   blog: PageViewPeriods;
   reports: PageViewReport[];
   blog_posts: PageViewBlogPost[];
+  trend: PageViewTrendPoint[];
 }
 
 export function pageViewPeriodLabel(
