@@ -73,6 +73,8 @@ export const reportDownloads = pgTable('report_downloads', {
   name: varchar('name', { length: 255 }),
   phone: varchar('phone', { length: 50 }),
   suburb: varchar('suburb', { length: 100 }).notNull(),
+  entry_language: varchar('entry_language', { length: 5 }).notNull().default('en'),
+  preferred_language: varchar('preferred_language', { length: 5 }).notNull().default('en'),
   report_type: varchar('report_type', { length: 50 }).default('local_market'),
   downloaded_at: timestamp('downloaded_at', { withTimezone: true }).defaultNow().notNull(),
   source: varchar('source', { length: 50 }),

@@ -366,21 +366,11 @@ describe('PDF Manager & Report Download API Routes', () => {
     });
   });
 
-  describe('POST /api/reports/download (Homepage download for Oteha)', () => {
-    it('returns latest active PDF report from suburb_reports for Oteha', async () => {
+  describe('POST /api/reports/download (Homepage report request for Oteha)', () => {
+    it('records an email report request for Oteha', async () => {
       vi.mocked(query)
         .mockResolvedValueOnce({ rows: [{ count: '0' }] } as any)
-        .mockResolvedValueOnce({
-          rows: [
-            {
-              id: 'report-1',
-              file_url: 'https://r2.nzmarie.com/reports/Oteha/Q2-2026.pdf',
-            },
-          ],
-        } as any)
-        .mockResolvedValueOnce({ rows: [] } as any)
         .mockResolvedValueOnce({ rows: [{ id: 'event-1' }] } as any)
-        .mockResolvedValueOnce({ rows: [] } as any)
         .mockResolvedValueOnce({ rows: [{ id: 'download-1' }] } as any);
 
       const request = new Request('http://localhost:3000/api/reports/download', {
@@ -398,13 +388,12 @@ describe('PDF Manager & Report Download API Routes', () => {
 
       const data = await response.json();
       expect(data.success).toBe(true);
-      expect(data.downloadUrl).toBe('https://r2.nzmarie.com/reports/Oteha/Q2-2026.pdf');
-
-      const downloadQuery = vi.mocked(query).mock.calls.find(
-        ([sql]) => typeof sql === 'string' && sql.includes('FROM suburb_reports')
+      expect(data.action).toBe('request');
+      expect(data.downloadUrl).toBeUndefined();
+      const requestQuery = vi.mocked(query).mock.calls.find(
+        ([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO report_downloads')
       )?.[0] as string;
-      expect(downloadQuery).toBeDefined();
-      expect(downloadQuery.indexOf('Main Report')).toBeLessThan(downloadQuery.indexOf('year DESC'));
+      expect(requestQuery).toBeDefined();
     });
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "../../app/api/reports/download/route";
+import { SUBURB_PRIORITY_ORDER } from "../../lib/suburb-order";
 
 vi.mock("../../lib/db", async (importOriginal) => {
   const mockQuery = vi.fn();
@@ -10,10 +11,6 @@ vi.mock("../../lib/db", async (importOriginal) => {
     },
   };
 });
-
-vi.mock("../../lib/r2-storage", () => ({
-  getSignedDownloadUrl: vi.fn().mockResolvedValue("https://r2.example.com/signed-url?token=abc"),
-}));
 
 import { query } from "../../lib/db";
 
@@ -38,20 +35,51 @@ describe("POST /api/reports/download (refactored)", () => {
     });
   }
 
-  it("returns 200 with signed URL on valid request", async () => {
+  it("records the request and confirms it will be emailed", async () => {
     vi.mocked(query)
       .mockResolvedValueOnce({ rows: [{ count: "0" }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any)
-      .mockResolvedValueOnce({ rows: [{ r2_key: "reports/Albany/2026-Q2.pdf" }] } as any)
       .mockResolvedValueOnce({ rows: [{ id: "event-uuid" }] } as any)
-      .mockResolvedValueOnce({ rows: [] } as any);
+      .mockResolvedValueOnce({ rows: [{ id: "request-uuid" }] } as any);
 
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
-    expect(json.action).toBe("download");
-    expect(json.downloadUrl).toBe("https://r2.example.com/signed-url?token=abc");
+    expect(json.action).toBe("request");
+    expect(json.downloadUrl).toBeUndefined();
+    expect(vi.mocked(query).mock.calls.some(([sql]) =>
+      typeof sql === "string" && sql.includes("INSERT INTO report_downloads")
+    )).toBe(true);
+  });
+
+  it("stores both entry and preferred report languages", async () => {
+    vi.mocked(query)
+      .mockResolvedValueOnce({ rows: [{ count: "0" }] } as any)
+      .mockResolvedValueOnce({ rows: [{ id: "event-uuid" }] } as any)
+      .mockResolvedValueOnce({ rows: [{ id: "request-uuid" }] } as any);
+
+    const res = await POST(makeRequest({
+      ...validBody,
+      entryLanguage: "zh",
+      preferredLanguage: "en",
+    }));
+
+    expect(res.status).toBe(200);
+    const eventInsert = vi.mocked(query).mock.calls.find(([sql]) =>
+      typeof sql === "string" && sql.includes("INSERT INTO report_download_events")
+    );
+    const requestInsert = vi.mocked(query).mock.calls.find(([sql]) =>
+      typeof sql === "string" && sql.includes("INSERT INTO report_downloads")
+    );
+    expect(eventInsert?.[1]).toContain("zh");
+    expect(eventInsert?.[1]).toContain("en");
+    expect(requestInsert?.[1]).toContain("zh");
+    expect(requestInsert?.[1]).toContain("en");
+  });
+
+  it("rejects unsupported language values", async () => {
+    const res = await POST(makeRequest({ ...validBody, preferredLanguage: "fr" }));
+    expect(res.status).toBe(400);
   });
 
   it("returns 400 for invalid email", async () => {
@@ -61,6 +89,12 @@ describe("POST /api/reports/download (refactored)", () => {
 
   it("returns 400 for invalid suburb", async () => {
     const res = await POST(makeRequest({ ...validBody, suburb: "FakeSuburb" }));
+    expect(res.status).toBe(400);
+  });
+
+  it("does not allow North Shore as a selectable suburb", async () => {
+    expect(SUBURB_PRIORITY_ORDER).not.toContain("North Shore");
+    const res = await POST(makeRequest({ ...validBody, suburb: "North Shore" }));
     expect(res.status).toBe(400);
   });
 

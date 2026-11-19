@@ -16,6 +16,8 @@ interface Download {
   downloaded_at: string;
   source: string;
   tracking_code: string | null;
+  entry_language: string;
+  preferred_language: string;
   created_at: string;
 }
 
@@ -213,6 +215,8 @@ export default function DownloadsPage() {
                   <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Email</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Name</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Suburb</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Page Language</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Report Language</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Downloaded</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Source</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-slate-500 uppercase">Tracking Code</th>
@@ -224,6 +228,12 @@ export default function DownloadsPage() {
                     <td className="px-4 py-3 text-sm text-slate-600">{item.email}</td>
                     <td className="px-4 py-3 text-sm font-medium text-slate-900">{item.name}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{item.suburb}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {(item.entry_language || 'en') === 'zh' ? '中文' : 'English'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {(item.preferred_language || 'en') === 'zh' ? '中文' : 'English'}
+                    </td>
                     <td className="px-4 py-3 text-sm text-slate-500">
                       {new Date(item.downloaded_at).toLocaleDateString('en-NZ', {
                         year: 'numeric',

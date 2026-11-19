@@ -859,7 +859,7 @@ export async function GET(request: Request) {
             recent_downloads_cte AS (
               SELECT
                 id, email, name, suburb,
-                downloaded_at, source, tracking_code
+                downloaded_at, source, tracking_code, entry_language, preferred_language
               FROM report_downloads
               ORDER BY downloaded_at DESC
               LIMIT 5

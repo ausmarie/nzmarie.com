@@ -3,19 +3,31 @@
 import React, { useState } from "react";
 import { toast } from "react-toastify";
 import { translations, Language } from "../lib/translations";
+import { SUBURB_PRIORITY_ORDER } from "../lib/suburb-order";
 
 export default function ReportDownloadSection({ lang = "en" }: { lang?: Language }) {
   const t = translations[lang].reportDownload;
+  const [reportLanguage, setReportLanguage] = useState<Language>(lang);
   
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    firstName: string;
+    email: string;
+    phone: string;
+    suburb: string;
+    subscribe: boolean;
+  }>({
     firstName: "",
     email: "",
     phone: "",
-    suburb: "North Shore",
+    suburb: SUBURB_PRIORITY_ORDER[0],
     subscribe: false,
   });
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error" | "limit">("idle");
   const [limitInfo, setLimitInfo] = useState<{ remaining: number; canDownload: boolean } | null>(null);
+
+  React.useEffect(() => {
+    setReportLanguage(lang);
+  }, [lang]);
 
   // Check download limit when email changes
   React.useEffect(() => {
@@ -60,26 +72,25 @@ export default function ReportDownloadSection({ lang = "en" }: { lang?: Language
       const res = await fetch("/api/reports/download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          entryLanguage: lang,
+          preferredLanguage: reportLanguage,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
 
-      if (res.ok && data.action === "download" && data.downloadUrl) {
+      if (res.ok && data.action === "request") {
         setStatus("success");
-        window.open(data.downloadUrl, "_blank", "noopener,noreferrer");
         toast.success(t.success, { toastId: "report-download-success", autoClose: 5000 });
         setTimeout(() => {
           setStatus("idle");
-          // Re-check limit after download
           setLimitInfo(null);
         }, 3000);
       } else if (data.reason === "limit") {
         setStatus("limit");
         toast.warning(t.limitReached, { toastId: "report-download-limit", autoClose: 6000 });
-      } else if (data.reason === "no_report") {
-        toast.info(t.inProgress, { toastId: "report-no-report", autoClose: 6000 });
-        setStatus("idle");
       } else {
         setStatus("error");
         toast.error(t.error, { toastId: "report-download-error" });
@@ -110,6 +121,29 @@ export default function ReportDownloadSection({ lang = "en" }: { lang?: Language
           onSubmit={handleSubmit}
           className="bg-white text-slate-900 p-6 md:p-10 rounded-2xl shadow-2xl space-y-6"
         >
+          <fieldset>
+            <legend className="block text-sm font-semibold text-slate-700 mb-2">
+              {t.reportLanguage}
+            </legend>
+            <div className="inline-flex rounded-lg border border-slate-300 p-1" role="group" aria-label={t.reportLanguage}>
+              {(["en", "zh"] as const).map((language) => (
+                <button
+                  key={language}
+                  type="button"
+                  aria-pressed={reportLanguage === language}
+                  onClick={() => setReportLanguage(language)}
+                  className={`rounded-md px-4 py-2 text-sm font-semibold transition-colors ${
+                    reportLanguage === language
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {language === "en" ? "English" : "中文"}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="flex flex-col">
               <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -149,17 +183,9 @@ export default function ReportDownloadSection({ lang = "en" }: { lang?: Language
                 onChange={(e) => setFormData({ ...formData, suburb: e.target.value })}
                 className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 bg-white"
               >
-                <option value="North Shore">North Shore</option>
-                <option value="Oteha">Oteha</option>
-                <option value="Northcross">Northcross</option>
-                <option value="Albany">Albany</option>
-                <option value="Browns Bay">Browns Bay</option>
-                <option value="Glenfield">Glenfield</option>
-                <option value="Pinehill">Pinehill</option>
-                <option value="Rosedale">Rosedale</option>
-                <option value="Long Bay">Long Bay</option>
-                <option value="Torbay">Torbay</option>
-                <option value="Mairangi Bay">Mairangi Bay</option>
+                {SUBURB_PRIORITY_ORDER.map((suburb) => (
+                  <option key={suburb} value={suburb}>{suburb}</option>
+                ))}
               </select>
             </div>
             <div className="flex flex-col">
@@ -188,7 +214,7 @@ export default function ReportDownloadSection({ lang = "en" }: { lang?: Language
           {limitInfo && !limitInfo.canDownload && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mt-2">
               <p className="text-amber-800 text-sm font-medium">
-                ⚠️ Download limit reached (5 per month).{" "}
+                ⚠️ Request limit reached (5 per month).{" "}
                 <a href="#appraisal" className="text-blue-600 underline hover:text-blue-700">
                   Request a personalized analysis instead
                 </a>
@@ -199,7 +225,7 @@ export default function ReportDownloadSection({ lang = "en" }: { lang?: Language
           {limitInfo && limitInfo.canDownload && limitInfo.remaining <= 2 && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-2">
               <p className="text-blue-700 text-xs">
-                ℹ️ {limitInfo.remaining} download{limitInfo.remaining !== 1 ? 's' : ''} remaining this month
+                ℹ️ {limitInfo.remaining} request{limitInfo.remaining !== 1 ? 's' : ''} remaining this month
               </p>
             </div>
           )}

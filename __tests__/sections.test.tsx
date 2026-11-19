@@ -4,6 +4,7 @@ import React from "react";
 import AppraisalSection from "../components/AppraisalSection";
 import ReportDownloadSection from "../components/ReportDownloadSection";
 import { toast } from "react-toastify";
+import { SUBURB_PRIORITY_ORDER } from "../lib/suburb-order";
 
 vi.mock("react-toastify", () => ({
   toast: {
@@ -76,7 +77,6 @@ document.createElement = vi.fn((tagName: string) => {
 
 let mockFetchSuccess = true;
 let errorOnAppraisalSubmit = false;
-let mockNoReport = false;
 
 const mockFetchImpl = (url: unknown, options?: unknown) => {
   // API endpoints (not Google Maps)
@@ -96,18 +96,19 @@ const mockFetchImpl = (url: unknown, options?: unknown) => {
     });
   }
 
+  if (typeof url === 'string' && url.includes("/api/reports/check-limit")) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ success: true, canDownload: true, remaining: 5 }),
+    });
+  }
+
   if (!mockFetchSuccess) {
     return Promise.reject(new Error("API Error"));
   }
-  if (mockNoReport) {
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ success: false, reason: "no_report" }),
-    });
-  }
   return Promise.resolve({
     ok: true,
-    json: () => Promise.resolve({ success: true, action: "download", downloadUrl: "https://example.com/mock.pdf" }),
+    json: () => Promise.resolve({ success: true, action: "request" }),
   });
 };
 const mockFetch = vi.fn(mockFetchImpl);
@@ -254,7 +255,6 @@ describe("ReportDownloadSection", () => {
   beforeEach(() => {
     mockFetch.mockClear();
     mockFetchSuccess = true;
-    mockNoReport = false;
     mockFetch.mockImplementation(mockFetchImpl);
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
@@ -269,7 +269,8 @@ describe("ReportDownloadSection", () => {
 
   it("should render translations and handle inputs", () => {
     render(<ReportDownloadSection lang="en" />);
-    expect(screen.getByText("Access the Latest Auckland & North Shore Hyper-Local Market Report")).toBeDefined();
+    expect(screen.getByText("Access the Latest North Shore Suburb Reports")).toBeDefined();
+    expect(screen.getByText("North Shore Suburbs")).toBeDefined();
 
     const firstNameInput = screen.getByPlaceholderText("e.g. Jane");
     const emailInput = screen.getByPlaceholderText("e.g. jane@example.com");
@@ -280,12 +281,27 @@ describe("ReportDownloadSection", () => {
     expect((firstNameInput as HTMLInputElement).value).toBe("Jane");
   });
 
-  it("should submit form successfully and trigger download", async () => {
-    Object.defineProperty(window, "location", {
-      value: { assign: vi.fn() },
-      writable: true,
-    });
+  it("uses the Assets suburb order without North Shore", () => {
+    render(<ReportDownloadSection lang="en" />);
+    const suburbSelect = screen.getByRole("combobox") as HTMLSelectElement;
+    expect(Array.from(suburbSelect.options).map((option) => option.value)).toEqual([...SUBURB_PRIORITY_ORDER]);
+    expect(Array.from(suburbSelect.options).some((option) => option.value === "North Shore")).toBe(false);
+  });
 
+  it("defaults the report language to the page language and allows switching", () => {
+    const { unmount } = render(<ReportDownloadSection lang="en" />);
+    expect(screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "中文" }));
+    expect(screen.getByRole("button", { name: "中文" }).getAttribute("aria-pressed")).toBe("true");
+
+    unmount();
+    render(<ReportDownloadSection lang="zh" />);
+    expect(screen.getByRole("button", { name: "中文" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "English" }));
+    expect(screen.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("submits a report request and confirms Marie will email the report", async () => {
     render(<ReportDownloadSection lang="en" />);
     const firstNameInput = screen.getByPlaceholderText("e.g. Jane");
     const emailInput = screen.getByPlaceholderText("e.g. jane@example.com");
@@ -293,6 +309,7 @@ describe("ReportDownloadSection", () => {
 
     fireEvent.change(firstNameInput, { target: { value: "Jane" } });
     fireEvent.change(emailInput, { target: { value: "jane@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "中文" }));
 
     fireEvent.click(submitBtn);
 
@@ -302,7 +319,14 @@ describe("ReportDownloadSection", () => {
     });
 
     expect(mockFetch).toHaveBeenCalledWith("/api/reports/download", expect.any(Object));
-    expect(toast.success).toHaveBeenCalledWith("Thank you! Your download has started.", expect.any(Object));
+    const requestCall = mockFetch.mock.calls.find(([url]) => url === "/api/reports/download");
+    const submittedData = JSON.parse((requestCall?.[1] as { body: string }).body);
+    expect(submittedData.entryLanguage).toBe("en");
+    expect(submittedData.preferredLanguage).toBe("zh");
+    expect(toast.success).toHaveBeenCalledWith(
+      "Your request has been received. Marie will email you the suburb report when it is ready.",
+      expect.any(Object)
+    );
   });
 
   it("should handle error state when api fails", async () => {
@@ -324,24 +348,4 @@ describe("ReportDownloadSection", () => {
     expect(toast.error).toHaveBeenCalledWith("An error occurred. Please try again.", expect.any(Object));
   });
 
-  it("shows in-progress message when the selected suburb has no report", async () => {
-    mockNoReport = true;
-    render(<ReportDownloadSection lang="en" />);
-    const firstNameInput = screen.getByPlaceholderText("e.g. Jane");
-    const emailInput = screen.getByPlaceholderText("e.g. jane@example.com");
-    const submitBtn = screen.getByRole("button", { name: /Download PDF Report/i });
-
-    fireEvent.change(firstNameInput, { target: { value: "Jane" } });
-    fireEvent.change(emailInput, { target: { value: "jane@example.com" } });
-
-    fireEvent.click(submitBtn);
-
-    await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith(
-        "The report for this suburb is currently being prepared. Please check back soon.",
-        expect.any(Object)
-      );
-    });
-    mockNoReport = false;
-  });
 });

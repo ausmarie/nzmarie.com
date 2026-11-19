@@ -218,8 +218,8 @@ describe("POST /api/reports/download", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
-    expect(json.action).toBe("download");
-    expect(json.downloadUrl).toBe("https://example.com/mock.pdf");
+    expect(json.action).toBe("request");
+    expect(json.downloadUrl).toBeUndefined();
   });
 
   it("returns 400 on invalid JSON body", async () => {

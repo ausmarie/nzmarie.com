@@ -6,7 +6,7 @@ const DOWNLOAD_LIMIT = 5;
 const DOWNLOAD_WINDOW_DAYS = 30;
 
 /**
- * Check if user has reached download limit
+ * Check if user has reached report-request limit
  * GET /api/reports/check-limit?email=xxx&suburb=xxx
  */
 export async function GET(req: Request) {
@@ -39,7 +39,7 @@ export async function GET(req: Request) {
     const normalizedEmail = email.trim().toLowerCase();
     const emailHash = hashEmail(normalizedEmail);
 
-    // Check downloads in the last 30 days for this email+suburb combination
+    // Check report requests in the last 30 days for this email+suburb combination
     const result = await query<{ count: string }>(
       `SELECT COUNT(*) AS count
        FROM report_download_events
@@ -62,8 +62,8 @@ export async function GET(req: Request) {
       limit: DOWNLOAD_LIMIT,
       windowDays: DOWNLOAD_WINDOW_DAYS,
       message: canDownload
-        ? `You have ${remaining} download${remaining !== 1 ? 's' : ''} remaining this month.`
-        : "You've reached the download limit. Please contact Marie for assistance.",
+        ? `You have ${remaining} report request${remaining !== 1 ? 's' : ''} remaining this month.`
+        : "You've reached the report-request limit. Please contact Marie for assistance.",
     });
   } catch (error) {
     console.error("Check limit API error:", error);

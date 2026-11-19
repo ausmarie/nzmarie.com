@@ -675,7 +675,7 @@ describe('Dashboard Stats API', () => {
             pendingOutreach: 0,
             todayFollowups: 0,
             overdueFollowups: 0,
-            todayDownloads: 0,
+            todayDownloads: 4,
             totalBookings: 9,
             recentAppraisals: [
               {
@@ -707,6 +707,17 @@ describe('Dashboard Stats API', () => {
               quarterly: [],
             },
             scanStats: { total_scans: 42, total_unique: 18, campaigns: [] },
+            recentDownloads: [{
+              id: 'request-1',
+              email: 'chinese@example.com',
+              name: 'Chinese User',
+              suburb: 'Northcross',
+              downloaded_at: '2026-11-18T10:00:00.000Z',
+              source: 'organic',
+              tracking_code: null,
+              entry_language: 'zh',
+              preferred_language: 'zh',
+            }],
           },
         }),
       })
@@ -747,6 +758,11 @@ describe('Dashboard Stats API', () => {
     expect(within(appraisalCard).getByText('Louis Augustine')).toBeTruthy();
     expect(within(appraisalCard).getByText('nzlouis.com@gmail.com')).toBeTruthy();
     expect(within(appraisalCard).getAllByText(/Oct/).length).toBeGreaterThan(0);
+    const downloadsCard = cards.find((card) => card.textContent?.includes('Total Downloads')) as HTMLElement;
+    expect(within(downloadsCard).getByText('Today: 4 new requests')).toBeTruthy();
+    expect(screen.getByText('Page Language')).toBeTruthy();
+    expect(screen.getByText('Report Language')).toBeTruthy();
+    expect(screen.getAllByText('中文')).toHaveLength(2);
   });
 
   it('shows an empty appraisals state when there are none', async () => {    useSessionMock = vi.fn().mockReturnValue({

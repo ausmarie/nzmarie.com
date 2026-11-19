@@ -117,9 +117,17 @@ async function initDatabase() {
         accept_monthly_newsletter BOOLEAN DEFAULT false,
         ip_hash VARCHAR(64) NOT NULL,
         user_agent TEXT,
+        entry_language VARCHAR(5) NOT NULL DEFAULT 'en',
+        preferred_language VARCHAR(5) NOT NULL DEFAULT 'en',
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+    `);
+
+    await pool.query(`
+      ALTER TABLE report_download_events
+        ADD COLUMN IF NOT EXISTS entry_language VARCHAR(5) NOT NULL DEFAULT 'en',
+        ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(5) NOT NULL DEFAULT 'en';
     `);
 
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_admin_users_email ON admin_users (email);`);
