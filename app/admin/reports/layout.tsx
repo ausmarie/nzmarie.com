@@ -143,7 +143,7 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
   return (
     <>
       <style>{`
-        .print-page-header, .print-page-footer { display: none; }
+        .print-page-header, .print-page-footer, .print-page-footer-page { display: none; }
         .about-marie-editor [data-block-type="image"]:first-child {
           float: left;
           margin: 0 24px 16px 0;
@@ -156,34 +156,37 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
           padding-top: 0;
         }
 
-        /* Premium Suburb Title Section (H1) Flex Container */
         .is-quarterly-report h1 {
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
-          gap: 16px !important; /* flex items-center gap-4 */
+          gap: 16px !important;
           text-decoration: none !important;
           border-bottom: none !important;
         }
 
         @media print {
-          /* Hide navigation bar */
           nav { display: none !important; }
-          /* Hide default report footer */
           .print-footer { display: none !important; }
-          
           .reports-sidebar { display: none !important; }
-          .reports-toolbar { display: none !important; }
+          .reports-toolbar-wrapper, .reports-toolbar { display: none !important; }
           .reports-editor-status { display: none !important; }
           .edit-header-footer-btn { display: none !important; }
+          [data-print-page-limit-hidden] { display: none !important; }
+          .report-content-wrapper.is-paginated-report {
+            position: static !important;
+            max-height: 594mm !important;
+            overflow: hidden !important;
+          }
+
           body {
+            position: relative !important;
             overflow: visible !important;
             background: white !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          
-          /* Reset AdminLayout wrappers */
+
           .min-h-screen,
           main,
           .max-w-7xl {
@@ -193,7 +196,7 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
             min-height: 0 !important;
             background: transparent !important;
           }
-          
+
           .reports-layout-wrapper {
             position: static !important;
             overflow: visible !important;
@@ -246,7 +249,6 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
             display: none !important;
           }
 
-          /* ===== Print Header & Footer ===== */
           .print-page-header {
             display: flex !important;
             align-items: center !important;
@@ -286,7 +288,7 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
           .print-page-footer-text {
             flex: 1 1 auto !important;
             min-width: 0 !important;
-            padding-right: 24px !important;
+            padding-right: 120px !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             font-size: 11px !important;
@@ -294,15 +296,15 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
             font-weight: 400 !important;
           }
           .print-page-footer-page {
-            flex-shrink: 0 !important;
-            white-space: nowrap !important;
+            display: block !important;
+            position: absolute !important;
+            right: 54px !important;
+            z-index: 10000 !important;
             font-size: 11px !important;
             color: #000000 !important;
             font-weight: 400 !important;
             letter-spacing: 0.025em !important;
-          }
-          .page-count::before {
-            content: counter(page) !important;
+            line-height: 1 !important;
           }
         }
       `}</style>

@@ -12,6 +12,8 @@ import { useReportStore } from '../stores/report-store';
 import { useCtrlS } from '../hooks/useCtrlS';
 import type { ReportDocument, ReportEditorContent } from '@/types/report';
 
+const MAX_REPORT_PRINT_PAGES = 2;
+
 export default function DocumentViewer({ docId, onNavigate }: { docId: string; onNavigate?: (id: string | null) => void }) {
   const router = useRouter();
   const setSelectedDocId = useReportStore((state) => state.setSelectedDocId);
@@ -31,8 +33,6 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
   const [headerContent, setHeaderContent] = useState('');
   const [footerContent, setFooterContent] = useState('');
   const getContentRef = useRef<(() => ReportEditorContent | null) | null>(null);
-  const pageNumber = 1;
-  const totalPages = 2;
 
   useEffect(() => {
     setSelectedDocId(docId);
@@ -165,8 +165,29 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
   }, []);
 
   const handleExport = useCallback(() => {
+    const pageThreeStart = doc?.doc_type === 'report'
+      ? document
+          .querySelector('.report-editor-container')
+          ?.querySelectorAll('[data-block-type="divider"] + [data-block-type="heading"]')
+          .item(1)
+      : null;
+    const hiddenBlocks: HTMLElement[] = [];
+
+    for (let block: Element | null = pageThreeStart ?? null; block; block = block.nextElementSibling) {
+      if (block instanceof HTMLElement) {
+        block.setAttribute('data-print-page-limit-hidden', 'true');
+        hiddenBlocks.push(block);
+      }
+    }
+
+    if (hiddenBlocks.length > 0) {
+      window.addEventListener('afterprint', () => {
+        hiddenBlocks.forEach((block) => block.removeAttribute('data-print-page-limit-hidden'));
+      }, { once: true });
+    }
+
     window.print();
-  }, []);
+  }, [doc?.doc_type]);
 
   const toSlug = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 
@@ -252,8 +273,10 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: isAboutMarie ? '#f8fafc' : 'white' }}>
-      <div style={{ flexShrink: 0, position: 'sticky', top: 0, zIndex: 10, background: 'white' }}>
+    <div
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', background: isAboutMarie ? '#f8fafc' : 'white' }}
+    >
+      <div className="report-toolbar-wrapper" style={{ flexShrink: 0, position: 'sticky', top: 0, zIndex: 10, background: 'white' }}>
           <ReportToolbar
             title={title}
             onTitleChange={handleTitleChange}
@@ -289,7 +312,10 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
         onSave={handleHeaderFooterSave}
         onCancel={() => setShowHeaderFooter(false)}
       />
-      <div style={{ flex: 1, position: 'relative' }}>
+      <div
+        className={`report-content-wrapper${doc.doc_type === 'report' ? ' is-paginated-report' : ''}`}
+        style={{ flex: 1, position: 'relative' }}
+      >
         {isAboutMarie ? (
           <AboutMarieEditor
             key={docId}
@@ -313,9 +339,17 @@ export default function DocumentViewer({ docId, onNavigate }: { docId: string; o
         {doc.doc_type === 'report' && (
           <div className="print-page-footer">
             <div className="print-page-footer-text">{footerContent || 'Data sourced from official REINZ metrics. Prepared independently for property context.'}</div>
-            <span className="print-page-footer-page">Page {pageNumber} of {totalPages}</span>
           </div>
         )}
+        {doc.doc_type === 'report' && Array.from({ length: MAX_REPORT_PRINT_PAGES }, (_, i) => i + 1).map((p) => (
+          <span
+            key={`footer-page-${p}`}
+            className="print-page-footer-page"
+            style={{ top: `calc(297mm * ${p} - 38px)` }}
+          >
+            Page {p} of {MAX_REPORT_PRINT_PAGES}
+          </span>
+        ))}
       </div>
 
       {toast && (

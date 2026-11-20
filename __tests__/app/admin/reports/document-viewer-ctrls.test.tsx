@@ -12,7 +12,9 @@ vi.mock('next/navigation', () => ({
 }));
 
 vi.mock('@/app/admin/reports/components/ReportEditor', () => ({
-  default: () => <div data-testid="report-editor">Editor</div>,
+  default: ({ className }: { className?: string }) => (
+    <div className={`report-editor-container ${className || ''}`} data-testid="report-editor">Editor</div>
+  ),
 }));
 
 vi.mock('@/app/admin/reports/components/AboutMarieEditor', () => ({
@@ -20,7 +22,11 @@ vi.mock('@/app/admin/reports/components/AboutMarieEditor', () => ({
 }));
 
 vi.mock('@/app/admin/reports/components/ReportToolbar', () => ({
-  default: () => <div data-testid="report-toolbar">Toolbar</div>,
+  default: ({ onExport }: { onExport?: () => void }) => (
+    <div data-testid="report-toolbar">
+      <button onClick={onExport}>Export PDF</button>
+    </div>
+  ),
 }));
 
 vi.mock('@/app/admin/reports/components/ConfirmModal', () => ({
@@ -111,5 +117,47 @@ describe('DocumentViewer Ctrl+S save', () => {
 
     await new Promise((r) => setTimeout(r, 100));
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('renders page numbers for each page in report document', async () => {
+    render(<DocumentViewer docId="doc-1" />);
+    await screen.findByTestId('report-editor');
+
+    const page1 = screen.getByText('Page 1 of 2');
+    const page2 = screen.getByText('Page 2 of 2');
+    expect(page1).toBeDefined();
+    expect(page2).toBeDefined();
+    expect(document.querySelectorAll('.print-page-footer-page')).toHaveLength(2);
+    expect(document.querySelector('.pdf-numbering-debug-overlay')).toBeNull();
+  });
+
+  it('omits report content after the second page when exporting', async () => {
+    render(<DocumentViewer docId="doc-1" />);
+    await screen.findByTestId('report-editor');
+
+    const editor = document.querySelector('.report-editor-container');
+    if (!editor) throw new Error('Report editor element was not rendered');
+    editor.innerHTML = `
+      <div data-block-type="divider"></div>
+      <div data-block-type="heading">Page 2</div>
+      <div>Page 2 content</div>
+      <div data-block-type="divider"></div>
+      <div data-block-type="heading">Page 3</div>
+      <div>Page 3 content</div>
+    `;
+    const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+
+    fireEvent.click(screen.getByText('Export PDF'));
+
+    const page3Heading = editor.querySelectorAll('[data-block-type="heading"]').item(1);
+    const page3Content = page3Heading.nextElementSibling;
+    expect(page3Heading.hasAttribute('data-print-page-limit-hidden')).toBe(true);
+    expect(page3Content?.hasAttribute('data-print-page-limit-hidden')).toBe(true);
+    expect(printSpy).toHaveBeenCalledOnce();
+
+    window.dispatchEvent(new Event('afterprint'));
+    expect(page3Heading.hasAttribute('data-print-page-limit-hidden')).toBe(false);
+    expect(page3Content?.hasAttribute('data-print-page-limit-hidden')).toBe(false);
+    printSpy.mockRestore();
   });
 });
