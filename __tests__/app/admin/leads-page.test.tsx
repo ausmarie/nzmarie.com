@@ -128,9 +128,9 @@ const mockSendHistory = [
     log_id: 'send-1',
     outreach_property_id: 'outreach-1',
     report_title: 'Sunnynook Market Update',
-    campaign_key: '2026_Q3_Sunnynook',
+    campaign_key: '2026_M10_Sunnynook',
     suburb: 'Sunnynook',
-    sent_at: '2026-10-18T00:00:00.000Z',
+    sent_at: '2026-11-17T00:33:00.000Z',
     sent_by: 'admin@example.com',
     notes: 'Owner requested a follow-up',
     pdf_file_url: 'https://example.com/report.pdf',
@@ -141,7 +141,7 @@ const mockSendHistory = [
     log_id: 'send-2',
     outreach_property_id: 'outreach-2',
     report_title: 'Winter Report',
-    campaign_key: '2026_Winter',
+    campaign_key: '2026_Q2_Sunnynook',
     suburb: 'Sunnynook',
     sent_at: '2026-06-18T00:00:00.000Z',
     sent_by: 'agent@example.com',
@@ -276,7 +276,7 @@ describe('LeadsPage refresh behavior', () => {
     expect(chamber.textContent).toContain('Sunnynook Market Update');
     expect(chamber.textContent).toContain('Owner requested a follow-up');
     expect(chamber.textContent).toContain('sunnynook-report.pdf');
-    expect(chamber.textContent).toContain('2026_Winter');
+    expect(chamber.textContent).toContain('2026_Q2_Sunnynook');
     expect(chamber.textContent).toContain('Appraisal PDF Count: 1');
     expect(chamber.textContent).toContain('sunset-road-appraisal.pdf');
     expect(chamber.textContent).toContain('Timeline Event Count: 2');
@@ -357,7 +357,9 @@ describe('LeadsPage refresh behavior', () => {
     });
     fireEvent.click(screen.getAllByRole('button', { name: 'Lead' })[0]);
 
-    expect(await screen.findByText('18 Oct 2026, 1:00 pm')).toBeTruthy();
+    expect(await screen.findByText('2026-10')).toBeTruthy();
+    expect(screen.getByText('2026-Q2')).toBeTruthy();
+    expect(await screen.findByText('17 Nov 2026, 1:33 pm')).toBeTruthy();
     expect(screen.getByText('18 Jun 2026, 12:00 pm')).toBeTruthy();
   });
 

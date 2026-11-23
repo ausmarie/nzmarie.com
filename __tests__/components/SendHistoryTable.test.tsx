@@ -61,25 +61,37 @@ describe('SendHistoryTable', () => {
 
   it('renders table headers', () => {
     const { container } = render(<SendHistoryTable history={mockHistory} />);
-    expect(container.textContent).toContain('Quarter');
+    expect(container.textContent).toContain('Quarter / Month');
     expect(container.textContent).toContain('Sent Date');
     expect(container.textContent).toContain('Report / Campaign');
     expect(container.textContent).toContain('Sent By');
     expect(container.textContent).toContain('Scans');
   });
 
-  it('renders all history rows in descending sent_at order (Q3, Q2, Q1)', () => {
+  it('renders quarterly history rows in descending sent_at order', () => {
     const { container } = render(<SendHistoryTable history={mockHistory} />);
     expect(container.textContent).toContain('2026-Q3');
     expect(container.textContent).toContain('2026-Q2');
     expect(container.textContent).toContain('2026-Q1');
   });
 
-  it('displays quarter extracted from campaign_key', () => {
+  it('displays quarter from campaign_key', () => {
     const { container } = render(<SendHistoryTable history={mockHistory} />);
     expect(container.textContent).toContain('2026-Q3');
     expect(container.textContent).toContain('2026-Q2');
     expect(container.textContent).toContain('2026-Q1');
+  });
+
+  it('displays campaign month instead of send date month for monthly campaigns', () => {
+    const monthlyHistory = [{
+      ...mockHistory[0],
+      campaign_key: '2026_M10_Campbells Bay',
+      sent_at: '2026-11-17T00:33:00.000Z',
+    }];
+    const { container } = render(<SendHistoryTable history={monthlyHistory} />);
+
+    expect(container.textContent).toContain('2026-10');
+    expect(container.textContent).not.toContain('2026-Q4');
   });
 
   it('displays sent date in NZ format', () => {
@@ -130,7 +142,7 @@ describe('SendHistoryTable', () => {
     expect(container.textContent).toContain('2026_Q1_Torbay');
   });
 
-  it('handles history with missing campaign_key (falls back to sent_at date)', () => {
+  it('falls back to the sent date quarter when campaign_key has no period', () => {
     const historyWithMissingCampaign = [
       {
         log_id: 'log-4',

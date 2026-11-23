@@ -1,5 +1,6 @@
 import React from 'react';
 import { FaQrcode } from 'react-icons/fa';
+import { parsePeriodParts, periodLabel } from '@/lib/report-period';
 
 interface SendHistoryLog {
   log_id: string;
@@ -20,22 +21,22 @@ interface SendHistoryTableProps {
   history: SendHistoryLog[] | null;
 }
 
-/**
- * Extract quarter from campaign_key or sent_at date
- * Expected formats: "2026_Q2_Torbay", "2026_Q3_Northcote", etc.
- */
-function extractQuarter(campaignKey: string, sentAt: string): string {
-  // Try to extract from campaign_key first (format: YYYY_QX_Suburb)
-  const campaignMatch = campaignKey.match(/(\d{4})_Q([1-4])/i);
-  if (campaignMatch) {
-    return `${campaignMatch[1]}-Q${campaignMatch[2]}`;
-  }
-  // Fallback: derive from sent_at date
+function formatSentPeriod(campaignKey: string, sentAt: string): string {
+  const campaignPeriodKey = campaignKey.match(
+    /^(\d{4}[-_](?:Q[1-4]|M(?:0[1-9]|1[0-2])|(?:0[1-9]|1[0-2])))(?:[_-]|$)/i
+  )?.[1];
+  const campaignPeriod = parsePeriodParts(campaignPeriodKey);
+  if (campaignPeriod) return campaignPeriod.label;
+
   const date = new Date(sentAt);
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const quarter = Math.ceil(month / 3);
-  return `${year}-Q${quarter}`;
+  const parts = new Intl.DateTimeFormat('en-NZ', {
+    year: 'numeric',
+    month: '2-digit',
+    timeZone: 'Pacific/Auckland',
+  }).formatToParts(date);
+  const year = parts.find((part) => part.type === 'year')?.value;
+  const month = parts.find((part) => part.type === 'month')?.value;
+  return periodLabel(Number(year), `Q${Math.ceil(Number(month) / 3)}`);
 }
 
 export function SendHistoryTable({ history }: SendHistoryTableProps) {
@@ -73,14 +74,14 @@ export function SendHistoryTable({ history }: SendHistoryTableProps) {
         borderBottom: '1px solid #e2e8f0',
         fontSize: '0.75rem',
       }}>
-        <span>Quarter</span>
+        <span>Quarter / Month</span>
         <span>Sent Date &amp; Time</span>
         <span>Report / Campaign</span>
         <span>Sent By</span>
         <span style={{ textAlign: 'center' }}>Scans</span>
       </div>
       {history.map((log, i) => {
-        const quarter = extractQuarter(log.campaign_key, log.sent_at);
+        const sentPeriod = formatSentPeriod(log.campaign_key, log.sent_at);
         const sentDateTime = new Date(log.sent_at).toLocaleString('en-NZ', {
           dateStyle: 'medium',
           timeStyle: 'short',
@@ -100,7 +101,7 @@ export function SendHistoryTable({ history }: SendHistoryTableProps) {
             }}
           >
             <span style={{ fontWeight: '600', color: '#2563eb', fontSize: '0.75rem' }}>
-              {quarter}
+              {sentPeriod}
             </span>
             <span style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
               {sentDateTime}

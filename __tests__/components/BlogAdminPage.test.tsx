@@ -290,15 +290,16 @@ describe('BlogAdminPage', () => {
     render(<BlogAdminPage initialPostId={post.id} />);
     await screen.findByTestId('blog-editor');
 
-    const event = new KeyboardEvent('keydown', {
-      key: 's',
-      ctrlKey: true,
-      bubbles: true,
-      cancelable: true,
+    await waitFor(() => {
+      const event = new KeyboardEvent('keydown', {
+        key: 's',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
     });
-    window.dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(true);
     await waitFor(() => {
       const saveCall = fetchMock.mock.calls.find(
         ([input, init]) => input === `/api/admin/blog/posts/${post.id}` && init?.method === 'PUT',
