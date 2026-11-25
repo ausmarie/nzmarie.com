@@ -7,6 +7,18 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+vi.mock('next/link', () => ({
+  default: ({
+    href,
+    children,
+    prefetch,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => {
+    void prefetch;
+    return <a href={href} {...props}>{children}</a>;
+  },
+}));
+
 const mockSession = { user: { email: 'nzmarie.com@gmail.com' } };
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: mockSession, status: 'authenticated' }),
@@ -281,6 +293,7 @@ describe('Properties Page', () => {
     const PropertiesPage = (await import('../../../app/admin/properties/page')).default;
     render(<PropertiesPage />);
 
+    expect(screen.getByRole('link', { name: 'Properties' }).getAttribute('aria-current')).toBe('page');
     const description = await screen.findByTitle('Beautiful home with sea views and modern renovations throughout the entire property');
     expect(description).toBeDefined();
     expect(description.textContent).toContain('Beautiful home with sea views and modern renovations throughout the entire property');

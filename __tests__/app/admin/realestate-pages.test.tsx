@@ -7,6 +7,18 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
+vi.mock('next/link', () => ({
+  default: ({
+    href,
+    children,
+    prefetch,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; prefetch?: boolean }) => {
+    void prefetch;
+    return <a href={href} {...props}>{children}</a>;
+  },
+}));
+
 const mockSession = { user: { email: 'nzmarie.com@gmail.com' } };
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: mockSession, status: 'authenticated' }),
@@ -125,6 +137,7 @@ describe('Realestate Page', () => {
     const RealestatePage = (await import('../../../app/admin/realestate/page')).default;
     render(<RealestatePage />);
 
+    expect(screen.getByRole('link', { name: 'Realestate' }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByText('15 Marine Parade')).toBeDefined();
     expect(screen.getByText('2/910 East Coast Road')).toBeDefined();
   });

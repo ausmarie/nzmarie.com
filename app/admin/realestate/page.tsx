@@ -7,6 +7,7 @@ import { useInfiniteQuery, keepPreviousData, useQuery } from "@tanstack/react-qu
 import { FaBed, FaBath, FaMapMarkerAlt, FaRulerCombined, FaUser, FaCar } from "react-icons/fa";
 import Image from "next/image";
 import { SkeletonProperties } from "@/components/admin/Skeleton";
+import { PropertyWorkspaceTabs } from "@/components/admin/PropertyWorkspaceTabs";
 import AddressAutocomplete from "@/components/property/AddressAutocomplete";
 import { REGION_CITIES, CITY_SUBURBS, REGIONS as GEO_REGIONS } from "@/lib/geo-data";
 import { SUBURB_PRIORITY_ORDER } from "@/lib/suburb-order";
@@ -739,6 +740,7 @@ export default function RealestatePage() {
   if (status === "loading") {
     return (
       <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "8px" }}>
+        <PropertyWorkspaceTabs activeView="realestate" />
         <SkeletonProperties />
       </div>
     );
@@ -757,6 +759,7 @@ export default function RealestatePage() {
       "--text-heading": "#2D3748",
       "--text-muted": "#718096",
     } as React.CSSProperties}>
+      <PropertyWorkspaceTabs activeView="realestate" />
       {notification && (
         <div style={{
           position: "fixed", top: "20px", right: "20px", zIndex: 100,

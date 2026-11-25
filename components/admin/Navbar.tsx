@@ -8,6 +8,13 @@ import { Menu, Transition } from '@headlessui/react';
 import { isSuperAdmin } from '@/lib/permissions';
 
 function isPathActive(pathname: string, href: string): boolean {
+  if (
+    href === '/admin/properties' &&
+    (pathname === '/admin/realestate' || pathname.startsWith('/admin/realestate/'))
+  ) {
+    return true;
+  }
+
   return pathname === href || pathname.startsWith(href + '/');
 }
 
@@ -54,7 +61,6 @@ export function AdminNavbar() {
     { href: '/admin/properties', label: 'Properties', alwaysShow: true },
     { href: '/admin/outreach', label: 'Outreach', alwaysShow: true },
     { href: '/admin/leads', label: 'Leads', alwaysShow: true },
-    { href: '/admin/realestate', label: 'Realestate', alwaysShow: true },
     { href: '/admin/analytics', label: 'Analytics', alwaysShow: false },
     { href: '/admin/market', label: 'Market', alwaysShow: false },
     { href: '/admin/blog', label: 'Blog', alwaysShow: false },

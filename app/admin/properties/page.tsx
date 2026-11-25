@@ -20,6 +20,7 @@ import { extractStreetNameFromAddress } from "@/lib/street-ordering";
 import type { StreetProgressEntry } from "@/lib/street-progress";
 import { getFixedImageUrl } from "@/lib/google-maps";
 import { PropertyHistoryView } from "@/components/admin/PropertyHistoryView";
+import { PropertyWorkspaceTabs } from "@/components/admin/PropertyWorkspaceTabs";
 import { openGoogleMaps, buildPropertyAddress } from "@/lib/clipboard";
 
 const CARD_PAGE_SIZE = 9;
@@ -2043,7 +2044,12 @@ export default function PropertiesPage() {
 
   // Show skeleton while session resolves or initial data loads — Navbar stays visible
   if (status === "loading" || (isLoading && properties.length === 0)) {
-    return <SkeletonProperties />;
+    return (
+      <>
+        <PropertyWorkspaceTabs activeView="properties" />
+        <SkeletonProperties />
+      </>
+    );
   }
 
   return (
@@ -2060,6 +2066,7 @@ export default function PropertiesPage() {
       "--text-muted": "#718096",
       "--background": "#f8fafc",
     } as React.CSSProperties}>
+      <PropertyWorkspaceTabs activeView="properties" />
       {notification && (
         <div style={{
           position: 'fixed',

@@ -54,6 +54,14 @@ describe('AdminNavbar active state', () => {
     render(<AdminNavbar />);
     expect(blogLink().className).toContain('text-blue-600');
   });
+
+  it('uses the Properties navigation item for the Realestate page', () => {
+    mockUsePathname.mockReturnValue('/admin/realestate');
+    render(<AdminNavbar />);
+
+    expect(screen.getByRole('link', { name: 'Properties' }).className).toContain('text-blue-600');
+    expect(screen.queryByRole('link', { name: 'Realestate' })).toBeNull();
+  });
 });
 
 describe('AdminNavbar scroll behaviour', () => {
